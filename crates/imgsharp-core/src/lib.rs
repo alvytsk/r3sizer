@@ -25,8 +25,9 @@ pub mod types;
 // Re-export the complete public surface.
 pub use pipeline::process_auto_sharp_downscale;
 pub use types::{
-    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CubicPolynomial, FitStrategy,
-    ImageSize, LinearRgbImage, ProbeSample, ProbeConfig, ProcessOutput,
+    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus, CubicPolynomial,
+    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample, ProbeConfig,
+    ProcessOutput, SelectionMode, SharpenMode,
 };
 
 // ---------------------------------------------------------------------------

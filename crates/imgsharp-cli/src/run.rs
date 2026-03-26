@@ -15,7 +15,8 @@ pub fn run(args: &Cli) -> Result<()> {
     let probe_strengths = if let Some(ref strengths) = args.probe_strengths {
         ProbeConfig::Explicit(strengths.clone())
     } else {
-        ProbeConfig::Range { min: 0.5, max: 4.0, count: 9 }
+        // Default: non-uniform list, denser near zero.
+        ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0])
     };
 
     let params = AutoSharpParams {
@@ -27,6 +28,8 @@ pub fn run(args: &Cli) -> Result<()> {
         sharpen_sigma: args.sharpen_sigma,
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
+        sharpen_mode: args.sharpen_mode.into(),
+        metric_mode: args.metric_mode.into(),
     };
 
     // --- Process ---
