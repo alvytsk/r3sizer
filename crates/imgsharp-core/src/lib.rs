@@ -45,12 +45,10 @@ pub enum CoreError {
     #[error("no valid sharpening root found: {reason}")]
     NoValidRoot { reason: String },
 
-    #[error("image dimension mismatch: expected {expected_w}×{expected_h}, got buffer for {got_w}×{got_h}")]
-    DimensionMismatch {
-        expected_w: u32,
-        expected_h: u32,
-        got_w: u32,
-        got_h: u32,
+    #[error("buffer length mismatch: expected {expected_len} components, got {got_len}")]
+    BufferLengthMismatch {
+        expected_len: usize,
+        got_len: usize,
     },
 
     #[error("empty image: width or height is zero")]

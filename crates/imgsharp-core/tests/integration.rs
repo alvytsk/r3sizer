@@ -39,14 +39,7 @@ fn default_params(tw: u32, th: u32) -> AutoSharpParams {
     AutoSharpParams {
         target_width: tw,
         target_height: th,
-        probe_strengths: ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]),
-        target_artifact_ratio: 0.001,
-        enable_contrast_leveling: false,
-        sharpen_sigma: 1.0,
-        fit_strategy: FitStrategy::Cubic,
-        output_clamp: ClampPolicy::Clamp,
-        sharpen_mode: SharpenMode::Lightness,
-        metric_mode: MetricMode::RelativeToBase,
+        ..AutoSharpParams::default()
     }
 }
 

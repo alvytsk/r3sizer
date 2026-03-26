@@ -29,11 +29,9 @@ impl LinearRgbImage {
         }
         let expected = (width as usize) * (height as usize) * 3;
         if data.len() != expected {
-            return Err(CoreError::DimensionMismatch {
-                expected_w: width,
-                expected_h: height,
-                got_w: (data.len() / 3) as u32,
-                got_h: 1,
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: expected,
+                got_len: data.len(),
             });
         }
         Ok(Self { width, height, data })
@@ -185,7 +183,7 @@ impl ProbeConfig {
     pub fn resolve(&self) -> Result<Vec<f32>, CoreError> {
         let mut values = match self {
             ProbeConfig::Range { min, max, count } => {
-                if count < &4 {
+                if *count < 4 {
                     return Err(CoreError::InvalidParams(
                         "probe range must have at least 4 samples".into(),
                     ));

@@ -69,8 +69,6 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     let strengths = params.probe_strengths.resolve()?;
     let sigma = params.sharpen_sigma;
-    let w = base.width() as usize;
-    let h = base.height() as usize;
 
     // Extract luminance once if using lightness mode (avoids recomputation per probe).
     let base_luminance = if matches!(params.sharpen_mode, SharpenMode::Lightness) {
@@ -87,8 +85,6 @@ pub fn process_auto_sharp_downscale(
             params.sharpen_mode,
             s,
             sigma,
-            w,
-            h,
         )?;
         let p_total = artifact_ratio(&sharpened);
         let metric_value = compute_metric_value(
@@ -104,7 +100,7 @@ pub fn process_auto_sharp_downscale(
     }
 
     // -------------------------------------------------------------------
-    // 6 + 7. Fit + solve (or direct search)
+    // 6–7. Fit + solve (or direct search)
     // -------------------------------------------------------------------
     let s_min = strengths.first().copied().unwrap_or(0.05) as f64;
     let s_max = strengths.last().copied().unwrap_or(3.0) as f64;
@@ -149,7 +145,7 @@ pub fn process_auto_sharp_downscale(
     };
 
     // -------------------------------------------------------------------
-    // 8. Determine budget reachability
+    // Budget reachability
     // -------------------------------------------------------------------
     let budget_reachable_baseline = match params.metric_mode {
         MetricMode::AbsoluteTotal => baseline_artifact_ratio <= params.target_artifact_ratio,
@@ -166,7 +162,7 @@ pub fn process_auto_sharp_downscale(
     };
 
     // -------------------------------------------------------------------
-    // 9. Final sharpening
+    // 8. Final sharpening
     // -------------------------------------------------------------------
     let selected_strength = solve_result.selected_strength;
     let mut final_image = sharpen_image(
@@ -175,12 +171,10 @@ pub fn process_auto_sharp_downscale(
         params.sharpen_mode,
         selected_strength,
         sigma,
-        w,
-        h,
     )?;
 
     // -------------------------------------------------------------------
-    // 10. Measure actual artifact ratio (pre-clamp)
+    // 9. Measure actual artifact ratio (pre-clamp)
     // -------------------------------------------------------------------
     let measured_artifact_ratio = artifact_ratio(&final_image);
     let measured_metric_value = compute_metric_value(
@@ -190,7 +184,7 @@ pub fn process_auto_sharp_downscale(
     );
 
     // -------------------------------------------------------------------
-    // 11. Apply clamp policy
+    // 10. Apply clamp policy
     // -------------------------------------------------------------------
     match params.output_clamp {
         ClampPolicy::Clamp => {
@@ -213,7 +207,7 @@ pub fn process_auto_sharp_downscale(
     }
 
     // -------------------------------------------------------------------
-    // 12. Return
+    // 11. Return
     // -------------------------------------------------------------------
     let diagnostics = AutoSharpDiagnostics {
         input_size,
@@ -247,13 +241,13 @@ fn sharpen_image(
     mode: SharpenMode,
     amount: f32,
     sigma: f32,
-    w: usize,
-    h: usize,
 ) -> Result<LinearRgbImage, CoreError> {
     match mode {
         SharpenMode::Rgb => unsharp_mask(base, amount, sigma),
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
+            let w = base.width() as usize;
+            let h = base.height() as usize;
             let sharpened_l = unsharp_mask_single_channel(lum, w, h, amount, sigma)?;
             Ok(color::reconstruct_rgb_from_lightness(base, &sharpened_l))
         }

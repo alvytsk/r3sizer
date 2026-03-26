@@ -148,12 +148,12 @@ pub fn unsharp_mask(
     let kernel = gaussian_kernel(sigma);
     let blurred = gaussian_blur(src, &kernel);
 
-    let src_px = src.pixels();
-    let blur_px = blurred.pixels();
-    let mut out = Vec::with_capacity(src_px.len());
-    for (s, b) in src_px.iter().zip(blur_px.iter()) {
-        out.push(s + amount * (s - b));
-    }
+    let out: Vec<f32> = src
+        .pixels()
+        .iter()
+        .zip(blurred.pixels().iter())
+        .map(|(s, b)| s + amount * (s - b))
+        .collect();
 
     LinearRgbImage::new(src.width(), src.height(), out)
 }

@@ -65,16 +65,10 @@ pub fn luminance_from_linear_srgb(r: f32, g: f32, b: f32) -> f32 {
 ///
 /// Returns a `Vec<f32>` of length `width * height`.
 pub fn extract_luminance(img: &LinearRgbImage) -> Vec<f32> {
-    let pixels = img.pixels();
-    let npixels = (img.width() as usize) * (img.height() as usize);
-    let mut lum = Vec::with_capacity(npixels);
-    for i in 0..npixels {
-        let r = pixels[i * 3];
-        let g = pixels[i * 3 + 1];
-        let b = pixels[i * 3 + 2];
-        lum.push(luminance_from_linear_srgb(r, g, b));
-    }
-    lum
+    img.pixels()
+        .chunks_exact(3)
+        .map(|rgb| luminance_from_linear_srgb(rgb[0], rgb[1], rgb[2]))
+        .collect()
 }
 
 /// Reconstruct RGB from original linear RGB and sharpened luminance.
@@ -90,23 +84,25 @@ pub fn reconstruct_rgb_from_lightness(
     sharpened_luminance: &[f32],
 ) -> LinearRgbImage {
     const EPSILON: f32 = 1e-6;
-    let pixels = original.pixels();
-    let npixels = (original.width() as usize) * (original.height() as usize);
-    debug_assert_eq!(sharpened_luminance.len(), npixels);
-    let mut out = Vec::with_capacity(pixels.len());
-    for i in 0..npixels {
-        let r = pixels[i * 3];
-        let g = pixels[i * 3 + 1];
-        let b = pixels[i * 3 + 2];
-        let l_orig = luminance_from_linear_srgb(r, g, b);
-        let l_sharp = sharpened_luminance[i];
-        if l_orig.abs() < EPSILON {
-            out.extend_from_slice(&[r, g, b]);
-        } else {
-            let k = l_sharp / l_orig;
-            out.extend_from_slice(&[k * r, k * g, k * b]);
-        }
-    }
+    debug_assert_eq!(
+        sharpened_luminance.len(),
+        (original.width() as usize) * (original.height() as usize),
+    );
+    let out: Vec<f32> = original
+        .pixels()
+        .chunks_exact(3)
+        .zip(sharpened_luminance.iter())
+        .flat_map(|(rgb, &l_sharp)| {
+            let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
+            let l_orig = luminance_from_linear_srgb(r, g, b);
+            if l_orig.abs() < EPSILON {
+                [r, g, b]
+            } else {
+                let k = l_sharp / l_orig;
+                [k * r, k * g, k * b]
+            }
+        })
+        .collect();
     LinearRgbImage::new(original.width(), original.height(), out).unwrap()
 }
 
