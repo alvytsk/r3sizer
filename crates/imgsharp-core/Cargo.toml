@@ -1,0 +1,18 @@
+[package]
+name    = "imgsharp-core"
+version = "0.1.0"
+edition = "2021"
+description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
+
+[dependencies]
+thiserror = { workspace = true }
+serde     = { workspace = true }
+image     = { workspace = true }
+
+[dev-dependencies]
+approx    = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name    = "pipeline_bench"
+harness = false

@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/imgsharp-core",
+    "crates/imgsharp-io",
+    "crates/imgsharp-cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+thiserror   = "2"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+approx      = "0.5"
+criterion   = { version = "0.5", features = ["html_reports"] }
+image       = "0.25"

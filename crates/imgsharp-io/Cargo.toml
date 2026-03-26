@@ -1,0 +1,11 @@
+[package]
+name    = "imgsharp-io"
+version = "0.1.0"
+edition = "2021"
+description = "Image I/O layer: load PNG/JPEG into LinearRgbImage, save back to file"
+
+[dependencies]
+thiserror     = { workspace = true }
+serde_json    = { workspace = true }
+image         = { workspace = true }
+imgsharp-core = { path = "../imgsharp-core" }
