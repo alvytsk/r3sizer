@@ -10,7 +10,7 @@ use std::path::PathBuf;
                   artifact ratios, then solving for a target artifact threshold P0."
 )]
 pub struct Cli {
-    /// Input image file (PNG, JPEG, BMP, …).
+    /// Input image file (PNG, JPEG, BMP, ...).
     #[arg(long, short = 'i', value_name = "FILE")]
     pub input: PathBuf,
 
@@ -35,8 +35,8 @@ pub struct Cli {
     #[arg(long, value_name = "FILE")]
     pub diagnostics: Option<PathBuf>,
 
-    /// Explicit comma-separated probe sharpening strengths, e.g. "0.5,1.0,2.0,3.0".
-    /// When omitted, 9 evenly spaced values from 0.5 to 4.0 are used.
+    /// Explicit comma-separated probe sharpening strengths, e.g. "0.05,0.1,0.2,0.4,0.8,1.5,3.0".
+    /// When omitted, a non-uniform default list dense near zero is used.
     #[arg(long, value_delimiter = ',', value_name = "S1,S2,...")]
     pub probe_strengths: Option<Vec<f32>>,
 
@@ -47,4 +47,48 @@ pub struct Cli {
     /// Gaussian sigma for the unsharp-mask sharpening filter.
     #[arg(long, default_value_t = 1.0)]
     pub sharpen_sigma: f32,
+
+    /// Sharpening mode: "rgb" (sharpen all channels) or "lightness" (sharpen CIE Y,
+    /// reconstruct RGB via multiplicative ratio). Default: lightness.
+    #[arg(long, default_value = "lightness")]
+    pub sharpen_mode: SharpenModeArg,
+
+    /// Metric mode: "absolute" (total artifact ratio) or "relative" (artifacts added
+    /// by sharpening, subtracting baseline from resize). Default: relative.
+    #[arg(long, default_value = "relative")]
+    pub metric_mode: MetricModeArg,
+}
+
+// ---------------------------------------------------------------------------
+// CLI-friendly wrappers for core enums (avoids adding clap dep to core)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SharpenModeArg {
+    Rgb,
+    Lightness,
+}
+
+impl From<SharpenModeArg> for imgsharp_core::SharpenMode {
+    fn from(val: SharpenModeArg) -> Self {
+        match val {
+            SharpenModeArg::Rgb => imgsharp_core::SharpenMode::Rgb,
+            SharpenModeArg::Lightness => imgsharp_core::SharpenMode::Lightness,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum MetricModeArg {
+    Absolute,
+    Relative,
+}
+
+impl From<MetricModeArg> for imgsharp_core::MetricMode {
+    fn from(val: MetricModeArg) -> Self {
+        match val {
+            MetricModeArg::Absolute => imgsharp_core::MetricMode::AbsoluteTotal,
+            MetricModeArg::Relative => imgsharp_core::MetricMode::RelativeToBase,
+        }
+    }
 }

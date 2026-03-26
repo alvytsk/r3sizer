@@ -18,6 +18,16 @@ what is an engineering approximation or placeholder.
 | P0 = 0.1% (= 0.001) is used as a target threshold example | Auto-sharpness paper (2018) |
 | Goal is to *maximise* sharpness subject to artifact budget | Auto-sharpness paper (2018) |
 | Contrast leveling is a post-resize step | Downsizing paper (2016) |
+| Lightness L = 0.2126R + 0.7152G + 0.0722B (CIE Y from linear sRGB) | sRGB standard (IEC 61966-2-1) |
+
+---
+
+## Confirmed and now implemented
+
+| Detail | Status |
+|--------|--------|
+| Lightness formula `L = 0.2126R + 0.7152G + 0.0722B` | Implemented in `color::luminance_from_linear_srgb` |
+| Processing in linear sRGB | Implemented throughout the pipeline |
 
 ---
 
@@ -28,10 +38,23 @@ what is an engineering approximation or placeholder.
 | **Lanczos3 downscale** | Exact kernel not confirmed | Replace `resize.rs` once kernel is known |
 | **Unsharp mask sharpening** | Exact sharpening operator not confirmed | Replace `sharpen.rs`; example values (1.09, 1.81, 2.17) are consistent with a linear `amount` parameter |
 | **Per-channel P metric** | Paper phrasing is ambiguous; per-channel is natural | Could be per-pixel, or evaluated in a perceptual colour space |
-| **Probe range [0.5, 4.0], 9 samples** | Example values from paper suggest this range | Adjust via `ProbeConfig::Range` |
 | **Gaussian sigma = 1.0** | Reasonable starting value for moderate downscale ratios | Expose as parameter (already done: `sharpen_sigma`) |
 | **Contrast leveling: percentile stretch** | Exact formula not confirmed | Replace body of `contrast::apply_contrast_leveling` |
 | **Contrast leveling order: before probing** | Order not confirmed | Architecture supports reordering |
+| **Lightness-based sharpening via `k = L'/L`** | Strong inference from paper context; not confirmed as exact formula | Replace reconstruction in `color::reconstruct_rgb_from_lightness` once confirmed |
+| **RelativeToBase metric mode** | Isolates sharpening artifacts from resize artifacts; assumes additive independence | May not be how the paper defines P(s); replace with paper-exact metric once known |
+| **Probe strengths [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]** | Non-uniform, denser near zero where crossings typically occur | Adjust via `ProbeConfig` once paper values are known |
+| **(0, 0) anchor in RelativeToBase fit** | Physically motivated: zero sharpening = zero added artifacts | Remove if paper uses a different fitting strategy |
+
+---
+
+## Previously open, now resolved
+
+| Question | Resolution |
+|----------|------------|
+| Probe range too narrow (all samples exceed budget) | Resolved: dense-near-zero probes + lightness mode eliminate the problem |
+| Baseline artifacts from Lanczos mixing into P(s) | Resolved: `RelativeToBase` metric mode subtracts baseline; lightness mode produces zero-baseline images |
+| Lightness formula was vague | Resolved: confirmed as CIE Y from the sRGB-to-XYZ matrix |
 
 ---
 
@@ -46,6 +69,10 @@ what is an engineering approximation or placeholder.
 4. What are the exact probe strength values and sample count used in the paper?
 5. Is the cubic fit applied per-channel (three separate fits) or to a
    channel-aggregated P?
+6. Is the `k = L'/L` reconstruction the exact paper formula, or does the paper
+   use a different colour-preserving method?
+7. Is the metric computed on the full RGB reconstruction, or only on the
+   lightness channel?
 
 ---
 

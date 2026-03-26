@@ -5,23 +5,25 @@
 /// 1. Validate parameters.
 /// 2. Downscale to target size (linear space).
 /// 3. Optional contrast leveling.
-/// 4. Probe multiple sharpening strengths, measure P(s).
-/// 5. Fit cubic polynomial to probe samples.
-/// 6. Solve P_hat(s*) = P0 (with fallback on failure).
-/// 7. Apply final sharpening with s*.
-/// 8. Measure actual artifact ratio on the final image.
-/// 9. Apply clamp/normalize policy.
-/// 10. Return result image + full diagnostics.
+/// 4. Measure baseline artifact ratio (before sharpening).
+/// 5. Probe multiple sharpening strengths, measure P(s).
+/// 6. Fit cubic polynomial to probe samples.
+/// 7. Solve P_hat(s*) = P0 (with fallback on failure).
+/// 8. Apply final sharpening with s*.
+/// 9. Measure actual artifact ratio on the final image.
+/// 10. Apply clamp/normalize policy.
+/// 11. Return result image + full diagnostics.
 use crate::{
     color,
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::fit_cubic,
     metrics::artifact_ratio,
     resize::downscale,
-    sharpen::unsharp_mask,
-    solve::find_sharpness,
-    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FitStrategy, ImageSize,
-    LinearRgbImage, ProbeSample, ProcessOutput, CoreError,
+    sharpen::{unsharp_mask, unsharp_mask_single_channel},
+    solve::{find_sharpness, find_sharpness_direct},
+    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FitStatus,
+    FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample, ProcessOutput,
+    SelectionMode, SharpenMode, CoreError,
 };
 
 /// Run the full automatic-sharpness downscale pipeline.
@@ -58,80 +60,131 @@ pub fn process_auto_sharp_downscale(
     apply_contrast_leveling(&mut base, &cl_params)?;
 
     // -------------------------------------------------------------------
-    // 4. Probe sharpening strengths
+    // 4. Measure baseline artifact ratio (before any sharpening)
+    // -------------------------------------------------------------------
+    let baseline_artifact_ratio = artifact_ratio(&base);
+
+    // -------------------------------------------------------------------
+    // 5. Probe sharpening strengths
     // -------------------------------------------------------------------
     let strengths = params.probe_strengths.resolve()?;
     let sigma = params.sharpen_sigma;
 
+    // Extract luminance once if using lightness mode (avoids recomputation per probe).
+    let base_luminance = if matches!(params.sharpen_mode, SharpenMode::Lightness) {
+        Some(color::extract_luminance(&base))
+    } else {
+        None
+    };
+
     let mut probe_samples: Vec<ProbeSample> = Vec::with_capacity(strengths.len());
     for &s in &strengths {
-        let sharpened = unsharp_mask(&base, s, sigma)?;
-        let p = artifact_ratio(&sharpened);
-        probe_samples.push(ProbeSample { strength: s, artifact_ratio: p });
+        let sharpened = sharpen_image(
+            &base,
+            base_luminance.as_deref(),
+            params.sharpen_mode,
+            s,
+            sigma,
+        )?;
+        let p_total = artifact_ratio(&sharpened);
+        let metric_value = compute_metric_value(
+            p_total,
+            baseline_artifact_ratio,
+            params.metric_mode,
+        );
+        probe_samples.push(ProbeSample {
+            strength: s,
+            artifact_ratio: p_total,
+            metric_value,
+        });
     }
 
     // -------------------------------------------------------------------
-    // 5 + 6. Fit + solve (or direct search)
+    // 6–7. Fit + solve (or direct search)
     // -------------------------------------------------------------------
-    let s_min = strengths.first().copied().unwrap_or(0.5) as f64;
-    let s_max = strengths.last().copied().unwrap_or(4.0) as f64;
+    let s_min = strengths.first().copied().unwrap_or(0.05) as f64;
+    let s_max = strengths.last().copied().unwrap_or(3.0) as f64;
     let p0 = params.target_artifact_ratio as f64;
 
-    let (selected_strength, fallback_used, fallback_reason, fit_coefficients) =
-        match params.fit_strategy {
-            FitStrategy::DirectSearch => {
-                // Skip fitting entirely.
-                let (s, fb, reason) = find_sharpness(
-                    // Dummy polynomial — will immediately fall back to samples.
-                    &crate::CubicPolynomial { a: 0.0, b: 0.0, c: 0.0, d: f64::MAX },
-                    p0,
-                    s_min,
-                    s_max,
-                    &probe_samples,
-                )?;
-                (s, fb, reason, None)
-            }
+    // Build fit data: (strength, metric_value) pairs.
+    // In RelativeToBase mode, prepend the known anchor (0.0, 0.0).
+    let mut fit_data: Vec<(f64, f64)> = probe_samples
+        .iter()
+        .map(|ps| (ps.strength as f64, ps.metric_value as f64))
+        .collect();
+    if matches!(params.metric_mode, MetricMode::RelativeToBase) {
+        fit_data.insert(0, (0.0, 0.0));
+    }
 
-            FitStrategy::ForcedLinear | FitStrategy::Cubic => {
-                let fit_result = fit_cubic(&probe_samples);
-                match fit_result {
-                    Ok(poly) => {
-                        let (s, fb, reason) =
-                            find_sharpness(&poly, p0, s_min, s_max, &probe_samples)?;
-                        (s, fb, reason, Some(poly))
-                    }
-                    Err(fit_err) => {
-                        // Fitting failed — fall back to direct sample search and
-                        // record the reason.
-                        let fallback_reason = Some(format!(
-                            "cubic fit failed ({}); using direct sample search",
-                            fit_err
-                        ));
-                        let (s, _, _) = find_sharpness(
-                            &crate::CubicPolynomial { a: 0.0, b: 0.0, c: 0.0, d: f64::MAX },
-                            p0,
-                            s_min,
-                            s_max,
-                            &probe_samples,
-                        )?;
-                        (s, true, fallback_reason, None)
-                    }
+    let (solve_result, fit_status, fit_coefficients) = match params.fit_strategy {
+        FitStrategy::DirectSearch => {
+            let result = find_sharpness_direct(&probe_samples, params.target_artifact_ratio)?;
+            (result, FitStatus::Skipped, None)
+        }
+
+        FitStrategy::ForcedLinear | FitStrategy::Cubic => {
+            match fit_cubic(&fit_data) {
+                Ok(poly) => {
+                    let result =
+                        find_sharpness(&poly, p0, s_min, s_max, &probe_samples)?;
+                    (result, FitStatus::Success, Some(poly))
+                }
+                Err(fit_err) => {
+                    let result = find_sharpness_direct(
+                        &probe_samples,
+                        params.target_artifact_ratio,
+                    )?;
+                    (
+                        result,
+                        FitStatus::Failed { reason: fit_err.to_string() },
+                        None,
+                    )
                 }
             }
-        };
+        }
+    };
 
     // -------------------------------------------------------------------
-    // 7. Final sharpening
+    // Budget reachability
     // -------------------------------------------------------------------
-    let mut final_image = unsharp_mask(&base, selected_strength, sigma)?;
+    let budget_reachable_baseline = match params.metric_mode {
+        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= params.target_artifact_ratio,
+        MetricMode::RelativeToBase => true, // by construction, relative starts at 0
+    };
+    let budget_reachable = budget_reachable_baseline
+        && !matches!(solve_result.selection_mode, SelectionMode::LeastBadSample);
+
+    // Override selection mode if budget is structurally unreachable due to baseline.
+    let selection_mode = if !budget_reachable_baseline {
+        SelectionMode::BudgetUnreachable
+    } else {
+        solve_result.selection_mode
+    };
 
     // -------------------------------------------------------------------
-    // 8. Measure actual artifact ratio (pre-clamp)
+    // 8. Final sharpening
+    // -------------------------------------------------------------------
+    let selected_strength = solve_result.selected_strength;
+    let mut final_image = sharpen_image(
+        &base,
+        base_luminance.as_deref(),
+        params.sharpen_mode,
+        selected_strength,
+        sigma,
+    )?;
+
+    // -------------------------------------------------------------------
+    // 9. Measure actual artifact ratio (pre-clamp)
     // -------------------------------------------------------------------
     let measured_artifact_ratio = artifact_ratio(&final_image);
+    let measured_metric_value = compute_metric_value(
+        measured_artifact_ratio,
+        baseline_artifact_ratio,
+        params.metric_mode,
+    );
 
     // -------------------------------------------------------------------
-    // 9. Apply clamp policy
+    // 10. Apply clamp policy
     // -------------------------------------------------------------------
     match params.output_clamp {
         ClampPolicy::Clamp => {
@@ -154,21 +207,64 @@ pub fn process_auto_sharp_downscale(
     }
 
     // -------------------------------------------------------------------
-    // 10. Return
+    // 11. Return
     // -------------------------------------------------------------------
     let diagnostics = AutoSharpDiagnostics {
-        selected_strength,
-        target_artifact_ratio: params.target_artifact_ratio,
-        measured_artifact_ratio,
-        probe_samples,
-        fit_coefficients,
-        fallback_used,
-        fallback_reason,
         input_size,
-        output_size: ImageSize { width: params.target_width, height: params.target_height },
+        output_size: target,
+        sharpen_mode: params.sharpen_mode,
+        metric_mode: params.metric_mode,
+        target_artifact_ratio: params.target_artifact_ratio,
+        baseline_artifact_ratio,
+        probe_samples,
+        fit_status,
+        fit_coefficients,
+        crossing_status: solve_result.crossing_status,
+        selected_strength,
+        selection_mode,
+        budget_reachable,
+        measured_artifact_ratio,
+        measured_metric_value,
     };
 
     Ok(ProcessOutput { image: final_image, diagnostics })
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Apply sharpening to the base image using the configured mode.
+fn sharpen_image(
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    mode: SharpenMode,
+    amount: f32,
+    sigma: f32,
+) -> Result<LinearRgbImage, CoreError> {
+    match mode {
+        SharpenMode::Rgb => unsharp_mask(base, amount, sigma),
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
+            let w = base.width() as usize;
+            let h = base.height() as usize;
+            let sharpened_l = unsharp_mask_single_channel(lum, w, h, amount, sigma)?;
+            Ok(color::reconstruct_rgb_from_lightness(base, &sharpened_l))
+        }
+    }
+}
+
+/// Compute the metric value used for fitting, based on the configured mode.
+#[inline]
+fn compute_metric_value(
+    p_total: f32,
+    baseline: f32,
+    mode: MetricMode,
+) -> f32 {
+    match mode {
+        MetricMode::AbsoluteTotal => p_total,
+        MetricMode::RelativeToBase => (p_total - baseline).max(0.0),
+    }
 }
 
 // ---------------------------------------------------------------------------

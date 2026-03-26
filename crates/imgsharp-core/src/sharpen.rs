@@ -82,6 +82,50 @@ fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbImage {
 }
 
 // ---------------------------------------------------------------------------
+// Single-channel Gaussian blur (for lightness-based sharpening)
+// ---------------------------------------------------------------------------
+
+/// Apply a separable Gaussian blur to single-channel data.
+fn gaussian_blur_single_channel(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+) -> Vec<f32> {
+    let radius = kernel.len() / 2;
+
+    // --- Horizontal pass ---
+    let mut horiz = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let mut acc = 0.0f32;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let xi = (x as isize + ki as isize - radius as isize)
+                    .clamp(0, width as isize - 1) as usize;
+                acc += data[y * width + xi] * kv;
+            }
+            horiz[y * width + x] = acc;
+        }
+    }
+
+    // --- Vertical pass ---
+    let mut vert = vec![0.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let mut acc = 0.0f32;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let yi = (y as isize + ki as isize - radius as isize)
+                    .clamp(0, height as isize - 1) as usize;
+                acc += horiz[yi * width + x] * kv;
+            }
+            vert[y * width + x] = acc;
+        }
+    }
+
+    vert
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -104,14 +148,45 @@ pub fn unsharp_mask(
     let kernel = gaussian_kernel(sigma);
     let blurred = gaussian_blur(src, &kernel);
 
-    let src_px = src.pixels();
-    let blur_px = blurred.pixels();
-    let mut out = Vec::with_capacity(src_px.len());
-    for (s, b) in src_px.iter().zip(blur_px.iter()) {
-        out.push(s + amount * (s - b));
-    }
+    let out: Vec<f32> = src
+        .pixels()
+        .iter()
+        .zip(blurred.pixels().iter())
+        .map(|(s, b)| s + amount * (s - b))
+        .collect();
 
     LinearRgbImage::new(src.width(), src.height(), out)
+}
+
+/// Apply unsharp-mask sharpening to a single-channel buffer (e.g. luminance).
+///
+/// - `data` must have length `width * height`.
+/// - `amount = 0.0` -> identity (no change).
+///
+/// The result is **not clamped**. Out-of-range values may be produced and are
+/// expected when used for artifact measurement via RGB reconstruction.
+pub fn unsharp_mask_single_channel(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    amount: f32,
+    sigma: f32,
+) -> Result<Vec<f32>, CoreError> {
+    if sigma <= 0.0 {
+        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+    }
+    debug_assert_eq!(data.len(), width * height);
+
+    let kernel = gaussian_kernel(sigma);
+    let blurred = gaussian_blur_single_channel(data, width, height, &kernel);
+
+    let out: Vec<f32> = data
+        .iter()
+        .zip(blurred.iter())
+        .map(|(s, b)| s + amount * (s - b))
+        .collect();
+
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

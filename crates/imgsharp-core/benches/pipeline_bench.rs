@@ -3,8 +3,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use imgsharp_core::{
     metrics::artifact_ratio,
     sharpen::unsharp_mask,
-    AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, ProbeConfig,
-    process_auto_sharp_downscale,
+    AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode, ProbeConfig,
+    SharpenMode, process_auto_sharp_downscale,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -25,12 +25,14 @@ fn bench_full_pipeline(c: &mut Criterion) {
     let params = AutoSharpParams {
         target_width: 960,
         target_height: 540,
-        probe_strengths: ProbeConfig::Range { min: 0.5, max: 4.0, count: 9 },
+        probe_strengths: ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]),
         target_artifact_ratio: 0.001,
         enable_contrast_leveling: false,
         sharpen_sigma: 1.0,
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
+        sharpen_mode: SharpenMode::Lightness,
+        metric_mode: MetricMode::RelativeToBase,
     };
 
     c.bench_function("full_pipeline_1080p_to_540p", |b| {

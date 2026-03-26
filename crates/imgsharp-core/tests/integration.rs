@@ -1,5 +1,6 @@
 use imgsharp_core::{
-    AutoSharpParams, ClampPolicy, FitStrategy, ImageSize, LinearRgbImage, ProbeConfig,
+    AutoSharpParams, ClampPolicy, CrossingStatus, FitStrategy, ImageSize, LinearRgbImage,
+    MetricMode, ProbeConfig, SelectionMode, SharpenMode,
     process_auto_sharp_downscale,
 };
 
@@ -38,12 +39,15 @@ fn default_params(tw: u32, th: u32) -> AutoSharpParams {
     AutoSharpParams {
         target_width: tw,
         target_height: th,
-        probe_strengths: ProbeConfig::Range { min: 0.5, max: 3.0, count: 7 },
-        target_artifact_ratio: 0.001,
-        enable_contrast_leveling: false,
-        sharpen_sigma: 1.0,
-        fit_strategy: FitStrategy::Cubic,
-        output_clamp: ClampPolicy::Clamp,
+        ..AutoSharpParams::default()
+    }
+}
+
+fn default_params_rgb(tw: u32, th: u32) -> AutoSharpParams {
+    AutoSharpParams {
+        sharpen_mode: SharpenMode::Rgb,
+        metric_mode: MetricMode::AbsoluteTotal,
+        ..default_params(tw, th)
     }
 }
 
@@ -69,8 +73,6 @@ fn checkerboard_downscale_no_panic() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 4);
     assert_eq!(out.image.height(), 4);
-    // fallback_used field must be a bool (either is fine for a checkerboard).
-    let _ = out.diagnostics.fallback_used;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ fn one_by_one_image_no_panic() {
     let params = AutoSharpParams {
         target_width: 1,
         target_height: 1,
-        probe_strengths: ProbeConfig::Range { min: 0.5, max: 3.0, count: 5 },
+        probe_strengths: ProbeConfig::Explicit(vec![0.1, 0.2, 0.3, 0.4]),
         ..default_params(1, 1)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
@@ -112,27 +114,21 @@ fn all_white_image_no_panic() {
 #[test]
 fn selected_strength_within_probe_range() {
     let src = gradient_image(16, 16);
-    let params = AutoSharpParams {
-        probe_strengths: ProbeConfig::Range { min: 0.5, max: 3.0, count: 7 },
-        ..default_params(4, 4)
-    };
+    let params = default_params(4, 4);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let s = out.diagnostics.selected_strength;
     assert!(
-        s >= 0.5 && s <= 3.0,
-        "selected_strength {s} outside probe range [0.5, 3.0]"
+        s >= 0.05 && s <= 3.0,
+        "selected_strength {s} outside probe range [0.05, 3.0]"
     );
 }
 
 #[test]
 fn probe_sample_count_matches_config() {
     let src = gradient_image(16, 16);
-    let params = AutoSharpParams {
-        probe_strengths: ProbeConfig::Range { min: 0.5, max: 4.0, count: 9 },
-        ..default_params(4, 4)
-    };
+    let params = default_params(4, 4);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    assert_eq!(out.diagnostics.probe_samples.len(), 9);
+    assert_eq!(out.diagnostics.probe_samples.len(), 7);
 }
 
 #[test]
@@ -142,6 +138,7 @@ fn probe_samples_are_finite() {
     for ps in &out.diagnostics.probe_samples {
         assert!(ps.strength.is_finite(), "non-finite strength");
         assert!(ps.artifact_ratio.is_finite(), "non-finite artifact_ratio");
+        assert!(ps.metric_value.is_finite(), "non-finite metric_value");
     }
 }
 
@@ -187,4 +184,117 @@ fn contrast_leveling_enabled_no_panic() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 4);
+}
+
+// ---------------------------------------------------------------------------
+// Baseline measurement
+// ---------------------------------------------------------------------------
+
+#[test]
+fn baseline_artifact_ratio_is_finite() {
+    let src = gradient_image(16, 16);
+    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
+    assert!(out.diagnostics.baseline_artifact_ratio.is_finite());
+    assert!(out.diagnostics.baseline_artifact_ratio >= 0.0);
+}
+
+#[test]
+fn solid_image_has_zero_baseline() {
+    let src = solid_image(8, 8, 0.5);
+    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
+    assert_eq!(out.diagnostics.baseline_artifact_ratio, 0.0);
+}
+
+// ---------------------------------------------------------------------------
+// Metric modes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn relative_mode_metric_values_are_nonnegative() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        metric_mode: MetricMode::RelativeToBase,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    for ps in &out.diagnostics.probe_samples {
+        assert!(ps.metric_value >= 0.0, "relative metric_value {} < 0", ps.metric_value);
+    }
+}
+
+#[test]
+fn absolute_mode_metric_equals_artifact_ratio() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        metric_mode: MetricMode::AbsoluteTotal,
+        sharpen_mode: SharpenMode::Rgb,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    for ps in &out.diagnostics.probe_samples {
+        assert_eq!(ps.metric_value, ps.artifact_ratio);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sharpen modes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lightness_mode_produces_valid_result() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        sharpen_mode: SharpenMode::Lightness,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.sharpen_mode, SharpenMode::Lightness);
+    assert_eq!(out.image.width(), 4);
+}
+
+#[test]
+fn rgb_mode_produces_valid_result() {
+    let src = gradient_image(16, 16);
+    let params = default_params_rgb(4, 4);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.sharpen_mode, SharpenMode::Rgb);
+    assert_eq!(out.image.width(), 4);
+}
+
+// ---------------------------------------------------------------------------
+// New diagnostics fields
+// ---------------------------------------------------------------------------
+
+#[test]
+fn diagnostics_have_valid_status_enums() {
+    let src = gradient_image(16, 16);
+    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
+    let d = &out.diagnostics;
+
+    assert!(matches!(d.fit_status, imgsharp_core::FitStatus::Success));
+    assert!(matches!(
+        d.crossing_status,
+        CrossingStatus::Found | CrossingStatus::NotFoundInRange
+    ));
+    assert!(matches!(
+        d.selection_mode,
+        SelectionMode::PolynomialRoot
+            | SelectionMode::BestSampleWithinBudget
+            | SelectionMode::LeastBadSample
+            | SelectionMode::BudgetUnreachable
+    ));
+}
+
+#[test]
+fn budget_reachable_consistent_with_selection_mode() {
+    let src = gradient_image(16, 16);
+    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
+    let d = &out.diagnostics;
+
+    if matches!(d.selection_mode, SelectionMode::BudgetUnreachable) {
+        assert!(!d.budget_reachable);
+    }
+    if matches!(d.selection_mode, SelectionMode::PolynomialRoot) {
+        assert!(d.budget_reachable);
+    }
 }
