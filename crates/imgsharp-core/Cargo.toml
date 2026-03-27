@@ -7,13 +7,14 @@ description = "Pure image processing core: linear color, downscale, sharpen, art
 
 [features]
 default = ["parallel"]
-parallel = ["rayon"]
+parallel = ["rayon", "image/rayon"]
 
 [dependencies]
 thiserror = { workspace = true }
 serde     = { workspace = true }
-image     = { workspace = true }
+image     = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 rayon     = { version = "1", optional = true }
+web-time  = { workspace = true }
 
 [dev-dependencies]
 approx    = { workspace = true }

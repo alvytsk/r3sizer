@@ -13,7 +13,7 @@
 /// 9. Measure actual artifact ratio on the final image.
 /// 10. Apply clamp/normalize policy.
 /// 11. Return result image + full diagnostics.
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::{
     color,

@@ -3,6 +3,7 @@ members = [
     "crates/imgsharp-core",
     "crates/imgsharp-io",
     "crates/imgsharp-cli",
+    "crates/imgsharp-wasm",
 ]
 resolver = "2"
 
@@ -15,4 +16,5 @@ serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 approx      = "0.5"
 criterion   = { version = "0.5", features = ["html_reports"] }
-image       = "0.25"
+image       = { version = "0.25", default-features = false }
+web-time    = "1"
