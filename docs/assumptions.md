@@ -35,14 +35,14 @@ what is an engineering approximation or placeholder.
 
 | Implementation choice | Reason | How to improve |
 |-----------------------|--------|----------------|
-| **Lanczos3 downscale** | Exact kernel not confirmed | Replace `resize.rs` once kernel is known |
-| **Unsharp mask sharpening** | Exact sharpening operator not confirmed | Replace `sharpen.rs`; example values (1.09, 1.81, 2.17) are consistent with a linear `amount` parameter |
-| **Per-channel P metric** | Paper phrasing is ambiguous; per-channel is natural | Could be per-pixel, or evaluated in a perceptual colour space |
+| **Lanczos3 downscale** | Engineering choice — exact kernel not confirmed | Replace `resize.rs` once kernel is known |
+| **Unsharp mask sharpening** | Engineering choice — exact sharpening operator not confirmed; cited values (1.09, 1.81, 2.17) are consistent with USM's linear `amount` parameter but do not confirm USM is the paper's method | Replace `sharpen.rs` once operator is known |
+| **Per-channel P metric** | Engineering proxy — paper says "fraction of color values outside valid gamut"; per-channel counting is one interpretation | Could be per-pixel, or evaluated in a perceptual colour space |
 | **Gaussian sigma = 1.0** | Reasonable starting value for moderate downscale ratios | Expose as parameter (already done: `sharpen_sigma`) |
-| **Contrast leveling: percentile stretch** | Exact formula not confirmed | Replace body of `contrast::apply_contrast_leveling` |
+| **Contrast leveling: percentile stretch** | Placeholder — exact formula not confirmed | Replace body of `contrast::apply_contrast_leveling` |
 | **Contrast leveling order: before probing** | Order not confirmed | Architecture supports reordering |
-| **Lightness-based sharpening via `k = L'/L`** | Strong inference from paper context; not confirmed as exact formula | Replace reconstruction in `color::reconstruct_rgb_from_lightness` once confirmed |
-| **RelativeToBase metric mode** | Isolates sharpening artifacts from resize artifacts; assumes additive independence | May not be how the paper defines P(s); replace with paper-exact metric once known |
+| **Lightness-based sharpening via `k = L'/L`** | Paper-supported — strong inference from paper context; all available evidence supports this formula | Upgrade to Confirmed once explicitly verified |
+| **RelativeToBase metric mode** | Engineering choice — isolates sharpening artifacts from resize artifacts; assumes additive independence | May not be how the paper defines P(s); replace with paper-exact metric once known |
 | **Probe strengths [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]** | Non-uniform, denser near zero where crossings typically occur | Adjust via `ProbeConfig` once paper values are known |
 | **(0, 0) anchor in RelativeToBase fit** | Physically motivated: zero sharpening = zero added artifacts | Remove if paper uses a different fitting strategy |
 

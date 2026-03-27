@@ -1,6 +1,7 @@
 /// Formatted stdout output.
 use imgsharp_core::{
-    AutoSharpDiagnostics, CrossingStatus, FitStatus, MetricMode, SelectionMode, SharpenMode,
+    ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FitStatus, MetricMode, Provenance,
+    SelectionMode, SharpenMode, SharpenModel,
 };
 
 /// Print a human-readable summary of the pipeline diagnostics to stdout.
@@ -14,8 +15,16 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         sharpen_mode_label(diag.sharpen_mode)
     );
     println!(
+        "Sharpen model               : {}",
+        sharpen_model_label(diag.sharpen_model)
+    );
+    println!(
         "Metric mode                 : {}",
         metric_mode_label(diag.metric_mode)
+    );
+    println!(
+        "Artifact metric             : {}",
+        artifact_metric_label(diag.artifact_metric)
     );
     println!(
         "Baseline artifact ratio     : {:.6}",
@@ -53,6 +62,15 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         "Selection mode              : {}",
         selection_mode_label(&diag.selection_mode)
     );
+    println!();
+    println!("Stage provenance:");
+    println!("  Color conversion          : {}", provenance_label(diag.provenance.color_conversion));
+    println!("  Resize                    : {}", provenance_label(diag.provenance.resize));
+    println!("  Contrast leveling         : {}", provenance_label(diag.provenance.contrast_leveling));
+    println!("  Sharpen operator          : {}", provenance_label(diag.provenance.sharpen_operator));
+    println!("  Lightness reconstruction  : {}", provenance_label(diag.provenance.lightness_reconstruction));
+    println!("  Artifact metric           : {}", provenance_label(diag.provenance.artifact_metric));
+    println!("  Polynomial fit            : {}", provenance_label(diag.provenance.polynomial_fit));
 }
 
 fn sharpen_mode_label(m: SharpenMode) -> &'static str {
@@ -91,5 +109,29 @@ fn selection_mode_label(s: &SelectionMode) -> &'static str {
         SelectionMode::BestSampleWithinBudget => "best sample within budget",
         SelectionMode::LeastBadSample => "least bad sample",
         SelectionMode::BudgetUnreachable => "budget unreachable",
+    }
+}
+
+fn sharpen_model_label(m: SharpenModel) -> &'static str {
+    match m {
+        SharpenModel::PracticalUsm => "practical USM",
+        SharpenModel::PaperLightnessApprox => "paper lightness approx",
+    }
+}
+
+fn artifact_metric_label(m: ArtifactMetric) -> &'static str {
+    match m {
+        ArtifactMetric::ChannelClippingRatio => "channel clipping ratio",
+        ArtifactMetric::PixelOutOfGamutRatio => "pixel out-of-gamut ratio",
+    }
+}
+
+fn provenance_label(p: Provenance) -> &'static str {
+    match p {
+        Provenance::PaperConfirmed => "paper confirmed",
+        Provenance::PaperSupported => "paper supported",
+        Provenance::EngineeringChoice => "engineering choice",
+        Provenance::EngineeringProxy => "engineering proxy",
+        Provenance::Placeholder => "placeholder",
     }
 }

@@ -57,6 +57,14 @@ pub struct Cli {
     /// by sharpening, subtracting baseline from resize). Default: relative.
     #[arg(long, default_value = "relative")]
     pub metric_mode: MetricModeArg,
+
+    /// Sharpening algorithm: "practical-usm" (default) or "paper-lightness-approx".
+    #[arg(long, default_value = "practical-usm")]
+    pub sharpen_model: SharpenModelArg,
+
+    /// Artifact metric: "channel-clipping" (default) or "pixel-out-of-gamut".
+    #[arg(long, default_value = "channel-clipping")]
+    pub artifact_metric: ArtifactMetricArg,
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +97,36 @@ impl From<MetricModeArg> for imgsharp_core::MetricMode {
         match val {
             MetricModeArg::Absolute => imgsharp_core::MetricMode::AbsoluteTotal,
             MetricModeArg::Relative => imgsharp_core::MetricMode::RelativeToBase,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SharpenModelArg {
+    PracticalUsm,
+    PaperLightnessApprox,
+}
+
+impl From<SharpenModelArg> for imgsharp_core::SharpenModel {
+    fn from(val: SharpenModelArg) -> Self {
+        match val {
+            SharpenModelArg::PracticalUsm => imgsharp_core::SharpenModel::PracticalUsm,
+            SharpenModelArg::PaperLightnessApprox => imgsharp_core::SharpenModel::PaperLightnessApprox,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ArtifactMetricArg {
+    ChannelClipping,
+    PixelOutOfGamut,
+}
+
+impl From<ArtifactMetricArg> for imgsharp_core::ArtifactMetric {
+    fn from(val: ArtifactMetricArg) -> Self {
+        match val {
+            ArtifactMetricArg::ChannelClipping => imgsharp_core::ArtifactMetric::ChannelClippingRatio,
+            ArtifactMetricArg::PixelOutOfGamut => imgsharp_core::ArtifactMetric::PixelOutOfGamutRatio,
         }
     }
 }

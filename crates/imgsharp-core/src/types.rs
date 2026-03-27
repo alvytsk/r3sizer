@@ -109,6 +109,21 @@ pub enum SharpenMode {
     Lightness,
 }
 
+/// Which sharpening algorithm to use.
+///
+/// Orthogonal to [`SharpenMode`] (which selects *channels*).
+/// `SharpenModel` selects the *operator*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharpenModel {
+    /// Gaussian unsharp mask — engineering choice, not paper-confirmed.
+    /// Works with both `SharpenMode::Rgb` and `SharpenMode::Lightness`.
+    PracticalUsm,
+    /// Paper-style lightness sharpening (scaffold — delegates to USM for now).
+    /// Requires `SharpenMode::Lightness`.
+    PaperLightnessApprox,
+}
+
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -121,6 +136,19 @@ pub enum MetricMode {
     /// Engineering approximation -- assumes resize and sharpen artifacts are approximately
     /// additive and independent, which is not guaranteed.
     RelativeToBase,
+}
+
+/// Which artifact metric function to use for measuring out-of-range values.
+///
+/// Orthogonal to [`MetricMode`] (which selects absolute vs relative comparison).
+/// `ArtifactMetric` selects *what* is measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactMetric {
+    /// Per-channel: fraction of f32 channel values outside [0,1]. Denominator = W*H*3.
+    ChannelClippingRatio,
+    /// Per-pixel: fraction of pixels where *any* channel is outside [0,1]. Denominator = W*H.
+    PixelOutOfGamutRatio,
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +191,41 @@ pub enum SelectionMode {
     LeastBadSample,
     /// Budget is structurally unreachable (e.g. baseline already exceeds target in absolute mode).
     BudgetUnreachable,
+}
+
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
+
+/// How faithful this stage's implementation is to the original papers.
+///
+/// Used in diagnostics to give callers (GUI, CLI, JSON consumers) a
+/// machine-readable honesty signal per pipeline stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provenance {
+    /// Matches a formula explicitly stated in the papers.
+    PaperConfirmed,
+    /// Strong inference from paper; all evidence supports this, confirmation pending.
+    PaperSupported,
+    /// Well-motivated engineering choice; paper's exact method is unknown.
+    EngineeringChoice,
+    /// Operational proxy; paper measures something similar but exact definition may differ.
+    EngineeringProxy,
+    /// Stub or placeholder; paper's method is completely unknown.
+    Placeholder,
+}
+
+/// Per-stage provenance tags filled in by the pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageProvenance {
+    pub color_conversion: Provenance,
+    pub resize: Provenance,
+    pub contrast_leveling: Provenance,
+    pub sharpen_operator: Provenance,
+    pub lightness_reconstruction: Provenance,
+    pub artifact_metric: Provenance,
+    pub polynomial_fit: Provenance,
 }
 
 // ---------------------------------------------------------------------------
@@ -253,8 +316,12 @@ pub struct AutoSharpParams {
     pub output_clamp: ClampPolicy,
     /// Whether to sharpen RGB directly or through lightness channel.
     pub sharpen_mode: SharpenMode,
+    /// Which sharpening algorithm to use. Default: `PracticalUsm`.
+    pub sharpen_model: SharpenModel,
     /// How the artifact metric is computed for strength selection.
     pub metric_mode: MetricMode,
+    /// Which artifact metric function to use. Default: `ChannelClippingRatio`.
+    pub artifact_metric: ArtifactMetric,
 }
 
 impl Default for AutoSharpParams {
@@ -271,7 +338,9 @@ impl Default for AutoSharpParams {
             fit_strategy: FitStrategy::Cubic,
             output_clamp: ClampPolicy::Clamp,
             sharpen_mode: SharpenMode::Lightness,
+            sharpen_model: SharpenModel::PracticalUsm,
             metric_mode: MetricMode::RelativeToBase,
+            artifact_metric: ArtifactMetric::ChannelClippingRatio,
         }
     }
 }
@@ -289,6 +358,13 @@ impl AutoSharpParams {
         }
         if self.sharpen_sigma <= 0.0 {
             return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+        }
+        if matches!(self.sharpen_model, SharpenModel::PaperLightnessApprox)
+            && matches!(self.sharpen_mode, SharpenMode::Rgb)
+        {
+            return Err(CoreError::InvalidParams(
+                "PaperLightnessApprox requires SharpenMode::Lightness".into(),
+            ));
         }
         self.probe_strengths.resolve()?;
         Ok(())
@@ -342,7 +418,9 @@ pub struct AutoSharpDiagnostics {
 
     // --- Configuration ---
     pub sharpen_mode: SharpenMode,
+    pub sharpen_model: SharpenModel,
     pub metric_mode: MetricMode,
+    pub artifact_metric: ArtifactMetric,
     pub target_artifact_ratio: f32,
 
     // --- Baseline (resize-stage artifact contribution) ---
@@ -369,6 +447,10 @@ pub struct AutoSharpDiagnostics {
     pub measured_artifact_ratio: f32,
     /// Metric value of the final output (relative or absolute depending on mode).
     pub measured_metric_value: f32,
+
+    // --- Provenance ---
+    /// Per-stage classification of how faithful the implementation is to the papers.
+    pub provenance: StageProvenance,
 }
 
 /// Return type of the top-level pipeline function.

@@ -1,10 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use imgsharp_core::{
-    metrics::artifact_ratio,
+    metrics::channel_clipping_ratio,
     sharpen::unsharp_mask,
-    AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode, ProbeConfig,
-    SharpenMode, process_auto_sharp_downscale,
+    ArtifactMetric, AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode,
+    ProbeConfig, SharpenMode, SharpenModel, process_auto_sharp_downscale,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -32,7 +32,9 @@ fn bench_full_pipeline(c: &mut Criterion) {
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
         sharpen_mode: SharpenMode::Lightness,
+        sharpen_model: SharpenModel::PracticalUsm,
         metric_mode: MetricMode::RelativeToBase,
+        artifact_metric: ArtifactMetric::ChannelClippingRatio,
     };
 
     c.bench_function("full_pipeline_1080p_to_540p", |b| {
@@ -51,14 +53,14 @@ fn bench_sharpen_only(c: &mut Criterion) {
     });
 }
 
-fn bench_artifact_ratio(c: &mut Criterion) {
+fn bench_channel_clipping_ratio(c: &mut Criterion) {
     let img = synthetic_image(960, 540);
-    c.bench_function("artifact_ratio_540p", |b| {
+    c.bench_function("channel_clipping_ratio_540p", |b| {
         b.iter(|| {
-            artifact_ratio(&img);
+            channel_clipping_ratio(&img);
         });
     });
 }
 
-criterion_group!(benches, bench_full_pipeline, bench_sharpen_only, bench_artifact_ratio);
+criterion_group!(benches, bench_full_pipeline, bench_sharpen_only, bench_channel_clipping_ratio);
 criterion_main!(benches);

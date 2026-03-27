@@ -121,6 +121,11 @@ The `metric_value` is what gets fitted and compared against P0.
 
 ### Artifact ratio definition
 
+**Engineering proxy** — the paper describes the target constraint in terms of the
+"fraction of color values outside the valid RGB gamut". The current implementation
+counts per-channel values, which is one interpretation; per-pixel counting or a
+different colour-space measure are possible alternatives.
+
 ```
 P(s) = (count of channel values v where v < 0.0 or v > 1.0)
        -------------------------------------------------------

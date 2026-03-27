@@ -17,13 +17,13 @@ use crate::{
     color,
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::fit_cubic,
-    metrics::artifact_ratio,
+    metrics::channel_clipping_ratio,
     resize::downscale,
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness, find_sharpness_direct},
-    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FitStatus,
+    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FitStatus,
     FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample, ProcessOutput,
-    SelectionMode, SharpenMode, CoreError,
+    Provenance, SelectionMode, SharpenMode, SharpenModel, StageProvenance, CoreError,
 };
 
 /// Run the full automatic-sharpness downscale pipeline.
@@ -62,7 +62,13 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 4. Measure baseline artifact ratio (before any sharpening)
     // -------------------------------------------------------------------
-    let baseline_artifact_ratio = artifact_ratio(&base);
+    let measure = |img: &LinearRgbImage| -> f32 {
+        match params.artifact_metric {
+            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+        }
+    };
+    let baseline_artifact_ratio = measure(&base);
 
     // -------------------------------------------------------------------
     // 5. Probe sharpening strengths
@@ -84,7 +90,9 @@ pub fn process_auto_sharp_downscale(
         &base,
         base_luminance.as_deref(),
         params.sharpen_mode,
+        params.sharpen_model,
         params.metric_mode,
+        params.artifact_metric,
         baseline_artifact_ratio,
         &kernel,
     )?;
@@ -159,6 +167,7 @@ pub fn process_auto_sharp_downscale(
         &base,
         base_luminance.as_deref(),
         params.sharpen_mode,
+        params.sharpen_model,
         selected_strength,
         &kernel,
     )?;
@@ -166,7 +175,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 9. Measure actual artifact ratio (pre-clamp)
     // -------------------------------------------------------------------
-    let measured_artifact_ratio = artifact_ratio(&final_image);
+    let measured_artifact_ratio = measure(&final_image);
     let measured_metric_value = compute_metric_value(
         measured_artifact_ratio,
         baseline_artifact_ratio,
@@ -213,7 +222,9 @@ pub fn process_auto_sharp_downscale(
         input_size,
         output_size: target,
         sharpen_mode: params.sharpen_mode,
+        sharpen_model: params.sharpen_model,
         metric_mode: params.metric_mode,
+        artifact_metric: params.artifact_metric,
         target_artifact_ratio: params.target_artifact_ratio,
         baseline_artifact_ratio,
         probe_samples,
@@ -225,6 +236,25 @@ pub fn process_auto_sharp_downscale(
         budget_reachable,
         measured_artifact_ratio,
         measured_metric_value,
+        provenance: StageProvenance {
+            color_conversion: Provenance::PaperConfirmed,
+            resize: Provenance::EngineeringChoice,
+            contrast_leveling: if params.enable_contrast_leveling {
+                Provenance::Placeholder
+            } else {
+                Provenance::PaperConfirmed
+            },
+            sharpen_operator: match params.sharpen_model {
+                SharpenModel::PracticalUsm => Provenance::EngineeringChoice,
+                SharpenModel::PaperLightnessApprox => Provenance::PaperSupported,
+            },
+            lightness_reconstruction: match params.sharpen_mode {
+                SharpenMode::Lightness => Provenance::PaperSupported,
+                SharpenMode::Rgb => Provenance::PaperConfirmed,
+            },
+            artifact_metric: Provenance::EngineeringProxy,
+            polynomial_fit: Provenance::PaperConfirmed,
+        },
     };
 
     Ok(ProcessOutput { image: final_image, diagnostics })
@@ -234,11 +264,12 @@ pub fn process_auto_sharp_downscale(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Apply sharpening to the base image using the configured mode and a pre-built kernel.
+/// Apply sharpening to the base image using the configured mode, model, and a pre-built kernel.
 fn sharpen_image(
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
     mode: SharpenMode,
+    model: SharpenModel,
     amount: f32,
     kernel: &[f32],
 ) -> Result<LinearRgbImage, CoreError> {
@@ -248,7 +279,14 @@ fn sharpen_image(
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
             let w = base.width() as usize;
             let h = base.height() as usize;
-            let sharpened_l = unsharp_mask_single_channel_with_kernel(lum, w, h, amount, kernel);
+            let sharpened_l = match model {
+                SharpenModel::PracticalUsm => {
+                    unsharp_mask_single_channel_with_kernel(lum, w, h, amount, kernel)
+                }
+                SharpenModel::PaperLightnessApprox => {
+                    crate::paper_sharpen::paper_sharpen_lightness(lum, w, h, amount, kernel)
+                }
+            };
             Ok(color::reconstruct_rgb_from_lightness(base, &sharpened_l))
         }
     }
@@ -266,13 +304,21 @@ fn probe_strengths(
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
     sharpen_mode: SharpenMode,
+    sharpen_model: SharpenModel,
     metric_mode: MetricMode,
+    artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     kernel: &[f32],
 ) -> Result<Vec<ProbeSample>, CoreError> {
+    let measure = |img: &LinearRgbImage| -> f32 {
+        match artifact_metric {
+            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+        }
+    };
     let probe_one = |&s: &f32| -> Result<ProbeSample, CoreError> {
-        let sharpened = sharpen_image(base, base_luminance, sharpen_mode, s, kernel)?;
-        let p_total = artifact_ratio(&sharpened);
+        let sharpened = sharpen_image(base, base_luminance, sharpen_mode, sharpen_model, s, kernel)?;
+        let p_total = measure(&sharpened);
         let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
         Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value })
     };

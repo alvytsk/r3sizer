@@ -1,7 +1,7 @@
 use imgsharp_core::{
-    AutoSharpParams, ClampPolicy, CrossingStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, ProbeConfig, SelectionMode, SharpenMode,
-    process_auto_sharp_downscale,
+    ArtifactMetric, AutoSharpParams, ClampPolicy, CrossingStatus, FitStrategy, ImageSize,
+    LinearRgbImage, MetricMode, ProbeConfig, Provenance, SelectionMode, SharpenMode,
+    SharpenModel, process_auto_sharp_downscale,
 };
 
 // ---------------------------------------------------------------------------
@@ -297,4 +297,105 @@ fn budget_reachable_consistent_with_selection_mode() {
     if matches!(d.selection_mode, SelectionMode::PolynomialRoot) {
         assert!(d.budget_reachable);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
+
+#[test]
+fn provenance_is_populated_for_default_config() {
+    let src = gradient_image(16, 16);
+    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
+    let p = &out.diagnostics.provenance;
+
+    assert_eq!(p.color_conversion, Provenance::PaperConfirmed);
+    assert_eq!(p.resize, Provenance::EngineeringChoice);
+    // Default has contrast leveling disabled -> PaperConfirmed (stage not applicable).
+    assert_eq!(p.contrast_leveling, Provenance::PaperConfirmed);
+    assert_eq!(p.sharpen_operator, Provenance::EngineeringChoice);
+    // Default is Lightness mode.
+    assert_eq!(p.lightness_reconstruction, Provenance::PaperSupported);
+    assert_eq!(p.artifact_metric, Provenance::EngineeringProxy);
+    assert_eq!(p.polynomial_fit, Provenance::PaperConfirmed);
+}
+
+#[test]
+fn provenance_paper_lightness_approx_is_paper_supported() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        sharpen_model: SharpenModel::PaperLightnessApprox,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.provenance.sharpen_operator, Provenance::PaperSupported);
+}
+
+#[test]
+fn provenance_contrast_leveling_enabled_is_placeholder() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        enable_contrast_leveling: true,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.provenance.contrast_leveling, Provenance::Placeholder);
+}
+
+// ---------------------------------------------------------------------------
+// SharpenModel and ArtifactMetric
+// ---------------------------------------------------------------------------
+
+#[test]
+fn paper_lightness_approx_requires_lightness_mode() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        sharpen_mode: SharpenMode::Rgb,
+        sharpen_model: SharpenModel::PaperLightnessApprox,
+        ..default_params(4, 4)
+    };
+    assert!(process_auto_sharp_downscale(&src, &params).is_err());
+}
+
+#[test]
+fn pixel_out_of_gamut_metric_produces_valid_result() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        artifact_metric: ArtifactMetric::PixelOutOfGamutRatio,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 4);
+    assert!(out.diagnostics.measured_artifact_ratio >= 0.0);
+    assert_eq!(out.diagnostics.artifact_metric, ArtifactMetric::PixelOutOfGamutRatio);
+}
+
+#[test]
+fn paper_lightness_approx_matches_practical_usm() {
+    // The scaffold delegates to the same USM, so outputs must be identical.
+    let src = gradient_image(16, 16);
+    let params_usm = AutoSharpParams {
+        sharpen_model: SharpenModel::PracticalUsm,
+        ..default_params(4, 4)
+    };
+    let params_paper = AutoSharpParams {
+        sharpen_model: SharpenModel::PaperLightnessApprox,
+        ..default_params(4, 4)
+    };
+    let out_usm = process_auto_sharp_downscale(&src, &params_usm).unwrap();
+    let out_paper = process_auto_sharp_downscale(&src, &params_paper).unwrap();
+    assert_eq!(out_usm.image.pixels(), out_paper.image.pixels());
+    assert_eq!(
+        out_usm.diagnostics.selected_strength,
+        out_paper.diagnostics.selected_strength
+    );
+}
+
+#[test]
+fn diagnostics_reflect_sharpen_model() {
+    let src = gradient_image(16, 16);
+    let params = default_params(4, 4);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.sharpen_model, SharpenModel::PracticalUsm);
+    assert_eq!(out.diagnostics.artifact_metric, ArtifactMetric::ChannelClippingRatio);
 }

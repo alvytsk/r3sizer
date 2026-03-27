@@ -386,15 +386,30 @@ Without `parallel`, probes run sequentially. The `probe_strengths` function uses
 
 ---
 
+## Paper-Faithfulness Status
+
+The current pipeline follows a paper-aligned architecture: linear-light processing,
+post-resize sharpening, artifact-limited parameter selection, and cubic modeling of
+artifact growth.
+
+However, some internal operators remain practical approximations rather than verified
+paper-exact reproductions. The classification system used in this document:
+
+- **Confirmed** — matches a formula explicitly stated in the papers or standards
+- **Paper-supported** — strong inference from paper context; not yet explicitly confirmed
+- **Engineering choice** — a well-motivated practical choice; the paper's exact method is unknown
+- **Engineering proxy** — measures something similar to the paper, but exact definition may differ
+- **Placeholder** — stub implementation; paper method completely unknown
+
 ## Confirmed vs. Approximated
 
 | Component | Status |
 |-----------|--------|
 | sRGB transfer function | **Confirmed** — IEC 61966-2-1 |
 | CIE Y luminance coefficients | **Confirmed** — sRGB-to-XYZ Y row |
-| Unsharp mask formula | **Confirmed** — standard USM, consistent with cited values (1.09, 1.81, 2.17) |
-| Lightness reconstruction (`k = L'/L`) | **Approximation** — strong inference from paper, not confirmed exact formula |
-| Downscale kernel | **Unknown** — Lanczos3 is an engineering choice |
-| Contrast leveling formula | **Unknown** — placeholder stub |
-| Artifact metric (channel-count fraction) | **Approximation** — operational definition may differ from paper-exact metric |
+| Unsharp mask formula | **Engineering choice** — standard USM, consistent with cited values (1.09, 1.81, 2.17), but the paper's exact sharpening operator is not confirmed |
+| Lightness reconstruction (`k = L'/L`) | **Paper-supported** — strong inference from paper; all available evidence supports this formula |
+| Downscale kernel | **Engineering choice** — Lanczos3; paper kernel unknown |
+| Contrast leveling formula | **Placeholder** — paper formula unknown |
+| Artifact metric (channel-count fraction) | **Engineering proxy** — paper says "fraction of color values outside valid gamut" but exact counting rule (per-channel vs per-pixel) is unconfirmed |
 | Cubic fit + Cardano solve | **Confirmed** — standard numerical methods |

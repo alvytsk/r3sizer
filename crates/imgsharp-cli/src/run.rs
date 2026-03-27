@@ -29,7 +29,9 @@ pub fn run(args: &Cli) -> Result<()> {
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
         sharpen_mode: args.sharpen_mode.into(),
+        sharpen_model: args.sharpen_model.into(),
         metric_mode: args.metric_mode.into(),
+        artifact_metric: args.artifact_metric.into(),
     };
 
     // --- Process ---

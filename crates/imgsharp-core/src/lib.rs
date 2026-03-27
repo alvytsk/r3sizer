@@ -16,6 +16,7 @@ pub mod color;
 pub mod contrast;
 pub mod fit;
 pub mod metrics;
+pub mod paper_sharpen;
 pub mod pipeline;
 pub mod resize;
 pub mod sharpen;
@@ -25,9 +26,10 @@ pub mod types;
 // Re-export the complete public surface.
 pub use pipeline::process_auto_sharp_downscale;
 pub use types::{
-    AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus, CubicPolynomial,
-    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample, ProbeConfig,
-    ProcessOutput, SelectionMode, SharpenMode,
+    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus,
+    CubicPolynomial, FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample,
+    ProbeConfig, ProcessOutput, Provenance, SelectionMode, SharpenMode, SharpenModel,
+    StageProvenance,
 };
 
 // ---------------------------------------------------------------------------
