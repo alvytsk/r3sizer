@@ -609,6 +609,7 @@ dependencies = [
  "approx",
  "criterion",
  "image",
+ "rayon",
  "serde",
  "thiserror",
 ]

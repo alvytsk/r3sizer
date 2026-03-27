@@ -44,36 +44,136 @@ fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbImage {
     let w = src.width() as usize;
     let h = src.height() as usize;
     let radius = kernel.len() / 2;
+    let stride = w * 3;
+
+    let src_data = src.pixels();
 
     // --- Horizontal pass ---
+    // Split into: left edge (clamp), interior (no bounds check), right edge (clamp).
     let mut horiz = vec![0.0f32; w * h * 3];
     for y in 0..h {
-        let row = src.row(y as u32);
-        for x in 0..w {
-            for c in 0..3 {
-                let mut acc = 0.0f32;
-                for (ki, &kv) in kernel.iter().enumerate() {
-                    let xi = (x as isize + ki as isize - radius as isize)
-                        .clamp(0, w as isize - 1) as usize;
-                    acc += row[xi * 3 + c] * kv;
-                }
-                horiz[(y * w + x) * 3 + c] = acc;
+        let row_start = y * stride;
+        let row = &src_data[row_start..row_start + stride];
+        let out_row = &mut horiz[row_start..row_start + stride];
+
+        // Left edge: x < radius
+        for x in 0..radius.min(w) {
+            let mut r = 0.0f32;
+            let mut g = 0.0f32;
+            let mut b = 0.0f32;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let xi = (x + ki).saturating_sub(radius).min(w - 1);
+                r += row[xi * 3] * kv;
+                g += row[xi * 3 + 1] * kv;
+                b += row[xi * 3 + 2] * kv;
             }
+            out_row[x * 3] = r;
+            out_row[x * 3 + 1] = g;
+            out_row[x * 3 + 2] = b;
+        }
+
+        // Interior: no bounds checks needed
+        let x_start = radius.min(w);
+        let x_end = w.saturating_sub(radius);
+        for x in x_start..x_end {
+            let mut r = 0.0f32;
+            let mut g = 0.0f32;
+            let mut b = 0.0f32;
+            let base = (x - radius) * 3;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let off = base + ki * 3;
+                r += row[off] * kv;
+                g += row[off + 1] * kv;
+                b += row[off + 2] * kv;
+            }
+            out_row[x * 3] = r;
+            out_row[x * 3 + 1] = g;
+            out_row[x * 3 + 2] = b;
+        }
+
+        // Right edge: x >= w - radius
+        for x in x_end.max(x_start)..w {
+            let mut r = 0.0f32;
+            let mut g = 0.0f32;
+            let mut b = 0.0f32;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let xi = (x + ki).saturating_sub(radius).min(w - 1);
+                r += row[xi * 3] * kv;
+                g += row[xi * 3 + 1] * kv;
+                b += row[xi * 3 + 2] * kv;
+            }
+            out_row[x * 3] = r;
+            out_row[x * 3 + 1] = g;
+            out_row[x * 3 + 2] = b;
         }
     }
 
     // --- Vertical pass ---
+    // Process one row at a time, accumulating from kernel.len() row pointers.
+    // This is cache-friendly: we read full rows sequentially.
     let mut vert = vec![0.0f32; w * h * 3];
-    for y in 0..h {
-        for x in 0..w {
-            for c in 0..3 {
-                let mut acc = 0.0f32;
-                for (ki, &kv) in kernel.iter().enumerate() {
-                    let yi = (y as isize + ki as isize - radius as isize)
-                        .clamp(0, h as isize - 1) as usize;
-                    acc += horiz[(yi * w + x) * 3 + c] * kv;
-                }
-                vert[(y * w + x) * 3 + c] = acc;
+
+    // Precompute clamped row indices for each (y, ki) to avoid per-pixel branching.
+    // Top edge
+    for y in 0..radius.min(h) {
+        let out_start = y * stride;
+        let out_row = &mut vert[out_start..out_start + stride];
+
+        // First kernel tap: initialize
+        let yi0 = y.saturating_sub(radius);
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
+        for i in 0..stride {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        // Remaining kernel taps: accumulate
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = (y + ki).saturating_sub(radius).min(h - 1);
+            let src_row = &horiz[yi * stride..yi * stride + stride];
+            for i in 0..stride {
+                out_row[i] += src_row[i] * kv;
+            }
+        }
+    }
+
+    // Interior rows: no clamping needed
+    let y_start = radius.min(h);
+    let y_end = h.saturating_sub(radius);
+    for y in y_start..y_end {
+        let out_start = y * stride;
+        let out_row = &mut vert[out_start..out_start + stride];
+
+        let yi0 = y - radius;
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
+        for i in 0..stride {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = yi0 + ki;
+            let src_row = &horiz[yi * stride..yi * stride + stride];
+            for i in 0..stride {
+                out_row[i] += src_row[i] * kv;
+            }
+        }
+    }
+
+    // Bottom edge
+    for y in y_end.max(y_start)..h {
+        let out_start = y * stride;
+        let out_row = &mut vert[out_start..out_start + stride];
+
+        let yi0 = y.saturating_sub(radius);
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
+        for i in 0..stride {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = (y + ki).saturating_sub(radius).min(h - 1);
+            let src_row = &horiz[yi * stride..yi * stride + stride];
+            for i in 0..stride {
+                out_row[i] += src_row[i] * kv;
             }
         }
     }
@@ -86,6 +186,7 @@ fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbImage {
 // ---------------------------------------------------------------------------
 
 /// Apply a separable Gaussian blur to single-channel data.
+#[allow(clippy::needless_range_loop)] // x index is used for kernel offset arithmetic
 fn gaussian_blur_single_channel(
     data: &[f32],
     width: usize,
@@ -97,28 +198,94 @@ fn gaussian_blur_single_channel(
     // --- Horizontal pass ---
     let mut horiz = vec![0.0f32; width * height];
     for y in 0..height {
-        for x in 0..width {
+        let row = &data[y * width..(y + 1) * width];
+        let out_row = &mut horiz[y * width..(y + 1) * width];
+
+        // Left edge
+        for x in 0..radius.min(width) {
             let mut acc = 0.0f32;
             for (ki, &kv) in kernel.iter().enumerate() {
-                let xi = (x as isize + ki as isize - radius as isize)
-                    .clamp(0, width as isize - 1) as usize;
-                acc += data[y * width + xi] * kv;
+                let xi = (x + ki).saturating_sub(radius).min(width - 1);
+                acc += row[xi] * kv;
             }
-            horiz[y * width + x] = acc;
+            out_row[x] = acc;
+        }
+        // Interior
+        let x_start = radius.min(width);
+        let x_end = width.saturating_sub(radius);
+        for x in x_start..x_end {
+            let mut acc = 0.0f32;
+            let base = x - radius;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                acc += row[base + ki] * kv;
+            }
+            out_row[x] = acc;
+        }
+        // Right edge
+        for x in x_end.max(x_start)..width {
+            let mut acc = 0.0f32;
+            for (ki, &kv) in kernel.iter().enumerate() {
+                let xi = (x + ki).saturating_sub(radius).min(width - 1);
+                acc += row[xi] * kv;
+            }
+            out_row[x] = acc;
         }
     }
 
     // --- Vertical pass ---
     let mut vert = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let mut acc = 0.0f32;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let yi = (y as isize + ki as isize - radius as isize)
-                    .clamp(0, height as isize - 1) as usize;
-                acc += horiz[yi * width + x] * kv;
+
+    // Top edge
+    for y in 0..radius.min(height) {
+        let out_row = &mut vert[y * width..(y + 1) * width];
+        let yi0 = y.saturating_sub(radius);
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
+        for i in 0..width {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = (y + ki).saturating_sub(radius).min(height - 1);
+            let src_row = &horiz[yi * width..(yi + 1) * width];
+            for i in 0..width {
+                out_row[i] += src_row[i] * kv;
             }
-            vert[y * width + x] = acc;
+        }
+    }
+    // Interior
+    let y_start = radius.min(height);
+    let y_end = height.saturating_sub(radius);
+    for y in y_start..y_end {
+        let out_row = &mut vert[y * width..(y + 1) * width];
+        let yi0 = y - radius;
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
+        for i in 0..width {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = yi0 + ki;
+            let src_row = &horiz[yi * width..(yi + 1) * width];
+            for i in 0..width {
+                out_row[i] += src_row[i] * kv;
+            }
+        }
+    }
+    // Bottom edge
+    for y in y_end.max(y_start)..height {
+        let out_row = &mut vert[y * width..(y + 1) * width];
+        let yi0 = y.saturating_sub(radius);
+        let &kv0 = &kernel[0];
+        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
+        for i in 0..width {
+            out_row[i] = src_row0[i] * kv0;
+        }
+        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+            let yi = (y + ki).saturating_sub(radius).min(height - 1);
+            let src_row = &horiz[yi * width..(yi + 1) * width];
+            for i in 0..width {
+                out_row[i] += src_row[i] * kv;
+            }
         }
     }
 
@@ -128,6 +295,18 @@ fn gaussian_blur_single_channel(
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/// Build and return a normalised Gaussian kernel for the given sigma.
+///
+/// Exposed so that callers (e.g. the pipeline probe loop) can build the kernel
+/// once and reuse it across multiple calls to [`unsharp_mask_with_kernel`] /
+/// [`unsharp_mask_single_channel_with_kernel`].
+pub fn make_kernel(sigma: f32) -> Result<Vec<f32>, CoreError> {
+    if sigma <= 0.0 {
+        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+    }
+    Ok(gaussian_kernel(sigma))
+}
 
 /// Apply unsharp-mask sharpening with the given `amount` and Gaussian `sigma`.
 ///
@@ -141,21 +320,26 @@ pub fn unsharp_mask(
     amount: f32,
     sigma: f32,
 ) -> Result<LinearRgbImage, CoreError> {
-    if sigma <= 0.0 {
-        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+    let kernel = make_kernel(sigma)?;
+    Ok(unsharp_mask_with_kernel(src, amount, &kernel))
+}
+
+/// Like [`unsharp_mask`] but accepts a pre-built kernel (avoids recomputation).
+pub fn unsharp_mask_with_kernel(
+    src: &LinearRgbImage,
+    amount: f32,
+    kernel: &[f32],
+) -> LinearRgbImage {
+    // Compute blur, then apply USM formula in-place on the blur buffer
+    // to avoid a third allocation: out[i] = src[i] + amount * (src[i] - blur[i])
+    let mut blurred = gaussian_blur(src, kernel);
+    let src_px = src.pixels();
+    let blur_px = blurred.pixels_mut();
+    let amt_plus_1 = 1.0 + amount;
+    for (b, &s) in blur_px.iter_mut().zip(src_px.iter()) {
+        *b = amt_plus_1 * s - amount * *b;
     }
-
-    let kernel = gaussian_kernel(sigma);
-    let blurred = gaussian_blur(src, &kernel);
-
-    let out: Vec<f32> = src
-        .pixels()
-        .iter()
-        .zip(blurred.pixels().iter())
-        .map(|(s, b)| s + amount * (s - b))
-        .collect();
-
-    LinearRgbImage::new(src.width(), src.height(), out)
+    blurred
 }
 
 /// Apply unsharp-mask sharpening to a single-channel buffer (e.g. luminance).
@@ -172,21 +356,27 @@ pub fn unsharp_mask_single_channel(
     amount: f32,
     sigma: f32,
 ) -> Result<Vec<f32>, CoreError> {
-    if sigma <= 0.0 {
-        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
-    }
+    let kernel = make_kernel(sigma)?;
+    Ok(unsharp_mask_single_channel_with_kernel(data, width, height, amount, &kernel))
+}
+
+/// Like [`unsharp_mask_single_channel`] but accepts a pre-built kernel.
+pub fn unsharp_mask_single_channel_with_kernel(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    amount: f32,
+    kernel: &[f32],
+) -> Vec<f32> {
     debug_assert_eq!(data.len(), width * height);
 
-    let kernel = gaussian_kernel(sigma);
-    let blurred = gaussian_blur_single_channel(data, width, height, &kernel);
-
-    let out: Vec<f32> = data
-        .iter()
-        .zip(blurred.iter())
-        .map(|(s, b)| s + amount * (s - b))
-        .collect();
-
-    Ok(out)
+    // Compute blur, then apply USM in-place to reuse the allocation.
+    let mut blurred = gaussian_blur_single_channel(data, width, height, kernel);
+    let amt_plus_1 = 1.0 + amount;
+    for (b, &s) in blurred.iter_mut().zip(data.iter()) {
+        *b = amt_plus_1 * s - amount * *b;
+    }
+    blurred
 }
 
 // ---------------------------------------------------------------------------
