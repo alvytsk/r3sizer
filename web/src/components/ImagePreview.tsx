@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useProcessorStore } from "@/stores/processor-store";
-import { DownloadButton } from "./DownloadButton";
 
 function renderToCanvas(
   canvas: HTMLCanvasElement,
@@ -196,9 +195,6 @@ export function ImagePreview() {
           outputW={outputWidth}
           outputH={outputHeight}
         />
-        <div className="pt-2 flex-shrink-0">
-          <DownloadButton />
-        </div>
       </div>
     );
   }

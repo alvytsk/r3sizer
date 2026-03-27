@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, RotateCcw, FolderOpen, ChevronLeft, ChevronRight } from "lucide-react";
+import { DownloadButton } from "@/components/DownloadButton";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ParameterPanel } from "@/components/ParameterPanel";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { useProcessorStore } from "@/stores/processor-store";
+
+const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
 export default function App() {
   const inputFile = useProcessorStore((s) => s.inputFile);
@@ -15,10 +18,12 @@ export default function App() {
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
   const params = useProcessorStore((s) => s.params);
   const lastProcessedParams = useProcessorStore((s) => s.lastProcessedParams);
+  const setInput = useProcessorStore((s) => s.setInput);
   const process = useProcessorStore((s) => s.process);
   const reset = useProcessorStore((s) => s.reset);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [diagOpen, setDiagOpen] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const paramsChanged = !!(
     lastProcessedParams &&
@@ -26,8 +31,44 @@ export default function App() {
     JSON.stringify(params) !== JSON.stringify(lastProcessedParams)
   );
 
+  const handleOpenFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        setInput(
+          file,
+          new Uint8Array(imageData.data.buffer),
+          canvas.width,
+          canvas.height
+        );
+        URL.revokeObjectURL(url);
+      };
+      img.src = url;
+      e.target.value = "";
+    },
+    [setInput]
+  );
+
   return (
     <div className="min-h-screen flex flex-col relative grain">
+      {/* Hidden file input for "Open" */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ACCEPTED}
+        className="hidden"
+        onChange={handleOpenFile}
+      />
+
       {/* Top bar */}
       <header className="border-b border-border/60 px-5 py-2.5 flex items-center justify-between backdrop-blur-sm bg-background/80 sticky top-0 z-20">
         <div className="flex items-center gap-3">
@@ -37,14 +78,6 @@ export default function App() {
           <span className="hidden sm:block text-[11px] font-mono text-muted-foreground/70 border-l border-border pl-3">
             precision downscaling
           </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {inputFile && (
-            <Button variant="ghost" size="sm" onClick={reset} className="text-muted-foreground hover:text-foreground">
-              <RotateCcw className="h-3.5 w-3.5 mr-1" />
-              Reset
-            </Button>
-          )}
         </div>
       </header>
 
@@ -87,11 +120,14 @@ export default function App() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Toolbar — above image */}
           {inputFile && (
-            <div className="px-4 py-2 border-b border-border/30 flex items-center gap-3 flex-shrink-0">
+            <div className="px-4 py-2 border-b border-border/30 flex items-center gap-2 flex-shrink-0">
+              {paramsChanged && (
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse" title="Parameters changed" />
+              )}
               <Button
                 onClick={process}
                 disabled={isProcessing}
-                className="glow-amber"
+                className={paramsChanged ? "glow-amber border border-primary/40" : "glow-amber"}
                 size="sm"
               >
                 {isProcessing && (
@@ -103,13 +139,33 @@ export default function App() {
                     ? "Reprocess"
                     : "Process"}
               </Button>
-              <span className="text-[11px] font-mono text-muted-foreground">
+              <span className={`text-[11px] font-mono ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}>
                 {isProcessing
                   ? "running pipeline..."
                   : paramsChanged
                     ? "parameters changed"
                     : "auto-sharpness downscale"}
               </span>
+              <div className="ml-auto flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 mr-1" />
+                  Open
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={reset}
+                  className="text-muted-foreground/50 hover:text-foreground"
+                  title="Reset all"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
           )}
 
@@ -134,6 +190,13 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* Save bar — bottom of center column */}
+          {outputRgbaData && (
+            <div className="px-4 py-2 border-t border-border/30 flex-shrink-0">
+              <DownloadButton />
+            </div>
+          )}
         </div>
 
         {/* Diagnostics sidebar — right */}

@@ -2,10 +2,9 @@ import { create } from "zustand";
 import type {
   AutoSharpParams,
   AutoSharpDiagnostics,
-  ProcessResult,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { initWasm, process_image } from "@/wasm";
+import { processImageAsync } from "@/wasm";
 
 interface ProcessorState {
   // Input
@@ -128,14 +127,13 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     set({ isProcessing: true, error: null });
 
     try {
-      await initWasm();
       const paramsJson = JSON.stringify(state.params);
-      const result = process_image(
+      const result = await processImageAsync(
         state.inputRgbaData,
         state.inputWidth,
         state.inputHeight,
         paramsJson
-      ) as ProcessResult;
+      );
 
       set({
         outputRgbaData: result.imageData,

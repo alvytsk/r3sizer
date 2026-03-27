@@ -6,6 +6,9 @@ import tailwindcss from "@tailwindcss/vite"
 
 export default defineConfig({
   plugins: [react(), wasm(), tailwindcss()],
+  worker: {
+    plugins: () => [wasm()],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
