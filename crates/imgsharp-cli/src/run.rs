@@ -1,15 +1,37 @@
 /// Core run logic: load → process → save → diagnostics.
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use imgsharp_core::{AutoSharpParams, ClampPolicy, FitStrategy, ProbeConfig};
 use imgsharp_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
 
+/// Resolve target dimensions from CLI args and input image size.
+fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u32)> {
+    match (args.width, args.height, args.preserve_aspect_ratio) {
+        (Some(w), Some(h), _) => Ok((w, h)),
+        (Some(w), None, true) => {
+            let h = ((w as f64 / src_w as f64) * src_h as f64).round() as u32;
+            Ok((w, h.max(1)))
+        }
+        (None, Some(h), true) => {
+            let w = ((h as f64 / src_h as f64) * src_w as f64).round() as u32;
+            Ok((w.max(1), h))
+        }
+        (None, None, _) => bail!("at least one of --width or --height is required"),
+        (_, None, false) | (None, _, false) => {
+            bail!("both --width and --height are required unless --preserve-aspect-ratio is set")
+        }
+    }
+}
+
 pub fn run(args: &Cli) -> Result<()> {
     // --- Load ---
     let input = load_as_linear(&args.input)
         .with_context(|| format!("failed to load input file: {}", args.input.display()))?;
+
+    // --- Resolve target dimensions ---
+    let (target_width, target_height) = resolve_dimensions(args, input.width(), input.height())?;
 
     // --- Build params ---
     let probe_strengths = if let Some(ref strengths) = args.probe_strengths {
@@ -20,8 +42,8 @@ pub fn run(args: &Cli) -> Result<()> {
     };
 
     let params = AutoSharpParams {
-        target_width: args.width,
-        target_height: args.height,
+        target_width,
+        target_height,
         probe_strengths,
         target_artifact_ratio: args.target_artifact_ratio,
         enable_contrast_leveling: args.enable_contrast_leveling,

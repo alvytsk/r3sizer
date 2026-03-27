@@ -20,11 +20,16 @@ pub struct Cli {
 
     /// Target width in pixels.
     #[arg(long, short = 'W')]
-    pub width: u32,
+    pub width: Option<u32>,
 
     /// Target height in pixels.
     #[arg(long, short = 'H')]
-    pub height: u32,
+    pub height: Option<u32>,
+
+    /// Preserve the input image's aspect ratio. When set, only one of
+    /// --width or --height is required; the other is computed automatically.
+    #[arg(long, short = 'p')]
+    pub preserve_aspect_ratio: bool,
 
     /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
     /// Default: 0.001 (= 0.1 %).
