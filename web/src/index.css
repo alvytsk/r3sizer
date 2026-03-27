@@ -162,6 +162,10 @@
   .glow-amber {
     box-shadow: 0 0 20px oklch(0.78 0.16 75 / 0.15), 0 0 60px oklch(0.78 0.16 75 / 0.05);
   }
+
+  .glow-amber-text {
+    text-shadow: 0 0 30px oklch(0.78 0.16 75 / 0.3), 0 0 80px oklch(0.78 0.16 75 / 0.1);
+  }
 }
 
 /* Styled scrollbar for dark theme */

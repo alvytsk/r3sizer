@@ -1,14 +1,14 @@
 import type { StageTiming } from "@/types/wasm-types";
 
 const STAGES: { key: keyof StageTiming; label: string; color: string; barColor: string }[] = [
-  { key: "resize_us", label: "Resize", color: "bg-blue-400", barColor: "bg-blue-400/80" },
-  { key: "contrast_us", label: "Contrast", color: "bg-purple-400", barColor: "bg-purple-400/80" },
-  { key: "baseline_us", label: "Baseline", color: "bg-emerald-400", barColor: "bg-emerald-400/80" },
-  { key: "probing_us", label: "Probing", color: "bg-amber-400", barColor: "bg-amber-400/80" },
-  { key: "fit_us", label: "Fit", color: "bg-orange-400", barColor: "bg-orange-400/80" },
-  { key: "robustness_us", label: "Robust.", color: "bg-red-400", barColor: "bg-red-400/80" },
-  { key: "final_sharpen_us", label: "Sharpen", color: "bg-pink-400", barColor: "bg-pink-400/80" },
-  { key: "clamp_us", label: "Clamp", color: "bg-indigo-400", barColor: "bg-indigo-400/80" },
+  { key: "resize_us", label: "Resize", color: "bg-chart-2", barColor: "bg-chart-2/80" },
+  { key: "contrast_us", label: "Contrast", color: "bg-chart-4", barColor: "bg-chart-4/80" },
+  { key: "baseline_us", label: "Baseline", color: "bg-chart-3", barColor: "bg-chart-3/80" },
+  { key: "probing_us", label: "Probing", color: "bg-chart-1", barColor: "bg-chart-1/80" },
+  { key: "fit_us", label: "Fit", color: "bg-amber-dim", barColor: "bg-amber-dim/80" },
+  { key: "robustness_us", label: "Robust.", color: "bg-chart-5", barColor: "bg-chart-5/80" },
+  { key: "final_sharpen_us", label: "Sharpen", color: "bg-amber-bright", barColor: "bg-amber-bright/80" },
+  { key: "clamp_us", label: "Clamp", color: "bg-surface-raised", barColor: "bg-surface-raised/80" },
 ];
 
 function formatUs(us: number): string {

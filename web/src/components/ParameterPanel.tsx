@@ -163,7 +163,8 @@ function NumericInput({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-xs font-mono font-semibold uppercase tracking-[0.15em] text-primary/70 border-b border-border/30 pb-1">
+    <div className="flex items-center gap-1.5 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-primary border-b border-border/30 pb-1">
+      <div className="w-0.5 h-3 rounded-full bg-primary" />
       {children}
     </div>
   );
