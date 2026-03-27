@@ -54,8 +54,9 @@ export function DownloadButton() {
   if (!outputRgbaData) return null;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <div className="flex rounded-md border border-border/40 overflow-hidden">
+    <div className="flex items-center gap-2">
+      {/* Format selector — hidden below lg */}
+      <div className="hidden lg:flex rounded-md border border-border/40 overflow-hidden">
         {(["jpeg", "png", "webp"] as const).map((fmt) => (
           <button
             key={fmt}
@@ -70,8 +71,9 @@ export function DownloadButton() {
           </button>
         ))}
       </div>
+      {/* Quality slider — hidden below xl or when PNG */}
       {format !== "png" && (
-        <div className="flex items-center gap-1.5">
+        <div className="hidden xl:flex items-center gap-1.5">
           <input
             type="range"
             min={10}
@@ -88,9 +90,12 @@ export function DownloadButton() {
         size="sm"
         onClick={handleDownload}
         className="font-mono text-[11px]"
+        title={`Save as ${format.toUpperCase()}`}
       >
         <Download className="h-3.5 w-3.5 mr-1" />
-        Save
+        {/* Below lg: show format in button since selector is hidden */}
+        <span className="lg:hidden">{format.toUpperCase()}</span>
+        <span className="hidden lg:inline">Save</span>
       </Button>
     </div>
   );
