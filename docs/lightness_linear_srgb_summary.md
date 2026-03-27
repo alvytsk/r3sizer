@@ -40,15 +40,17 @@ This strongly supports a lightness-oriented pipeline:
 5. reconstruct RGB in a color-preserving way
 6. measure out-of-range RGB values for artifact estimation
 
-### 3. `L` should become a first-class utility in the core library
+### 3. `L` is a first-class utility in the core library
 
-A core helper can now be treated as part of the baseline design:
+Implemented in `color.rs`:
 
 ```rust
 pub fn luminance_from_linear_srgb(r: f32, g: f32, b: f32) -> f32 {
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 ```
+
+Also: `color::extract_luminance(&img) -> Vec<f32>` for whole-image extraction.
 
 ## Strongly reinforced reconstruction
 
@@ -66,7 +68,7 @@ G' = k * G
 B' = k * B
 ```
 
-This is still a **strong inference**, not a fully confirmed formula, unless the paper explicitly states it.
+This is classified as **paper-supported** — a strong inference from the paper context. All available evidence supports this formula, but it has not been explicitly confirmed verbatim from the paper. The implementation is complete in `color::reconstruct_rgb_from_lightness`.
 
 ## Important implementation notes
 
@@ -108,12 +110,9 @@ This makes grayscale pixels a very useful test category for validation.
 
 ### Still not fully confirmed
 
-- exact sharpening formula applied to `L`
-- exact RGB reconstruction formula after sharpening
-- exact definition of `P(s)`:
-  - per pixel
-  - per channel
-  - or in another internal color representation
+- exact sharpening formula applied to `L` (USM is used as an engineering choice)
+- exact RGB reconstruction formula after sharpening (`k = L'/L` is paper-supported but not confirmed verbatim)
+- exact definition of `P(s)` counting rule (both per-channel and per-pixel are now implemented; paper's exact method is unknown)
 - exact interaction with contrast leveling
 
 ## Updated project-level algorithm sketch

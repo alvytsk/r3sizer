@@ -13,8 +13,9 @@ Replace `imageops::resize` in `resize.rs` with the confirmed resampling strategy
 No other module changes required.
 
 ### Exact artifact metric
-Replace `metrics::artifact_ratio` if the paper evaluates P in a different colour
-space (e.g. perceptual, or per-pixel rather than per-channel).
+Two metrics are now implemented (`ChannelClippingRatio` and `PixelOutOfGamutRatio`).
+Replace or extend if the paper evaluates P in a different colour space or uses a
+different counting rule entirely.
 
 ### Exact contrast leveling
 Replace the placeholder body of `contrast::apply_contrast_leveling`.
@@ -49,14 +50,15 @@ This would reduce the number of expensive sharpen+measure operations.
 Both operate on flat `&[f32]` slices -- well-suited for auto-vectorisation or
 explicit SIMD via `std::simd` (once stabilised) or `wide`.
 
-### Parallel probing
-Each probe (`sharpen -> measure`) is independent.  Add `rayon::par_iter` to the
-probe loop in `pipeline.rs` for multi-core speedup.
+### ~~Parallel probing~~ (done)
+Probes now run in parallel via `rayon::par_iter` when the `parallel` feature is
+enabled (default).  The Gaussian kernel and luminance buffer are shared read-only
+across threads.
 
-### Separable blur cache
-The Gaussian kernel is already computed once per probe call, but the luminance
-extraction is also cached across probes in lightness mode.  Further gains are
-possible by parallelising the probe loop.
+### Further parallelism
+The Gaussian blur inner loops (`sharpen.rs`) could benefit from per-row
+parallelism or explicit SIMD.  The current bottleneck for large images is the
+separable blur, not the probe dispatch.
 
 ---
 

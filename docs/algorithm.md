@@ -72,10 +72,10 @@ confirmed.  Lanczos3 is used as a high-quality standard choice.
 ## Stage 5: Baseline measurement
 
 Before any sharpening, the artifact ratio of the downscaled base image is
-measured:
+measured using the configured `ArtifactMetric`:
 
 ```
-baseline_artifact_ratio = artifact_ratio(base)
+baseline_artifact_ratio = measure(base)   // dispatches on ArtifactMetric
 ```
 
 This captures any out-of-range values introduced by the resize stage (e.g.
@@ -91,23 +91,35 @@ sharpening-induced artifacts from resize-induced artifacts.
 For each strength `s_i` in the probe set, sharpening is applied and artifacts
 are measured.  Two sharpening modes are supported:
 
-### Sharpening modes
+### Sharpening modes (`SharpenMode`)
 
 **`SharpenMode::Rgb`** (legacy):
 
 1. `sharpen::unsharp_mask(base, s_i, sigma)` -- unsharp mask on all RGB channels.
-2. `metrics::artifact_ratio(sharpened)` -- fraction of channel values outside [0,1].
+2. Measure artifact ratio on the sharpened image.
 
 **`SharpenMode::Lightness`** (default):
 
 1. `color::extract_luminance(base)` -- CIE Y luminance: `L = 0.2126R + 0.7152G + 0.0722B`.
-2. `sharpen::unsharp_mask_single_channel(luminance, s_i, sigma)` -- sharpen luminance only.
+2. Sharpen luminance only (dispatched by `SharpenModel`, see below).
 3. `color::reconstruct_rgb_from_lightness(base, sharpened_L)` -- multiplicative reconstruction:
    `k = L'/L; R' = k*R, G' = k*G, B' = k*B` (with epsilon guard for L near 0).
-4. `metrics::artifact_ratio(reconstructed)` -- measure artifacts on reconstructed RGB.
+4. Measure artifact ratio on the reconstructed RGB image.
 
 The luminance is extracted once before the probe loop and reused across all
 probes for efficiency.
+
+### Sharpening models (`SharpenModel`)
+
+Orthogonal to `SharpenMode` (which selects *channels*), `SharpenModel` selects
+the *operator*:
+
+- **`PracticalUsm`** (default): Gaussian unsharp mask. Engineering choice -- the
+  paper's exact sharpening operator is unknown. Works with both RGB and Lightness
+  modes.
+- **`PaperLightnessApprox`**: Scaffold for the paper-style lightness sharpening
+  operator. Currently delegates to USM internally. Requires
+  `SharpenMode::Lightness`.
 
 ### Metric modes
 
@@ -119,12 +131,13 @@ that depends on `MetricMode`:
 
 The `metric_value` is what gets fitted and compared against P0.
 
-### Artifact ratio definition
+### Artifact metrics (`ArtifactMetric`)
 
 **Engineering proxy** — the paper describes the target constraint in terms of the
-"fraction of color values outside the valid RGB gamut". The current implementation
-counts per-channel values, which is one interpretation; per-pixel counting or a
-different colour-space measure are possible alternatives.
+"fraction of color values outside the valid RGB gamut". Two interpretations are
+implemented, selectable via `ArtifactMetric`:
+
+**`ChannelClippingRatio`** (default) — per-channel fraction:
 
 ```
 P(s) = (count of channel values v where v < 0.0 or v > 1.0)
@@ -132,7 +145,15 @@ P(s) = (count of channel values v where v < 0.0 or v > 1.0)
               total channel values  =  W x H x 3
 ```
 
-Values exactly equal to 0.0 or 1.0 are not counted.
+**`PixelOutOfGamutRatio`** — per-pixel fraction:
+
+```
+P(s) = (count of pixels where any channel v < 0.0 or v > 1.0)
+       --------------------------------------------------------
+                      total pixels  =  W x H
+```
+
+In both cases, values exactly equal to 0.0 or 1.0 are not counted as artifacts.
 
 ### Sharpening formula (unsharp mask)
 
@@ -235,7 +256,9 @@ The result is scaled to [0, 255] u8 and written to disk.
 |-------|-------------|
 | `input_size` / `output_size` | Image dimensions |
 | `sharpen_mode` | `Rgb` or `Lightness` |
+| `sharpen_model` | `PracticalUsm` or `PaperLightnessApprox` |
 | `metric_mode` | `AbsoluteTotal` or `RelativeToBase` |
+| `artifact_metric` | `ChannelClippingRatio` or `PixelOutOfGamutRatio` |
 | `target_artifact_ratio` | P0 |
 | `baseline_artifact_ratio` | P(base) before sharpening |
 | `probe_samples` | All `(s_i, P_total(s_i), metric_value(s_i))` triples |
@@ -247,3 +270,4 @@ The result is scaled to [0, 255] u8 and written to disk.
 | `budget_reachable` | Whether the target P0 is achievable |
 | `measured_artifact_ratio` | P_total(s*) after final sharpen |
 | `measured_metric_value` | Mode-adjusted metric of the final output |
+| `provenance` | Per-stage faithfulness classification (see `StageProvenance`) |

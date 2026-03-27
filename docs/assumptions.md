@@ -28,6 +28,12 @@ what is an engineering approximation or placeholder.
 |--------|--------|
 | Lightness formula `L = 0.2126R + 0.7152G + 0.0722B` | Implemented in `color::luminance_from_linear_srgb` |
 | Processing in linear sRGB | Implemented throughout the pipeline |
+| sRGB ↔ linear conversion (IEC 61966-2-1) | Implemented in `color::srgb_to_linear` / `linear_to_srgb` |
+| Cubic polynomial fit of P(s) | Implemented in `fit::fit_cubic` (f64 Vandermonde normal equations) |
+| Cardano's formula root solve | Implemented in `solve::find_sharpness` |
+| Lightness-based sharpening with RGB reconstruction | Implemented in `color::reconstruct_rgb_from_lightness` (paper-supported) |
+| Two artifact metric interpretations | `channel_clipping_ratio` and `pixel_out_of_gamut_ratio` in `metrics.rs` |
+| Parallel probe evaluation | `rayon::par_iter` in `pipeline.rs` (default `parallel` feature) |
 
 ---
 
@@ -37,7 +43,7 @@ what is an engineering approximation or placeholder.
 |-----------------------|--------|----------------|
 | **Lanczos3 downscale** | Engineering choice — exact kernel not confirmed | Replace `resize.rs` once kernel is known |
 | **Unsharp mask sharpening** | Engineering choice — exact sharpening operator not confirmed; cited values (1.09, 1.81, 2.17) are consistent with USM's linear `amount` parameter but do not confirm USM is the paper's method | Replace `sharpen.rs` once operator is known |
-| **Per-channel P metric** | Engineering proxy — paper says "fraction of color values outside valid gamut"; per-channel counting is one interpretation | Could be per-pixel, or evaluated in a perceptual colour space |
+| **P metric counting rule** | Engineering proxy — paper says "fraction of color values outside valid gamut"; both per-channel (`ChannelClippingRatio`) and per-pixel (`PixelOutOfGamutRatio`) are now implemented as alternatives | The paper may use a different colour-space measure entirely |
 | **Gaussian sigma = 1.0** | Reasonable starting value for moderate downscale ratios | Expose as parameter (already done: `sharpen_sigma`) |
 | **Contrast leveling: percentile stretch** | Placeholder — exact formula not confirmed | Replace body of `contrast::apply_contrast_leveling` |
 | **Contrast leveling order: before probing** | Order not confirmed | Architecture supports reordering |

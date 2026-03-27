@@ -6,7 +6,7 @@ Detailed walkthrough of the `process_auto_sharp_downscale` pipeline as implement
 
 ## Entry Point
 
-`crates/imgsharp-core/src/pipeline.rs:38` — `process_auto_sharp_downscale(input, params)`
+`crates/imgsharp-core/src/pipeline.rs` — `process_auto_sharp_downscale(input, params)`
 
 The caller supplies a `LinearRgbImage` (already in linear RGB — the sRGB-to-linear conversion is the responsibility of `imgsharp-io` or the caller) and an `AutoSharpParams` struct.
 
@@ -16,12 +16,11 @@ Returns `Result<ProcessOutput, CoreError>` where `ProcessOutput` contains the fi
 
 ## Stage 1: Validate Parameters
 
-`pipeline.rs:45` — `params.validate()`
-
-Checks:
+`params.validate()` checks:
 - Target width/height are non-zero
 - `target_artifact_ratio` is in `[0.0, 1.0]`
 - `sharpen_sigma` is positive
+- `PaperLightnessApprox` requires `SharpenMode::Lightness`
 - Probe config resolves to >= 4 sorted, positive values
 
 Validation is fail-fast; any violation returns `CoreError::InvalidParams`.
@@ -30,9 +29,9 @@ Validation is fail-fast; any violation returns `CoreError::InvalidParams`.
 
 ## Stage 2: Downscale
 
-`pipeline.rs:53` — `downscale(input, target)`
+`downscale(input, target)`
 
-Implementation: `crates/imgsharp-core/src/resize.rs:20`
+Implementation: `crates/imgsharp-core/src/resize.rs`
 
 - Wraps the flat `Vec<f32>` as an `image::ImageBuffer<Rgb<f32>>` (zero-copy layout match)
 - Calls `imageops::resize` with `FilterType::Lanczos3`
@@ -47,9 +46,7 @@ Implementation: `crates/imgsharp-core/src/resize.rs:20`
 
 ## Stage 3: Contrast Leveling (optional, disabled by default)
 
-`pipeline.rs:58-60`
-
-Implementation: `crates/imgsharp-core/src/contrast.rs:35`
+Implementation: `crates/imgsharp-core/src/contrast.rs`
 
 When `enable_contrast_leveling = false` (default), this is a true no-op — returns immediately without touching the buffer.
 
@@ -68,15 +65,12 @@ When enabled, applies a per-channel percentile stretch:
 
 ## Stage 4: Baseline Measurement
 
-`pipeline.rs:65` — `artifact_ratio(&base)`
+Implementation: `crates/imgsharp-core/src/metrics.rs`
 
-Implementation: `crates/imgsharp-core/src/metrics.rs:28`
+The artifact ratio of the base image is measured using the configured `ArtifactMetric`:
 
-Counts the fraction of f32 channel values strictly outside `[0.0, 1.0]`:
-
-```
-P_base = (count of v where v < 0.0 or v > 1.0) / (W * H * 3)
-```
+- **`ChannelClippingRatio`** (default): fraction of f32 channel values strictly outside `[0.0, 1.0]`, denominator `W * H * 3`.
+- **`PixelOutOfGamutRatio`**: fraction of pixels where *any* channel is strictly outside `[0.0, 1.0]`, denominator `W * H`.
 
 Values exactly equal to 0.0 or 1.0 are **not** counted as artifacts.
 
@@ -90,11 +84,9 @@ The implementation uses integer accumulation (`u32` sum of boolean masks) rather
 
 ## Stage 5: Probe Sharpening Strengths
 
-`pipeline.rs:70-90`
-
 ### 5a. Resolve probe strengths
 
-`pipeline.rs:70` — `params.probe_strengths.resolve()`
+`params.probe_strengths.resolve()`
 
 `ProbeConfig` is either:
 - `Range { min, max, count }` — linearly spaced values (requires count >= 4, min > 0, min < max)
@@ -104,15 +96,13 @@ Result is always sorted ascending. Default: `[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0
 
 ### 5b. Build Gaussian kernel
 
-`pipeline.rs:73` — `make_kernel(params.sharpen_sigma)`
+`make_kernel(params.sharpen_sigma)`
 
-Implementation: `crates/imgsharp-core/src/sharpen.rs:304`
+Implementation: `crates/imgsharp-core/src/sharpen.rs`
 
 Builds a 1-D normalized Gaussian kernel with `radius = ceil(3 * sigma)`. Default sigma = 1.0 gives kernel size 7 (radius 3). The kernel is built once and reused across all probes and the final sharpen.
 
 ### 5c. Extract luminance (lightness mode only)
-
-`pipeline.rs:76-80`
 
 When `sharpen_mode == SharpenMode::Lightness`, `color::extract_luminance(&base)` computes CIE Y luminance for each pixel:
 
@@ -126,17 +116,20 @@ Coefficients are the Y row of the sRGB-to-XYZ matrix (IEC 61966-2-1). Extracted 
 
 ### 5d. Run probes
 
-`pipeline.rs:82-90` — `probe_strengths(...)`
-
-Implementation: `pipeline.rs:264-290`
+Implementation: `probe_strengths()` helper in `pipeline.rs`
 
 For each strength `s_i`:
 
-1. **Sharpen** — dispatched by `sharpen_image()` (`pipeline.rs:238`):
+1. **Sharpen** — dispatched by `sharpen_image()`:
    - **RGB mode:** `unsharp_mask_with_kernel(base, s_i, kernel)` — 3-channel USM
-   - **Lightness mode:** `unsharp_mask_single_channel_with_kernel(luminance, w, h, s_i, kernel)` then `reconstruct_rgb_from_lightness(base, sharpened_L)`
+   - **Lightness mode:** dispatched by `SharpenModel`:
+     - `PracticalUsm`: `unsharp_mask_single_channel_with_kernel(luminance, w, h, s_i, kernel)`
+     - `PaperLightnessApprox`: `paper_sharpen::paper_sharpen_lightness(luminance, w, h, s_i, kernel)` (currently delegates to USM)
+   - Then `reconstruct_rgb_from_lightness(base, sharpened_L)`
 
-2. **Measure** — `artifact_ratio(&sharpened)` returns `P_total(s_i)`
+2. **Measure** — dispatched by `ArtifactMetric`:
+   - `ChannelClippingRatio`: `channel_clipping_ratio(&sharpened)` returns `P_total(s_i)`
+   - `PixelOutOfGamutRatio`: `pixel_out_of_gamut_ratio(&sharpened)` returns `P_total(s_i)`
 
 3. **Compute metric** — `compute_metric_value(p_total, baseline, metric_mode)`:
    - `AbsoluteTotal`: `metric_value = p_total`
@@ -162,7 +155,7 @@ Equivalent to `input[i] + amount * (input[i] - blur[i])` but computed as a singl
 
 ### Gaussian blur implementation
 
-`crates/imgsharp-core/src/sharpen.rs:43` (RGB) / `sharpen.rs:190` (single-channel)
+`crates/imgsharp-core/src/sharpen.rs` — `gaussian_blur()` (RGB) / `gaussian_blur_single_channel()` (single-channel)
 
 Separable 2-pass (horizontal then vertical) with explicit edge handling:
 1. **Left/top edge:** clamped indexing (`saturating_sub`)
@@ -177,11 +170,7 @@ The vertical pass reads from the horizontal output and writes to a fresh buffer.
 
 ## Stage 6: Cubic Polynomial Fit
 
-`pipeline.rs:95-135`
-
 ### Fit data preparation
-
-`pipeline.rs:101-107`
 
 Probe samples are converted to `(f64, f64)` pairs of `(strength, metric_value)`. In `RelativeToBase` mode, a known anchor `(0.0, 0.0)` is prepended — zero sharpening produces zero added artifacts by definition, constraining the fit to pass near the origin.
 
@@ -200,7 +189,7 @@ Two strategies:
 
 ### Cubic fit internals
 
-`crates/imgsharp-core/src/fit.rs:29`
+`crates/imgsharp-core/src/fit.rs` — `fit_cubic()`
 
 Fits `P_hat(s) = a*s^3 + b*s^2 + c*s + d` by solving the 4x4 Vandermonde normal equations:
 
@@ -218,13 +207,13 @@ The 4x4 system is solved by Gaussian elimination with partial pivoting (pivot th
 
 ## Stage 7: Root Solving
 
-`crates/imgsharp-core/src/solve.rs:43`
+`crates/imgsharp-core/src/solve.rs` — `find_sharpness()`
 
 Solves `P_hat(s*) = P0` for the optimal sharpening strength.
 
 ### Algebraic path
 
-`solve.rs:89` — `roots_in_range(poly, p0, s_min, s_max)`
+`roots_in_range(poly, p0, s_min, s_max)`
 
 1. Shift: solve `a*s^3 + b*s^2 + c*s + (d - P0) = 0`
 2. If `|a| < 1e-12`: degenerate, solve as quadratic/linear
@@ -238,7 +227,7 @@ Solves `P_hat(s*) = P0` for the optimal sharpening strength.
 
 ### Fallback path
 
-`solve.rs:189` — `fallback_from_samples(samples, p0)`
+`fallback_from_samples(samples, p0)`
 
 Triggered when: no in-range algebraic root, or polynomial is degenerate, or fit failed entirely.
 
@@ -246,8 +235,6 @@ Triggered when: no in-range algebraic root, or polynomial is degenerate, or fit 
 2. **Least bad:** If all samples exceed P0, pick the one with the *smallest* `metric_value` → `SelectionMode::LeastBadSample`
 
 ### Budget reachability
-
-`pipeline.rs:140-152`
 
 Checks whether the target P0 is structurally achievable:
 - In `AbsoluteTotal` mode: if `baseline > P0`, the budget is unreachable (resize alone already exceeds the target)
@@ -260,8 +247,6 @@ If unreachable due to baseline, `SelectionMode` is overridden to `BudgetUnreacha
 
 ## Stage 8: Final Sharpening
 
-`pipeline.rs:157-164`
-
 Applies the selected strength `s*` to the base image using the same `sharpen_image()` helper as the probe loop — same sharpening mode (RGB or lightness), same pre-built kernel, same base luminance.
 
 **Key invariant:** The `base` image is never mutated during probing. Each probe produces a fresh allocation, and the final sharpen also produces a fresh allocation from the original `base`.
@@ -269,8 +254,6 @@ Applies the selected strength `s*` to the base image using the same `sharpen_ima
 ---
 
 ## Stage 9: Measure Final Artifact Ratio
-
-`pipeline.rs:169-174`
 
 Before clamping, the artifact ratio of the final sharpened image is measured:
 - `measured_artifact_ratio` — raw P_total(s*)
@@ -281,8 +264,6 @@ These are recorded in diagnostics for quality verification. They may differ slig
 ---
 
 ## Stage 10: Clamp Policy
-
-`pipeline.rs:179-207`
 
 Two policies:
 
@@ -303,14 +284,13 @@ The negative-clamp after normalization is necessary because sharpening ringing c
 
 ## Stage 11: Return Diagnostics
 
-`pipeline.rs:212-230`
-
 Assembles `AutoSharpDiagnostics` with:
 
 | Field | Source |
 |-------|--------|
 | `input_size` / `output_size` | Recorded at entry |
-| `sharpen_mode` / `metric_mode` | From params |
+| `sharpen_mode` / `sharpen_model` | From params |
+| `metric_mode` / `artifact_metric` | From params |
 | `target_artifact_ratio` | P0 from params |
 | `baseline_artifact_ratio` | Stage 4 measurement |
 | `probe_samples` | Stage 5 probe results |
@@ -322,6 +302,7 @@ Assembles `AutoSharpDiagnostics` with:
 | `budget_reachable` | Whether P0 is achievable |
 | `measured_artifact_ratio` | Actual P_total(s*) pre-clamp |
 | `measured_metric_value` | Mode-adjusted final metric |
+| `provenance` | `StageProvenance` — per-stage faithfulness classification |
 
 Returns `ProcessOutput { image, diagnostics }`.
 
@@ -345,8 +326,10 @@ P0: 0.001 (0.1%)
 sigma: 1.0
 fit: Cubic
 clamp: Clamp
-sharpen: Lightness
-metric: RelativeToBase
+sharpen_mode: Lightness
+sharpen_model: PracticalUsm
+metric_mode: RelativeToBase
+artifact_metric: ChannelClippingRatio
 contrast leveling: disabled
 ```
 
