@@ -2,6 +2,7 @@
 name    = "imgsharp-core"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
 
 [features]

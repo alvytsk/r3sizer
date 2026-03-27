@@ -2,6 +2,7 @@
 name    = "imgsharp-cli"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 description = "CLI for automatic-sharpness image downscaling"
 
 [[bin]]

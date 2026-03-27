@@ -24,11 +24,26 @@ cargo build --release -p imgsharp-cli
 Output:
 
 ```
-Selected sharpness strength : 1.8472
-Measured artifact ratio     : 0.000997  (target: 0.001000)
-Polynomial fit              : success
-Fallback used               : no
-Output size                 : 800×600
+Output size                 : 800x600
+Sharpen mode                : lightness (CIE Y)
+Sharpen model               : practical USM
+Metric mode                 : relative (sharpening-added artifacts)
+Artifact metric             : channel clipping ratio
+Baseline artifact ratio     : 0.000000
+Selected strength           : 1.8472
+Target metric value         : 0.001000
+Measured metric value        : 0.000997
+Measured artifact ratio     : 0.000997
+Budget reachable            : yes
+Fit status                  : success
+Crossing status             : found
+Selection mode              : polynomial root
+```
+
+Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
+
+```sh
+imgsharp -i photo.jpg -o out.png --width 800 -p
 ```
 
 ---
@@ -55,8 +70,11 @@ input (sRGB file)
   ↓ sRGB → linear RGB  (IEC 61966-2-1)
   ↓ Lanczos3 downscale (linear space)
   ↓ optional contrast leveling
+  ↓ measure baseline artifact ratio P(base)
+  ↓ extract CIE Y luminance from base
   ↓ probe N sharpening strengths:
-      for each s_i:  sharpen(s_i)  →  measure P(s_i) = out-of-range fraction
+      for each s_i:
+        sharpen luminance(s_i)  →  reconstruct RGB via k=L'/L  →  measure P(s_i)
   ↓ fit cubic  P_hat(s) = a·s³ + b·s² + c·s + d
   ↓ solve  P_hat(s*) = P0  (default P0 = 0.001 = 0.1%)
   ↓ apply final sharpening(s*)
@@ -70,31 +88,65 @@ See [`docs/algorithm.md`](docs/algorithm.md) for a full pipeline description.
 
 ## CLI reference
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--input` | required | Input image path |
-| `--output` | required | Output image path |
-| `--width` | required | Target width (px) |
-| `--height` | required | Target height (px) |
-| `--target-artifact-ratio` | `0.001` | P0 threshold (fraction, not percent) |
-| `--diagnostics` | — | JSON file for full diagnostics |
-| `--probe-strengths` | 9 samples, 0.5–4.0 | Comma-separated explicit probe list |
-| `--sharpen-sigma` | `1.0` | Gaussian sigma for unsharp mask |
-| `--enable-contrast-leveling` | off | Enable contrast leveling stage |
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--input` | `-i` | required | Input image path |
+| `--output` | `-o` | required | Output image path |
+| `--width` | `-W` | — | Target width (px) |
+| `--height` | `-H` | — | Target height (px) |
+| `--preserve-aspect-ratio` | `-p` | off | Compute the missing dimension from the input aspect ratio |
+| `--target-artifact-ratio` | | `0.001` | P0 threshold (fraction, not percent) |
+| `--diagnostics` | | — | Path to write a JSON diagnostics file |
+| `--probe-strengths` | | `0.05,0.1,0.2,0.4,0.8,1.5,3.0` | Comma-separated explicit probe list |
+| `--sharpen-sigma` | | `1.0` | Gaussian sigma for unsharp mask |
+| `--sharpen-mode` | | `lightness` | `lightness` (CIE Y) or `rgb` |
+| `--metric-mode` | | `relative` | `relative` (sharpening-added) or `absolute` (total) |
+| `--sharpen-model` | | `practical-usm` | `practical-usm` or `paper-lightness-approx` |
+| `--artifact-metric` | | `channel-clipping` | `channel-clipping` or `pixel-out-of-gamut` |
+| `--enable-contrast-leveling` | | off | Enable contrast leveling stage (placeholder) |
+
+Both `--width` and `--height` are required unless `--preserve-aspect-ratio` is set, in
+which case only one is needed.
 
 ---
 
-## Running tests
+## Building and testing
 
 ```sh
+# Build all crates
+cargo build --workspace
+
+# Run all tests
 cargo test --workspace
-```
 
-## Linting
-
-```sh
+# Lint (warnings are errors)
 cargo clippy --workspace -- -D warnings
+
+# Benchmarks
+cargo bench -p imgsharp-core
 ```
+
+---
+
+## Library usage
+
+`imgsharp-core` exposes the pipeline as a single function:
+
+```rust
+use imgsharp_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
+
+let params = AutoSharpParams {
+    target_width: 800,
+    target_height: 600,
+    ..Default::default()
+};
+
+let ProcessOutput { image, diagnostics } =
+    process_auto_sharp_downscale(&input_linear_rgb, &params)?;
+```
+
+`AutoSharpDiagnostics` is `Serialize`-able for JSON export and contains the full probe
+data, fit coefficients, selection mode, and per-stage provenance tags.
 
 ---
 
@@ -103,3 +155,9 @@ cargo clippy --workspace -- -D warnings
 - [`docs/algorithm.md`](docs/algorithm.md) — implemented pipeline
 - [`docs/assumptions.md`](docs/assumptions.md) — confirmed vs engineering approximations
 - [`docs/future_work.md`](docs/future_work.md) — next steps and Tauri integration
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
