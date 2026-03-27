@@ -174,9 +174,28 @@ via `ProbeConfig::Explicit` or `ProbeConfig::Range`.
 
 ---
 
+## Stage 6b: Metric breakdown (composite scaffold)
+
+Each probe now produces a `MetricBreakdown` via `metrics::compute_metric_breakdown`,
+which returns per-component scores:
+
+| Component | v0.1 status |
+|-----------|-------------|
+| `GamutExcursion` | Active — delegates to the configured `ArtifactMetric` |
+| `HaloRinging` | Stub — returns 0.0 |
+| `EdgeOvershoot` | Stub — returns 0.0 |
+| `TextureFlattening` | Stub — returns 0.0 |
+
+The `aggregate` field of `MetricBreakdown` equals the scalar metric value used for
+fitting, preserving backward compatibility. Each `ProbeSample` stores its
+`breakdown: Option<MetricBreakdown>` for downstream analysis.
+
+---
+
 ## Stage 7: Cubic polynomial fit
 
-`fit::fit_cubic` fits a cubic via Vandermonde normal equations in f64:
+`fit::fit_cubic_with_quality` fits a cubic via Vandermonde normal equations in f64 and
+returns both the polynomial and a `FitQuality` record:
 
 ```
 P_hat(s) = a*s^3 + b*s^2 + c*s + d
@@ -192,6 +211,80 @@ elimination with partial pivoting.
 
 Requires >= 4 data points.  Returns `CoreError::FitFailed` if the matrix is
 numerically singular (pivot < 1e-14).
+
+### Fit quality (`FitQuality`)
+
+After a successful fit, the following quality metrics are computed:
+
+| Field | Description |
+|-------|-------------|
+| `r_squared` | Coefficient of determination; 1.0 = perfect fit |
+| `residual_sum_of_squares` | Sum of squared residuals between predicted and actual values |
+| `max_residual` | Largest absolute residual across all data points |
+| `min_pivot` | Smallest pivot magnitude during Gaussian elimination (condition proxy) |
+
+These are stored in `diagnostics.fit_quality` (None when fit is skipped or fails).
+
+---
+
+## Stage 7b: Robustness checks
+
+After fitting and before solving, several robustness checks are performed.  Results
+are stored in `diagnostics.robustness` as `RobustnessFlags`:
+
+### Monotonicity check
+
+`fit::check_monotonicity` scans the sorted probe samples and counts inversions
+(cases where `metric_value[i+1] < metric_value[i]`).
+
+| Flag | Meaning |
+|------|---------|
+| `monotonic` | Zero inversions — P(s) is non-decreasing |
+| `quasi_monotonic` | At most one inversion |
+
+### Leave-one-out (LOO) stability
+
+The pipeline refits the cubic N times, each time dropping one probe sample,
+re-solves for the root, and measures the maximum relative change in s*:
+
+```
+max_loo_root_change = max_i |s*_full - s*_drop_i| / s*_full
+```
+
+`loo_stable = true` when `max_loo_root_change < 0.5` (50% relative shift).
+N=7 refits of a 4x4 system is negligible cost.
+
+### Derived flags
+
+| Flag | Threshold |
+|------|-----------|
+| `r_squared_ok` | R² > 0.85 |
+| `well_conditioned` | min_pivot > 1e-8 |
+
+### Impact on solver
+
+If robustness checks indicate unreliable fitting (non-monotonic data or LOO
+instability), the pipeline falls back to direct search and records the appropriate
+`FallbackReason` (see below).
+
+---
+
+## Stage 7c: Fallback reason determination
+
+When the pipeline does not use the polynomial root (i.e. `selection_mode != PolynomialRoot`),
+a typed `FallbackReason` is recorded in `diagnostics.fallback_reason`:
+
+| Reason | Trigger |
+|--------|---------|
+| `BudgetTooStrictForContent` | Budget structurally unreachable (baseline > P0) |
+| `DirectSearchConfigured` | `FitStrategy::DirectSearch` selected by caller |
+| `FitFailed` | Polynomial fit returned an error |
+| `MetricNonMonotonic` | Probe data is not monotonically increasing |
+| `FitUnstable` | LOO cross-validation shows unstable root |
+| `RootOutOfRange` | Fit succeeded but no root in [s_min, s_max] |
+
+Priority order: first matching reason wins (listed in evaluation order above).
+When `selection_mode == PolynomialRoot`, `fallback_reason` is `None`.
 
 ---
 
@@ -248,6 +341,27 @@ The result is scaled to [0, 255] u8 and written to disk.
 
 ---
 
+## Per-stage timing
+
+Every pipeline invocation records wall-clock microsecond timing via `StageTiming`:
+
+| Field | What it measures |
+|-------|------------------|
+| `resize_us` | Lanczos3 downscale |
+| `contrast_us` | Contrast leveling (0 when disabled) |
+| `baseline_us` | Baseline artifact measurement |
+| `probing_us` | Entire probe loop (all strengths) |
+| `fit_us` | Cubic polynomial fitting |
+| `robustness_us` | Monotonicity + LOO stability checks |
+| `final_sharpen_us` | Final sharpening at selected s* |
+| `clamp_us` | Clamping + final measurement |
+| `total_us` | End-to-end pipeline time |
+
+Timing is always collected (no feature flag needed).  Overhead is negligible —
+`Instant::now()` calls between stages.
+
+---
+
 ## Diagnostics
 
 `AutoSharpDiagnostics` (serialisable to JSON) contains:
@@ -261,13 +375,18 @@ The result is scaled to [0, 255] u8 and written to disk.
 | `artifact_metric` | `ChannelClippingRatio` or `PixelOutOfGamutRatio` |
 | `target_artifact_ratio` | P0 |
 | `baseline_artifact_ratio` | P(base) before sharpening |
-| `probe_samples` | All `(s_i, P_total(s_i), metric_value(s_i))` triples |
+| `probe_samples` | All `(s_i, P_total(s_i), metric_value(s_i), breakdown)` tuples |
 | `fit_status` | `Success`, `Failed { reason }`, or `Skipped` |
 | `fit_coefficients` | Cubic [a, b, c, d] if fit succeeded |
+| `fit_quality` | `FitQuality` (R², RSS, max residual, min pivot) or None |
 | `crossing_status` | `Found`, `NotFoundInRange`, or `NotAttempted` |
 | `selected_strength` | s* applied |
 | `selection_mode` | How s* was chosen (see Selection modes above) |
+| `fallback_reason` | `FallbackReason` enum or None (see Stage 7c) |
+| `robustness` | `RobustnessFlags` (monotonicity, LOO, condition) or None |
 | `budget_reachable` | Whether the target P0 is achievable |
 | `measured_artifact_ratio` | P_total(s*) after final sharpen |
 | `measured_metric_value` | Mode-adjusted metric of the final output |
+| `metric_components` | `MetricBreakdown` of the final output (component-wise scores) |
+| `timing` | `StageTiming` — per-stage microsecond wall-clock times |
 | `provenance` | Per-stage faithfulness classification (see `StageProvenance`) |

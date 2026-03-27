@@ -244,6 +244,7 @@ mod tests {
                 strength,
                 artifact_ratio,
                 metric_value: artifact_ratio, // default: metric = raw ratio
+                breakdown: None,
             })
             .collect()
     }
@@ -326,10 +327,10 @@ mod tests {
     fn fallback_uses_metric_value_not_artifact_ratio() {
         // metric_value differs from artifact_ratio (simulating RelativeToBase mode).
         let samples = vec![
-            ProbeSample { strength: 0.5, artifact_ratio: 0.010, metric_value: 0.005 },
-            ProbeSample { strength: 1.0, artifact_ratio: 0.015, metric_value: 0.010 },
-            ProbeSample { strength: 2.0, artifact_ratio: 0.025, metric_value: 0.020 },
-            ProbeSample { strength: 3.0, artifact_ratio: 0.040, metric_value: 0.035 },
+            ProbeSample { strength: 0.5, artifact_ratio: 0.010, metric_value: 0.005, breakdown: None },
+            ProbeSample { strength: 1.0, artifact_ratio: 0.015, metric_value: 0.010, breakdown: None },
+            ProbeSample { strength: 2.0, artifact_ratio: 0.025, metric_value: 0.020, breakdown: None },
+            ProbeSample { strength: 3.0, artifact_ratio: 0.040, metric_value: 0.035, breakdown: None },
         ];
         // P0 = 0.015 in relative terms: s=1.0 has metric_value=0.010 <= 0.015.
         let result = find_sharpness_direct(&samples, 0.015).unwrap();

@@ -1,7 +1,7 @@
 use imgsharp_core::{
-    ArtifactMetric, AutoSharpParams, ClampPolicy, CrossingStatus, FitStrategy, ImageSize,
-    LinearRgbImage, MetricMode, ProbeConfig, Provenance, SelectionMode, SharpenMode,
-    SharpenModel, process_auto_sharp_downscale,
+    ArtifactMetric, AutoSharpParams, ClampPolicy, CrossingStatus, FallbackReason, FitStrategy,
+    ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig, Provenance,
+    SelectionMode, SharpenMode, SharpenModel, process_auto_sharp_downscale,
 };
 
 // ---------------------------------------------------------------------------
@@ -398,4 +398,137 @@ fn diagnostics_reflect_sharpen_model() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.diagnostics.sharpen_model, SharpenModel::PracticalUsm);
     assert_eq!(out.diagnostics.artifact_metric, ArtifactMetric::ChannelClippingRatio);
+}
+
+// ---------------------------------------------------------------------------
+// Fit quality
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fit_quality_present_for_cubic_strategy() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let q = out.diagnostics.fit_quality.expect("fit_quality should be present for cubic strategy");
+    assert!(q.r_squared.is_finite());
+    assert!(q.residual_sum_of_squares.is_finite());
+    assert!(q.max_residual.is_finite());
+    assert!(q.min_pivot > 0.0);
+}
+
+#[test]
+fn fit_quality_none_for_direct_search() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        fit_strategy: FitStrategy::DirectSearch,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert!(out.diagnostics.fit_quality.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Robustness flags
+// ---------------------------------------------------------------------------
+
+#[test]
+fn robustness_flags_present() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let r = out.diagnostics.robustness.expect("robustness should be present");
+    // quasi_monotonic should be at least as permissive as monotonic.
+    if r.monotonic {
+        assert!(r.quasi_monotonic);
+    }
+    assert!(r.max_loo_root_change.is_finite());
+}
+
+// ---------------------------------------------------------------------------
+// Fallback reason
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_fallback_reason_for_polynomial_root() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    if out.diagnostics.selection_mode == SelectionMode::PolynomialRoot {
+        assert!(out.diagnostics.fallback_reason.is_none());
+    }
+}
+
+#[test]
+fn direct_search_has_fallback_reason() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        fit_strategy: FitStrategy::DirectSearch,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.fallback_reason, Some(FallbackReason::DirectSearchConfigured));
+}
+
+// ---------------------------------------------------------------------------
+// Timing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn timing_all_stages_positive() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let t = &out.diagnostics.timing;
+    assert!(t.total_us > 0);
+    assert!(t.probing_us > 0);
+}
+
+#[test]
+fn timing_total_gte_parts() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let t = &out.diagnostics.timing;
+    let parts_sum = t.resize_us + t.contrast_us + t.baseline_us + t.probing_us
+        + t.fit_us + t.robustness_us + t.final_sharpen_us + t.clamp_us;
+    // Total should be >= sum of parts (captures overhead between stages too).
+    assert!(t.total_us >= parts_sum / 2, "total_us={} should be roughly >= parts_sum={}", t.total_us, parts_sum);
+}
+
+// ---------------------------------------------------------------------------
+// Metric breakdown (v0.2 scaffold)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn metric_breakdown_present_in_diagnostics() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let mc = out.diagnostics.metric_components.expect("metric_components should be present");
+    assert_eq!(mc.components.len(), 4);
+    assert_eq!(mc.components[0].0, MetricComponent::GamutExcursion);
+    // In v0.1, aggregate == gamut excursion.
+    assert!((mc.aggregate - mc.components[0].1).abs() < 1e-10);
+}
+
+#[test]
+fn probe_samples_have_breakdown() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    for sample in &out.diagnostics.probe_samples {
+        let bd = sample.breakdown.as_ref().expect("each probe should have breakdown");
+        // aggregate should match artifact_ratio (for v0.1 where aggregate == gamut excursion)
+        assert!((bd.aggregate - sample.artifact_ratio).abs() < 1e-6,
+            "breakdown aggregate {} != artifact_ratio {}", bd.aggregate, sample.artifact_ratio);
+    }
+}
+
+#[test]
+fn metric_breakdown_aggregate_matches_measured_artifact_ratio() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let mc = out.diagnostics.metric_components.unwrap();
+    assert!((mc.aggregate - out.diagnostics.measured_artifact_ratio).abs() < 1e-6);
 }

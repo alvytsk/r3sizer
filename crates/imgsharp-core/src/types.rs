@@ -372,11 +372,105 @@ impl AutoSharpParams {
 }
 
 // ---------------------------------------------------------------------------
+// Fit quality and robustness
+// ---------------------------------------------------------------------------
+
+/// Quality metrics for the polynomial fit.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct FitQuality {
+    /// Sum of squared residuals between fitted polynomial and data points.
+    pub residual_sum_of_squares: f64,
+    /// Coefficient of determination (1.0 = perfect fit, 0.0 = no better than mean).
+    pub r_squared: f64,
+    /// Largest absolute residual among all data points.
+    pub max_residual: f64,
+    /// Smallest pivot encountered during Gaussian elimination (condition proxy).
+    pub min_pivot: f64,
+}
+
+/// Robustness assessment of the probe data and fit.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RobustnessFlags {
+    /// P(s) is non-decreasing across all probes.
+    pub monotonic: bool,
+    /// At most one monotonicity violation.
+    pub quasi_monotonic: bool,
+    /// R^2 exceeds the quality threshold (0.85).
+    pub r_squared_ok: bool,
+    /// Fit matrix is well-conditioned (min_pivot > threshold).
+    pub well_conditioned: bool,
+    /// Leave-one-out root is stable (max relative change < threshold).
+    pub loo_stable: bool,
+    /// Largest relative change in s* across leave-one-out refits.
+    pub max_loo_root_change: f64,
+}
+
+/// Why the pipeline fell back from polynomial root to sample-based selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackReason {
+    /// Cubic fit failed numerically (singular matrix, insufficient data).
+    FitFailed,
+    /// Fit succeeded but leave-one-out check showed instability.
+    FitUnstable,
+    /// Polynomial root exists but falls outside the probed interval.
+    RootOutOfRange,
+    /// Probe metric values are non-monotonic — fit may be unreliable.
+    MetricNonMonotonic,
+    /// Target artifact budget is structurally unreachable (baseline already exceeds P0).
+    BudgetTooStrictForContent,
+    /// User configured DirectSearch strategy — fit was not attempted.
+    DirectSearchConfigured,
+}
+
+/// Per-stage wall-clock timing in microseconds.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct StageTiming {
+    pub resize_us: u64,
+    pub contrast_us: u64,
+    pub baseline_us: u64,
+    /// Wall-clock time for the entire probe loop (parallel or sequential).
+    pub probing_us: u64,
+    pub fit_us: u64,
+    pub robustness_us: u64,
+    pub final_sharpen_us: u64,
+    pub clamp_us: u64,
+    pub total_us: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Composite metric types (v0.2 scaffold)
+// ---------------------------------------------------------------------------
+
+/// Individual components of the composite artifact metric.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetricComponent {
+    /// Fraction of channel values outside [0, 1] (existing metric_v0).
+    GamutExcursion,
+    /// Anomalous oscillations near strong edges (v0.2 — not yet implemented).
+    HaloRinging,
+    /// Local contrast exceeding reasonable edge envelope (v0.2 — not yet implemented).
+    EdgeOvershoot,
+    /// Loss of micro-texture or unnatural over-sharpening (v0.2 — not yet implemented).
+    TextureFlattening,
+}
+
+/// Per-component breakdown of the composite artifact metric.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricBreakdown {
+    /// Individual component scores with their labels.
+    pub components: Vec<(MetricComponent, f32)>,
+    /// Weighted aggregate scalar used for fitting and selection.
+    pub aggregate: f32,
+}
+
+// ---------------------------------------------------------------------------
 // Probe and fit result types
 // ---------------------------------------------------------------------------
 
 /// A single measured sample of the artifact-vs-strength relationship.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeSample {
     /// Sharpening strength `s`.
     pub strength: f32,
@@ -386,6 +480,9 @@ pub struct ProbeSample {
     /// - `AbsoluteTotal`: same as `artifact_ratio`
     /// - `RelativeToBase`: `max(0, artifact_ratio - baseline)`
     pub metric_value: f32,
+    /// Per-component breakdown of the artifact metric (v0.2 scaffold).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakdown: Option<MetricBreakdown>,
 }
 
 /// Cubic polynomial in f64 arithmetic (for numerical stability).
@@ -433,12 +530,23 @@ pub struct AutoSharpDiagnostics {
     // --- Fit / solve results ---
     pub fit_status: FitStatus,
     pub fit_coefficients: Option<CubicPolynomial>,
+    /// Quality metrics for the polynomial fit (residuals, R², condition).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit_quality: Option<FitQuality>,
     pub crossing_status: CrossingStatus,
+
+    // --- Robustness assessment ---
+    /// Robustness flags computed from probe data and fit quality.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robustness: Option<RobustnessFlags>,
 
     // --- Selection result ---
     /// Sharpening strength that was applied to produce the final image.
     pub selected_strength: f32,
     pub selection_mode: SelectionMode,
+    /// Why the polynomial root was not used (None when selection_mode == PolynomialRoot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<FallbackReason>,
     /// Whether the target artifact budget is achievable given the baseline and probe range.
     pub budget_reachable: bool,
 
@@ -447,6 +555,14 @@ pub struct AutoSharpDiagnostics {
     pub measured_artifact_ratio: f32,
     /// Metric value of the final output (relative or absolute depending on mode).
     pub measured_metric_value: f32,
+    /// Per-component breakdown of the final artifact metric (v0.2 scaffold).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric_components: Option<MetricBreakdown>,
+
+    // --- Timing ---
+    /// Per-stage wall-clock timing.
+    #[serde(default)]
+    pub timing: StageTiming,
 
     // --- Provenance ---
     /// Per-stage classification of how faithful the implementation is to the papers.

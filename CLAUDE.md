@@ -23,9 +23,12 @@ cargo clippy --workspace -- -D warnings
 # Run benchmarks
 cargo bench -p imgsharp-core
 
-# Run the CLI
+# Run the CLI (single file)
 cargo run -p imgsharp-cli -- --input <FILE> --output <FILE> --width <N> --height <N>
 cargo run -p imgsharp-cli -- --input photo.jpg --output out.png --width 800 --height 600 --diagnostics diag.json
+
+# Run the CLI (sweep mode)
+cargo run -p imgsharp-cli -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
 ```
 
 ## Architecture
@@ -34,20 +37,20 @@ Three crates with a strict dependency direction: `imgsharp-core` ← `imgsharp-i
 
 **`imgsharp-core`** — all image processing logic, no I/O. This is the library meant to be reused in a future Tauri GUI or WASM build. Modules map 1:1 to pipeline stages:
 
-- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `SharpenModel`, `MetricMode`, `ArtifactMetric`, `Provenance`, `StageProvenance`, `FitStatus`, `CrossingStatus`, `SelectionMode`, etc.)
+- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `SharpenModel`, `MetricMode`, `ArtifactMetric`, `Provenance`, `StageProvenance`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, etc.)
 - `color.rs` — sRGB ↔ linear RGB (IEC 61966-2-1), CIE Y luminance extraction, lightness-based RGB reconstruction
 - `resize.rs` — Lanczos3 downscale via `image` crate
 - `sharpen.rs` — unsharp mask (3-channel RGB and single-channel luminance) with hand-rolled separable Gaussian; **deliberately no clamping** so out-of-range values exist for the metric
 - `paper_sharpen.rs` — scaffold for paper-style lightness sharpening operator; currently delegates to `sharpen.rs`
-- `metrics.rs` — `channel_clipping_ratio` (per-channel fraction outside [0,1]) and `pixel_out_of_gamut_ratio` (per-pixel fraction); selectable via `ArtifactMetric` enum
-- `fit.rs` — 4×4 Vandermonde normal equations solved by Gaussian elimination with partial pivoting, all in **f64**; takes generic `(x, y)` pairs
+- `metrics.rs` — `channel_clipping_ratio` (per-channel fraction outside [0,1]) and `pixel_out_of_gamut_ratio` (per-pixel fraction); selectable via `ArtifactMetric` enum; `compute_metric_breakdown` produces component-wise `MetricBreakdown` (v0.2 composite metric scaffold)
+- `fit.rs` — 4×4 Vandermonde normal equations solved by Gaussian elimination with partial pivoting, all in **f64**; `fit_cubic_with_quality` returns `FitQuality` (R², residuals, min pivot); `check_monotonicity` validates probe sample ordering
 - `solve.rs` — Cardano's formula for cubic roots + fallback to best probe sample; returns `SolveResult` with `SelectionMode` and `CrossingStatus`
 - `contrast.rs` — placeholder contrast leveling (percentile stretch); real formula unknown
-- `pipeline.rs` — orchestrates all stages; measures baseline, supports lightness/RGB sharpening and absolute/relative metric modes; dispatches on `SharpenModel` and `ArtifactMetric`; emits per-stage `Provenance` tags; public entry point is `process_auto_sharp_downscale`
+- `pipeline.rs` — orchestrates all stages; measures baseline, supports lightness/RGB sharpening and absolute/relative metric modes; dispatches on `SharpenModel` and `ArtifactMetric`; emits per-stage `Provenance` tags; computes `FitQuality`, `RobustnessFlags` (monotonicity + LOO stability), typed `FallbackReason`, per-stage `StageTiming`, and `MetricBreakdown` per probe; public entry point is `process_auto_sharp_downscale`
 
 **`imgsharp-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
 
-**`imgsharp-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting).
+**`imgsharp-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
 ## Key design decisions to preserve
 
@@ -58,6 +61,9 @@ Three crates with a strict dependency direction: `imgsharp-core` ← `imgsharp-i
 - **Lightness-based sharpening is the default** — `SharpenMode::Lightness` sharpens CIE Y luminance, then reconstructs RGB via `k = L'/L`. This is paper-supported (strong inference from paper, not yet explicitly confirmed). `SharpenMode::Rgb` is kept for comparison.
 - **Baseline measurement separates resize from sharpen artifacts** — `MetricMode::RelativeToBase` (default) subtracts the pre-sharpen baseline from each probe measurement, so the fitted metric only reflects sharpening-induced artifacts.
 - **`contrast.rs` is a documented stub** — `ContrastLevelingParams::enabled = false` by default. The function signature and placement are fixed; only the body needs replacement once the paper formula is known.
+- **Robustness checks gate the polynomial root** — monotonicity, R² > 0.85, condition number (min pivot > 1e-8), and leave-one-out stability are checked after fitting. If any check fails, the pipeline falls back to direct search and records a typed `FallbackReason`.
+- **Per-stage timing is always collected** — `StageTiming` records microsecond-resolution wall-clock time for each pipeline stage. Zero overhead when unused (no allocation, just `Instant::now()`).
+- **Composite metric scaffold is in place** — `MetricBreakdown` with `MetricComponent` variants (GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening) is populated per probe. For v0.1, only GamutExcursion is active; others return 0.0. The `aggregate` field preserves backward compatibility with the scalar fitting path.
 
 ## Algorithm summary
 
@@ -66,7 +72,8 @@ The core idea: select sharpening strength by constraining the fraction of channe
 ```
 linearize → downscale → [contrast leveling] → measure baseline P(base) →
 extract luminance L → probe N strengths { sharpen L(s_i) → reconstruct RGB → measure P(s_i) } →
-compute metric_value per mode → fit cubic P_hat(s) → solve P_hat(s*) = P0 →
+compute metric_value per mode → fit cubic P_hat(s) (with quality metrics) →
+robustness checks (monotonicity, LOO) → solve P_hat(s*) = P0 →
 final sharpen(s*) → clamp → output
 ```
 

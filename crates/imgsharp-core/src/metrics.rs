@@ -66,6 +66,34 @@ pub fn pixel_out_of_gamut_ratio(img: &LinearRgbImage) -> f32 {
     oog as f32 / total_pixels as f32
 }
 
+/// Compute a per-component metric breakdown.
+///
+/// In the current v0.1 implementation, only `GamutExcursion` is populated
+/// (delegating to the existing `channel_clipping_ratio` or `pixel_out_of_gamut_ratio`).
+/// The remaining components (`HaloRinging`, `EdgeOvershoot`, `TextureFlattening`)
+/// return 0.0 and are reserved for v0.2.
+///
+/// The `aggregate` field equals the gamut excursion score (weight = 1.0 for v0.1).
+pub fn compute_metric_breakdown(
+    img: &LinearRgbImage,
+    artifact_metric: crate::ArtifactMetric,
+) -> crate::MetricBreakdown {
+    let gamut = match artifact_metric {
+        crate::ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+        crate::ArtifactMetric::PixelOutOfGamutRatio => pixel_out_of_gamut_ratio(img),
+    };
+
+    crate::MetricBreakdown {
+        components: vec![
+            (crate::MetricComponent::GamutExcursion, gamut),
+            (crate::MetricComponent::HaloRinging, 0.0),
+            (crate::MetricComponent::EdgeOvershoot, 0.0),
+            (crate::MetricComponent::TextureFlattening, 0.0),
+        ],
+        aggregate: gamut, // v0.1: aggregate = gamut_excursion * 1.0
+    }
+}
+
 /// Deprecated alias for [`channel_clipping_ratio`].
 #[deprecated(note = "renamed to channel_clipping_ratio")]
 pub fn artifact_ratio(img: &LinearRgbImage) -> f32 {

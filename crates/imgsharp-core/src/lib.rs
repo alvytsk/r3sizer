@@ -27,9 +27,10 @@ pub mod types;
 pub use pipeline::process_auto_sharp_downscale;
 pub use types::{
     ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus,
-    CubicPolynomial, FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample,
-    ProbeConfig, ProcessOutput, Provenance, SelectionMode, SharpenMode, SharpenModel,
-    StageProvenance,
+    CubicPolynomial, FallbackReason, FitQuality, FitStatus, FitStrategy, ImageSize,
+    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, ProbeSample, ProbeConfig,
+    ProcessOutput, Provenance, RobustnessFlags, SelectionMode, SharpenMode, SharpenModel,
+    StageTiming, StageProvenance,
 };
 
 // ---------------------------------------------------------------------------

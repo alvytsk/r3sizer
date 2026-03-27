@@ -2,6 +2,19 @@
 
 ---
 
+## Recently completed (v0.1)
+
+The following items from the original roadmap are now implemented:
+
+- **Fit quality reporting** — `FitQuality` struct with R², residual sum of squares, max residual, min pivot. Computed in `fit::fit_cubic_with_quality`.
+- **Solver robustness checks** — `RobustnessFlags` with monotonicity, quasi-monotonicity, R² threshold, condition number, LOO stability. Computed in `pipeline.rs`.
+- **Typed fallback reasons** — `FallbackReason` enum with 6 variants, priority-ordered. Replaces implicit fallback logic.
+- **Per-stage timing** — `StageTiming` with microsecond wall-clock times for all 8 pipeline stages.
+- **Composite metric scaffold** — `MetricBreakdown` with `MetricComponent` variants. Only `GamutExcursion` is active in v0.1; others are stubs for v0.2.
+- **CLI sweep mode** — `--sweep-dir`, `--sweep-output-dir`, `--sweep-summary` flags. Batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+
+---
+
 ## Algorithm improvements
 
 ### Exact sharpening operator
@@ -39,6 +52,19 @@ in `types.rs`.  Current defaults are non-uniform, denser near zero.
 Instead of a fixed probe list, consider a two-pass approach: coarse scan to
 find the approximate crossing region, then dense probing near the crossing.
 This would reduce the number of expensive sharpen+measure operations.
+
+### Composite metric components (v0.2)
+The `MetricBreakdown` scaffold is in place with four `MetricComponent` variants.
+Next steps:
+1. Implement `HaloRinging` detection (edge profile analysis)
+2. Implement `EdgeOvershoot` measurement (gradient-based)
+3. Implement `TextureFlattening` detection (local variance comparison)
+4. Add configurable weights to `compute_metric_breakdown`
+5. Tune aggregate formula to balance components
+
+### Robustness threshold tuning
+Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.5) are engineering
+choices.  Use sweep mode across diverse image corpora to validate and tune.
 
 ---
 

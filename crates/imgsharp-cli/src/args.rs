@@ -11,12 +11,14 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Input image file (PNG, JPEG, BMP, ...).
-    #[arg(long, short = 'i', value_name = "FILE")]
-    pub input: PathBuf,
+    /// Not required when --sweep-dir is used.
+    #[arg(long, short = 'i', value_name = "FILE", required_unless_present = "sweep_dir")]
+    pub input: Option<PathBuf>,
 
     /// Output image file.  Format is inferred from the extension.
-    #[arg(long, short = 'o', value_name = "FILE")]
-    pub output: PathBuf,
+    /// Not required when --sweep-dir is used.
+    #[arg(long, short = 'o', value_name = "FILE", required_unless_present = "sweep_dir")]
+    pub output: Option<PathBuf>,
 
     /// Target width in pixels.
     #[arg(long, short = 'W')]
@@ -70,6 +72,20 @@ pub struct Cli {
     /// Artifact metric: "channel-clipping" (default) or "pixel-out-of-gamut".
     #[arg(long, default_value = "channel-clipping")]
     pub artifact_metric: ArtifactMetricArg,
+
+    // --- Sweep mode ---
+
+    /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
+    #[arg(long, value_name = "DIR")]
+    pub sweep_dir: Option<PathBuf>,
+
+    /// Output directory for processed images in sweep mode.
+    #[arg(long, value_name = "DIR", requires = "sweep_dir")]
+    pub sweep_output_dir: Option<PathBuf>,
+
+    /// Path to write the sweep summary JSON file.
+    #[arg(long, value_name = "FILE", requires = "sweep_dir")]
+    pub sweep_summary: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------

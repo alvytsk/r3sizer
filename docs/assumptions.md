@@ -34,6 +34,12 @@ what is an engineering approximation or placeholder.
 | Lightness-based sharpening with RGB reconstruction | Implemented in `color::reconstruct_rgb_from_lightness` (paper-supported) |
 | Two artifact metric interpretations | `channel_clipping_ratio` and `pixel_out_of_gamut_ratio` in `metrics.rs` |
 | Parallel probe evaluation | `rayon::par_iter` in `pipeline.rs` (default `parallel` feature) |
+| Fit quality reporting (R², residuals, condition) | Implemented in `fit::fit_cubic_with_quality` |
+| Solver robustness checks (monotonicity, LOO stability) | Implemented in `pipeline.rs` with `RobustnessFlags` |
+| Typed fallback reasons | `FallbackReason` enum with 6 variants in `types.rs` |
+| Per-stage timing | `StageTiming` struct with microsecond wall-clock times |
+| Composite metric scaffold | `MetricBreakdown` + `MetricComponent` in `metrics.rs` (v0.2 foundation) |
+| CLI sweep mode | Batch processing with aggregate statistics in `sweep.rs` |
 
 ---
 
@@ -51,6 +57,10 @@ what is an engineering approximation or placeholder.
 | **RelativeToBase metric mode** | Engineering choice — isolates sharpening artifacts from resize artifacts; assumes additive independence | May not be how the paper defines P(s); replace with paper-exact metric once known |
 | **Probe strengths [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]** | Non-uniform, denser near zero where crossings typically occur | Adjust via `ProbeConfig` once paper values are known |
 | **(0, 0) anchor in RelativeToBase fit** | Physically motivated: zero sharpening = zero added artifacts | Remove if paper uses a different fitting strategy |
+| **R² threshold = 0.85 for fit acceptance** | Engineering choice — balances false rejection of good fits vs. accepting poor ones | Tune based on empirical data across image corpus |
+| **Min pivot threshold = 1e-8 for condition check** | Engineering choice — well below the 1e-14 singularity threshold, catches ill-conditioned systems | Adjust if false positives occur on valid data |
+| **LOO stability threshold = 0.5 (50% relative root change)** | Engineering choice — allows moderate sensitivity while catching catastrophic instability | Tune based on sweep-mode analysis of real images |
+| **Composite metric with single active component** | v0.2 scaffold — `MetricBreakdown` aggregates four components but only `GamutExcursion` is populated in v0.1 | Activate `HaloRinging`, `EdgeOvershoot`, `TextureFlattening` in v0.2 |
 
 ---
 

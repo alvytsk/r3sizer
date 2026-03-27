@@ -135,7 +135,9 @@ For each strength `s_i`:
    - `AbsoluteTotal`: `metric_value = p_total`
    - `RelativeToBase`: `metric_value = max(0, p_total - baseline)`
 
-4. **Collect** — `ProbeSample { strength: s_i, artifact_ratio: p_total, metric_value }`
+4. **Breakdown** — `compute_metric_breakdown(&sharpened, artifact_metric)` returns a `MetricBreakdown` with per-component scores (v0.1: only `GamutExcursion` is populated; `HaloRinging`, `EdgeOvershoot`, `TextureFlattening` return 0.0). The `aggregate` field equals the scalar metric value.
+
+5. **Collect** — `ProbeSample { strength: s_i, artifact_ratio: p_total, metric_value, breakdown: Some(breakdown) }`
 
 **Parallelism:** With the `parallel` feature (default, enabled via `rayon`), probes run in parallel using `par_iter().map(probe_one).collect()`. Without it, probes run sequentially.
 
@@ -179,17 +181,22 @@ Probe samples are converted to `(f64, f64)` pairs of `(strength, metric_value)`.
 Two strategies:
 
 **`FitStrategy::Cubic`** (default):
-1. `fit::fit_cubic(&fit_data)` — least-squares cubic via Vandermonde normal equations
-2. On success: `solve::find_sharpness(poly, p0, s_min, s_max, &probe_samples)`
-3. On failure: falls back to `find_sharpness_direct` (direct sample search)
+1. `fit::check_monotonicity(&probe_samples)` — verifies probe data is non-decreasing
+2. `fit::fit_cubic_with_quality(&fit_data)` — least-squares cubic + `FitQuality` (R², residuals, min pivot)
+3. On success: robustness checks (LOO stability), then `solve::find_sharpness(poly, p0, s_min, s_max, &probe_samples)`
+4. On failure (or robustness failure): falls back to `find_sharpness_direct` (direct sample search) with typed `FallbackReason`
 
 **`FitStrategy::DirectSearch`:**
 - Skips fitting entirely; calls `find_sharpness_direct` directly
 - `FitStatus::Skipped`
 
+### Monotonicity check
+
+`fit::check_monotonicity(&probe_samples)` — O(N) scan of sorted probe samples. Returns `(monotonic: bool, quasi_monotonic: bool)`. Non-monotonic data triggers `FallbackReason::MetricNonMonotonic` and falls back to direct search.
+
 ### Cubic fit internals
 
-`crates/imgsharp-core/src/fit.rs` — `fit_cubic()`
+`crates/imgsharp-core/src/fit.rs` — `fit_cubic_with_quality()`
 
 Fits `P_hat(s) = a*s^3 + b*s^2 + c*s + d` by solving the 4x4 Vandermonde normal equations:
 
@@ -201,7 +208,51 @@ where `V[k][j] = x_k^j` (ascending power).
 
 **All arithmetic uses f64.** The normal-equation matrix contains terms up to `x^6`; for `x = 4.0`, `x^6 = 4096`. Using f32 would cause catastrophic cancellation in Gaussian elimination.
 
-The 4x4 system is solved by Gaussian elimination with partial pivoting (pivot threshold: 1e-14). Returns `CoreError::FitFailed` if numerically singular.
+The 4x4 system is solved by `gauss_solve_with_pivots` — Gaussian elimination with partial pivoting (pivot threshold: 1e-14) that also tracks the minimum pivot magnitude. Returns `CoreError::FitFailed` if numerically singular.
+
+After solving, `FitQuality` is computed:
+- **R²**: coefficient of determination — `1 - (RSS / TSS)` where TSS is total sum of squares
+- **Residual sum of squares**: sum of `(predicted - actual)²` across all data points
+- **Max residual**: largest absolute error
+- **Min pivot**: smallest pivot magnitude during elimination (condition number proxy)
+
+### LOO stability check
+
+After a successful fit and solve, the pipeline performs leave-one-out cross-validation:
+
+1. For each of N probe samples, refit the cubic dropping that sample
+2. Re-solve for the root using the leave-one-out polynomial
+3. Record `|s*_full - s*_drop_i| / s*_full`
+4. `max_loo_root_change` = maximum across all N drops
+5. `loo_stable = max_loo_root_change < 0.5`
+
+If `!loo_stable`, the pipeline falls back to direct search with `FallbackReason::FitUnstable`.
+
+N=7 refits of a 4x4 system is negligible cost (~100μs total).
+
+### Robustness flags assembly
+
+`RobustnessFlags` is assembled from:
+
+| Flag | Source | Threshold |
+|------|--------|-----------|
+| `monotonic` | `check_monotonicity` | zero inversions |
+| `quasi_monotonic` | `check_monotonicity` | ≤ 1 inversion |
+| `r_squared_ok` | `FitQuality` | R² > 0.85 |
+| `well_conditioned` | `FitQuality` | min_pivot > 1e-8 |
+| `loo_stable` | LOO cross-validation | max change < 0.5 |
+| `max_loo_root_change` | LOO cross-validation | raw value |
+
+### Fallback reason determination
+
+When the pipeline does not use the polynomial root, `determine_fallback_reason` maps the first matching condition to a `FallbackReason` (priority order):
+
+1. `BudgetTooStrictForContent` — budget unreachable (baseline > P0)
+2. `DirectSearchConfigured` — `FitStrategy::DirectSearch`
+3. `FitFailed` — polynomial fit returned an error
+4. `MetricNonMonotonic` — probe data not monotonically increasing
+5. `FitUnstable` — LOO cross-validation shows unstable root
+6. `RootOutOfRange` — fit succeeded but no root in [s_min, s_max]
 
 ---
 
@@ -293,15 +344,20 @@ Assembles `AutoSharpDiagnostics` with:
 | `metric_mode` / `artifact_metric` | From params |
 | `target_artifact_ratio` | P0 from params |
 | `baseline_artifact_ratio` | Stage 4 measurement |
-| `probe_samples` | Stage 5 probe results |
+| `probe_samples` | Stage 5 probe results (each with optional `MetricBreakdown`) |
 | `fit_status` | `Success` / `Failed { reason }` / `Skipped` |
 | `fit_coefficients` | `Some(CubicPolynomial)` if fit succeeded |
+| `fit_quality` | `Some(FitQuality)` with R², RSS, max residual, min pivot |
 | `crossing_status` | `Found` / `NotFoundInRange` / `NotAttempted` |
 | `selected_strength` | s* from solver |
 | `selection_mode` | How s* was chosen |
+| `fallback_reason` | `Some(FallbackReason)` when not using polynomial root |
+| `robustness` | `Some(RobustnessFlags)` — monotonicity, LOO, condition |
 | `budget_reachable` | Whether P0 is achievable |
 | `measured_artifact_ratio` | Actual P_total(s*) pre-clamp |
 | `measured_metric_value` | Mode-adjusted final metric |
+| `metric_components` | `Some(MetricBreakdown)` of final output |
+| `timing` | `StageTiming` — per-stage microsecond wall-clock times |
 | `provenance` | `StageProvenance` — per-stage faithfulness classification |
 
 Returns `ProcessOutput { image, diagnostics }`.
@@ -334,7 +390,8 @@ contrast leveling: disabled
 ```
 
 ### `ProbeSample`
-Triple of `(strength, artifact_ratio, metric_value)` in f32.
+Contains `(strength, artifact_ratio, metric_value)` in f32, plus an optional
+`breakdown: Option<MetricBreakdown>` with per-component scores.
 
 ### `CubicPolynomial`
 Coefficients `(a, b, c, d)` in f64. `P_hat(s) = a*s^3 + b*s^2 + c*s + d`.
@@ -354,6 +411,27 @@ Coefficients `(a, b, c, d)` in f64. `P_hat(s) = a*s^3 + b*s^2 + c*s + d`.
 | `EmptyImage` | Zero-dimension image construction |
 
 The pipeline is designed to **always return a result**. `FitFailed` triggers the direct-search fallback. `NoValidRoot` is structurally impossible when at least 4 probes are configured (validation enforces this).
+
+---
+
+## Per-Stage Timing
+
+Every pipeline invocation records wall-clock microsecond timing in a `StageTiming` struct.
+Each stage is bracketed by `Instant::now()` / `.elapsed().as_micros()`:
+
+| Field | Pipeline stage |
+|-------|---------------|
+| `resize_us` | Stage 2: downscale |
+| `contrast_us` | Stage 3: contrast leveling (0 when disabled) |
+| `baseline_us` | Stage 4: baseline measurement |
+| `probing_us` | Stage 5: entire probe loop (all strengths, including parallel dispatch) |
+| `fit_us` | Stage 6: cubic polynomial fit |
+| `robustness_us` | Stage 7b: monotonicity + LOO stability checks |
+| `final_sharpen_us` | Stage 8: final sharpening at s* |
+| `clamp_us` | Stage 10: clamping + final measurement |
+| `total_us` | End-to-end (includes validation and diagnostics assembly) |
+
+Timing overhead is negligible — only `Instant::now()` calls between existing stages.
 
 ---
 
