@@ -1,15 +1,10 @@
-import { Badge } from "@/components/ui/badge";
 import type { AutoSharpDiagnostics } from "@/types/wasm-types";
 
-const selectionColors: Record<string, string> = {
-  polynomial_root:
-    "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  best_sample_within_budget:
-    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  least_bad_sample:
-    "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
-  budget_unreachable:
-    "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+const selectionStyles: Record<string, { dot: string; text: string }> = {
+  polynomial_root: { dot: "bg-chart-3", text: "text-chart-3" },
+  best_sample_within_budget: { dot: "bg-primary", text: "text-primary" },
+  least_bad_sample: { dot: "bg-chart-5", text: "text-chart-5" },
+  budget_unreachable: { dot: "bg-destructive", text: "text-destructive" },
 };
 
 const selectionLabels: Record<string, string> = {
@@ -33,25 +28,37 @@ export function StatusIndicators({
 }: {
   diagnostics: AutoSharpDiagnostics;
 }) {
+  const style = selectionStyles[diagnostics.selection_mode] ?? {
+    dot: "bg-muted-foreground",
+    text: "text-muted-foreground",
+  };
+
   return (
-    <div className="flex flex-wrap gap-2">
-      <Badge
-        variant="outline"
-        className={selectionColors[diagnostics.selection_mode] ?? ""}
-      >
-        {selectionLabels[diagnostics.selection_mode] ??
-          diagnostics.selection_mode}
-      </Badge>
+    <div className="flex flex-wrap items-center gap-3">
+      {/* Selection mode */}
+      <div className="flex items-center gap-1.5">
+        <div className={`w-2 h-2 rounded-full ${style.dot}`} />
+        <span className={`text-[13px] font-mono font-medium ${style.text}`}>
+          {selectionLabels[diagnostics.selection_mode] ?? diagnostics.selection_mode}
+        </span>
+      </div>
 
-      <Badge variant={diagnostics.budget_reachable ? "default" : "destructive"}>
-        {diagnostics.budget_reachable ? "Budget OK" : "Budget Unreachable"}
-      </Badge>
+      {/* Budget status */}
+      <div className="flex items-center gap-1.5">
+        <div className={`w-2 h-2 rounded-full ${diagnostics.budget_reachable ? "bg-chart-3" : "bg-destructive"}`} />
+        <span className={`text-[13px] font-mono ${diagnostics.budget_reachable ? "text-chart-3" : "text-destructive"}`}>
+          {diagnostics.budget_reachable ? "Budget OK" : "Unreachable"}
+        </span>
+      </div>
 
+      {/* Fallback reason */}
       {diagnostics.fallback_reason && (
-        <Badge variant="secondary">
-          {fallbackLabels[diagnostics.fallback_reason] ??
-            diagnostics.fallback_reason}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-primary/60" />
+          <span className="text-[13px] font-mono text-primary/80">
+            {fallbackLabels[diagnostics.fallback_reason] ?? diagnostics.fallback_reason}
+          </span>
+        </div>
       )}
     </div>
   );

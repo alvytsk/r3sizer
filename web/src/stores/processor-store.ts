@@ -27,6 +27,7 @@ interface ProcessorState {
   outputWidth: number;
   outputHeight: number;
   diagnostics: AutoSharpDiagnostics | null;
+  lastProcessedParams: AutoSharpParams | null;
 
   // Actions
   setInput: (
@@ -57,6 +58,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   outputWidth: 0,
   outputHeight: 0,
   diagnostics: null,
+  lastProcessedParams: null,
 
   setInput: (file, rgbaData, width, height) => {
     const state = get();
@@ -140,6 +142,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
         outputWidth: result.outputWidth,
         outputHeight: result.outputHeight,
         diagnostics: result.diagnostics,
+        lastProcessedParams: { ...state.params },
         isProcessing: false,
       });
     } catch (e) {
@@ -164,5 +167,6 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       outputWidth: 0,
       outputHeight: 0,
       diagnostics: null,
+      lastProcessedParams: null,
     }),
 }));

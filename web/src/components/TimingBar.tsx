@@ -1,20 +1,20 @@
 import type { StageTiming } from "@/types/wasm-types";
 
-const STAGES: { key: keyof StageTiming; label: string; color: string }[] = [
-  { key: "resize_us", label: "Resize", color: "bg-blue-500" },
-  { key: "contrast_us", label: "Contrast", color: "bg-purple-500" },
-  { key: "baseline_us", label: "Baseline", color: "bg-green-500" },
-  { key: "probing_us", label: "Probing", color: "bg-yellow-500" },
-  { key: "fit_us", label: "Fit", color: "bg-orange-500" },
-  { key: "robustness_us", label: "Robustness", color: "bg-red-500" },
-  { key: "final_sharpen_us", label: "Final Sharpen", color: "bg-pink-500" },
-  { key: "clamp_us", label: "Clamp", color: "bg-indigo-500" },
+const STAGES: { key: keyof StageTiming; label: string; color: string; barColor: string }[] = [
+  { key: "resize_us", label: "Resize", color: "bg-blue-400", barColor: "bg-blue-400/80" },
+  { key: "contrast_us", label: "Contrast", color: "bg-purple-400", barColor: "bg-purple-400/80" },
+  { key: "baseline_us", label: "Baseline", color: "bg-emerald-400", barColor: "bg-emerald-400/80" },
+  { key: "probing_us", label: "Probing", color: "bg-amber-400", barColor: "bg-amber-400/80" },
+  { key: "fit_us", label: "Fit", color: "bg-orange-400", barColor: "bg-orange-400/80" },
+  { key: "robustness_us", label: "Robust.", color: "bg-red-400", barColor: "bg-red-400/80" },
+  { key: "final_sharpen_us", label: "Sharpen", color: "bg-pink-400", barColor: "bg-pink-400/80" },
+  { key: "clamp_us", label: "Clamp", color: "bg-indigo-400", barColor: "bg-indigo-400/80" },
 ];
 
 function formatUs(us: number): string {
   if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(1)}s`;
   if (us >= 1_000) return `${(us / 1_000).toFixed(1)}ms`;
-  return `${us}us`;
+  return `${us}\u00b5s`;
 }
 
 export function TimingBar({ timing }: { timing: StageTiming }) {
@@ -22,30 +22,37 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Pipeline timing</span>
-        <span className="font-mono">{formatUs(timing.total_us)} total</span>
+      <div className="flex items-center justify-between text-xs font-mono">
+        <span className="uppercase tracking-[0.15em] text-primary/70">Pipeline</span>
+        <span className="text-foreground/80">{formatUs(timing.total_us)}</span>
       </div>
-      <div className="flex h-4 rounded overflow-hidden">
-        {STAGES.map(({ key, label, color }) => {
+
+      {/* Stacked bar */}
+      <div className="flex h-2.5 rounded-sm overflow-hidden bg-background border border-border/30">
+        {STAGES.map(({ key, label, barColor }) => {
           const pct = (timing[key] / total) * 100;
           if (pct < 0.5) return null;
           return (
             <div
               key={key}
-              className={`${color} relative group`}
+              className={`${barColor} transition-all duration-300`}
               style={{ width: `${pct}%` }}
               title={`${label}: ${formatUs(timing[key])}`}
             />
           );
         })}
       </div>
-      <div className="grid grid-cols-4 gap-1 text-[10px]">
+
+      {/* Legend grid */}
+      <div className="grid grid-cols-4 gap-x-2 gap-y-0.5">
         {STAGES.map(({ key, label, color }) => (
           <div key={key} className="flex items-center gap-1">
-            <div className={`w-2 h-2 rounded-sm ${color}`} />
-            <span className="text-muted-foreground">
-              {label}: {formatUs(timing[key])}
+            <div className={`w-1.5 h-1.5 rounded-[1px] ${color}`} />
+            <span className="text-[11px] font-mono text-muted-foreground truncate">
+              {label}
+            </span>
+            <span className="text-[11px] font-mono text-foreground/60 ml-auto">
+              {formatUs(timing[key])}
             </span>
           </div>
         ))}
