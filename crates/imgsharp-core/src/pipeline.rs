@@ -19,7 +19,7 @@ use crate::{
     fit::fit_cubic,
     metrics::artifact_ratio,
     resize::downscale,
-    sharpen::{unsharp_mask, unsharp_mask_single_channel},
+    sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness, find_sharpness_direct},
     AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FitStatus,
     FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample, ProcessOutput,
@@ -68,7 +68,9 @@ pub fn process_auto_sharp_downscale(
     // 5. Probe sharpening strengths
     // -------------------------------------------------------------------
     let strengths = params.probe_strengths.resolve()?;
-    let sigma = params.sharpen_sigma;
+
+    // Build the Gaussian kernel once — sigma is constant across all probes.
+    let kernel = make_kernel(params.sharpen_sigma)?;
 
     // Extract luminance once if using lightness mode (avoids recomputation per probe).
     let base_luminance = if matches!(params.sharpen_mode, SharpenMode::Lightness) {
@@ -77,27 +79,15 @@ pub fn process_auto_sharp_downscale(
         None
     };
 
-    let mut probe_samples: Vec<ProbeSample> = Vec::with_capacity(strengths.len());
-    for &s in &strengths {
-        let sharpened = sharpen_image(
-            &base,
-            base_luminance.as_deref(),
-            params.sharpen_mode,
-            s,
-            sigma,
-        )?;
-        let p_total = artifact_ratio(&sharpened);
-        let metric_value = compute_metric_value(
-            p_total,
-            baseline_artifact_ratio,
-            params.metric_mode,
-        );
-        probe_samples.push(ProbeSample {
-            strength: s,
-            artifact_ratio: p_total,
-            metric_value,
-        });
-    }
+    let probe_samples = probe_strengths(
+        &strengths,
+        &base,
+        base_luminance.as_deref(),
+        params.sharpen_mode,
+        params.metric_mode,
+        baseline_artifact_ratio,
+        &kernel,
+    )?;
 
     // -------------------------------------------------------------------
     // 6–7. Fit + solve (or direct search)
@@ -122,7 +112,7 @@ pub fn process_auto_sharp_downscale(
             (result, FitStatus::Skipped, None)
         }
 
-        FitStrategy::ForcedLinear | FitStrategy::Cubic => {
+        FitStrategy::Cubic => {
             match fit_cubic(&fit_data) {
                 Ok(poly) => {
                     let result =
@@ -170,7 +160,7 @@ pub fn process_auto_sharp_downscale(
         base_luminance.as_deref(),
         params.sharpen_mode,
         selected_strength,
-        sigma,
+        &kernel,
     )?;
 
     // -------------------------------------------------------------------
@@ -200,7 +190,17 @@ pub fn process_auto_sharp_downscale(
                 .fold(f32::NEG_INFINITY, f32::max);
             if max_val > 0.0 {
                 for v in final_image.pixels_mut() {
-                    *v /= max_val;
+                    // Divide by the positive maximum, then clamp negatives
+                    // that can survive from sharpening ringing.  Without this
+                    // clamp, negative values would produce NaN during the
+                    // subsequent linear→sRGB pow(x, 1/2.4) conversion.
+                    *v = (*v / max_val).max(0.0);
+                }
+            } else {
+                // Every channel value is <= 0 (degenerate image).
+                // Clamp to zero to avoid NaN in sRGB conversion.
+                for v in final_image.pixels_mut() {
+                    *v = 0.0;
                 }
             }
         }
@@ -234,23 +234,58 @@ pub fn process_auto_sharp_downscale(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Apply sharpening to the base image using the configured mode.
+/// Apply sharpening to the base image using the configured mode and a pre-built kernel.
 fn sharpen_image(
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
     mode: SharpenMode,
     amount: f32,
-    sigma: f32,
+    kernel: &[f32],
 ) -> Result<LinearRgbImage, CoreError> {
     match mode {
-        SharpenMode::Rgb => unsharp_mask(base, amount, sigma),
+        SharpenMode::Rgb => Ok(unsharp_mask_with_kernel(base, amount, kernel)),
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
             let w = base.width() as usize;
             let h = base.height() as usize;
-            let sharpened_l = unsharp_mask_single_channel(lum, w, h, amount, sigma)?;
+            let sharpened_l = unsharp_mask_single_channel_with_kernel(lum, w, h, amount, kernel);
             Ok(color::reconstruct_rgb_from_lightness(base, &sharpened_l))
         }
+    }
+}
+
+/// Run all probe strengths and collect `ProbeSample`s.
+///
+/// Each probe allocates a temporary sharpened image (W × H × 3 × 4 bytes) plus
+/// an equally-sized blur buffer inside the Gaussian pass.  In sequential mode
+/// these are freed before the next probe starts; with the `parallel` feature
+/// up to `rayon::current_num_threads()` images exist simultaneously.
+#[allow(clippy::too_many_arguments)]
+fn probe_strengths(
+    strengths: &[f32],
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    sharpen_mode: SharpenMode,
+    metric_mode: MetricMode,
+    baseline_artifact_ratio: f32,
+    kernel: &[f32],
+) -> Result<Vec<ProbeSample>, CoreError> {
+    let probe_one = |&s: &f32| -> Result<ProbeSample, CoreError> {
+        let sharpened = sharpen_image(base, base_luminance, sharpen_mode, s, kernel)?;
+        let p_total = artifact_ratio(&sharpened);
+        let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+        Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value })
+    };
+
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        strengths.par_iter().map(probe_one).collect()
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        strengths.iter().map(probe_one).collect()
     }
 }
 

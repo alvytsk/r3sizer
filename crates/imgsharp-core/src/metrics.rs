@@ -26,11 +26,17 @@ use crate::types::LinearRgbImage;
 ///
 /// Returns a value in `[0, 1]`. Returns `0.0` for an empty image.
 pub fn artifact_ratio(img: &LinearRgbImage) -> f32 {
-    let total = img.total_components();
+    let pixels = img.pixels();
+    let total = pixels.len();
     if total == 0 {
         return 0.0;
     }
-    let out_of_range = img.pixels().iter().filter(|&&v| !(0.0..=1.0).contains(&v)).count();
+    // Use integer accumulation instead of filter+count so LLVM can
+    // auto-vectorize the comparison → mask → add pattern.
+    let out_of_range: u32 = pixels
+        .iter()
+        .map(|&v| (!(0.0..=1.0).contains(&v)) as u32)
+        .sum();
     out_of_range as f32 / total as f32
 }
 

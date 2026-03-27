@@ -224,8 +224,6 @@ pub enum FitStrategy {
     Cubic,
     /// Skip fitting; pick best strength directly from probe samples.
     DirectSearch,
-    /// Force a linear (degree-1) fit. Useful for diagnostics.
-    ForcedLinear,
 }
 
 /// How to handle out-of-range values at the final output stage.
