@@ -39,7 +39,6 @@ function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
       <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50">
         Region Coverage
       </div>
-      {/* Stacked bar */}
       <div className="flex h-2 rounded-[2px] overflow-hidden bg-background border border-border/20">
         {REGION_LABELS.map(([, fracKey], i) => {
           const pct = (coverage[fracKey] as number) * 100;
@@ -53,7 +52,6 @@ function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
           );
         })}
       </div>
-      {/* Per-class rows */}
       <div className="space-y-0.5">
         {REGION_LABELS.map(([countKey, fracKey, label], i) => {
           const frac = coverage[fracKey] as number;
@@ -118,8 +116,6 @@ function Readout({ label, value }: { label: string; value: string | number }) {
     </div>
   );
 }
-
-// ─── Diagnosis card ──────────────────────────────────────────────────────────
 
 type Severity = "ok" | "warn" | "error";
 
@@ -307,8 +303,6 @@ function DiagnosisCard({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
   );
 }
 
-// ─── Fit tab components ───────────────────────────────────────────────────────
-
 type ChipVariant = "ok" | "warn" | "error" | "neutral";
 
 const CHIP_STYLES: Record<ChipVariant, { border: string; bg: string; text: string }> = {
@@ -400,7 +394,6 @@ function R2Gauge({ value }: { value: number }) {
           </span>
         </div>
       </div>
-      {/* Track + fill */}
       <div className="relative h-1.5">
         <div className="absolute inset-0 rounded-full bg-border/25" />
         <div
@@ -409,13 +402,11 @@ function R2Gauge({ value }: { value: number }) {
           }`}
           style={{ width: `${pct}%` }}
         />
-        {/* Threshold tick */}
         <div
           className="absolute top-1/2 -translate-y-1/2 w-px h-3 bg-primary/45"
           style={{ left: `${THRESHOLD * 100}%` }}
         />
       </div>
-      {/* Threshold label */}
       <div className="relative h-3">
         <span
           className="absolute text-[9px] font-mono text-muted-foreground/35 -translate-x-1/2"
@@ -534,33 +525,33 @@ function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
   );
 }
 
-// ─── Provenance ───────────────────────────────────────────────────────────────
-
-const provenanceColors: Record<string, string> = {
-  paper_confirmed: "text-chart-3",
-  paper_supported: "text-chart-2",
-  engineering_choice: "text-primary",
-  engineering_proxy: "text-chart-5",
-  placeholder: "text-destructive",
+const PROVENANCE_STYLES: Record<string, { dot: string; text: string; label: string }> = {
+  paper_confirmed:   { dot: "bg-chart-3",     text: "text-chart-3",          label: "Confirmed"   },
+  paper_supported:   { dot: "bg-chart-2",     text: "text-chart-2",          label: "Supported"   },
+  engineering_choice:{ dot: "bg-primary",     text: "text-primary",          label: "Eng. Choice" },
+  engineering_proxy: { dot: "bg-chart-5",     text: "text-chart-5",          label: "Eng. Proxy"  },
+  placeholder:       { dot: "bg-destructive", text: "text-destructive",      label: "Placeholder" },
 };
 
-const provenanceDots: Record<string, string> = {
-  paper_confirmed: "bg-chart-3",
-  paper_supported: "bg-chart-2",
-  engineering_choice: "bg-primary",
-  engineering_proxy: "bg-chart-5",
-  placeholder: "bg-destructive",
+const FIT_STATUS_VARIANTS: Record<string, ChipVariant> = {
+  success: "ok",
+  failed: "error",
+  skipped: "warn",
 };
 
-const provenanceLabels: Record<string, string> = {
-  paper_confirmed: "Confirmed",
-  paper_supported: "Supported",
-  engineering_choice: "Eng. Choice",
-  engineering_proxy: "Eng. Proxy",
-  placeholder: "Placeholder",
+function fitStatusVariant(status: string | undefined): ChipVariant {
+  if (!status) return "neutral";
+  return FIT_STATUS_VARIANTS[status] ?? "neutral";
+}
+
+const CROSSING_STATUS_VARIANTS: Record<string, ChipVariant> = {
+  found: "ok",
+  not_found_in_range: "warn",
 };
 
-// ─── Main panel ───────────────────────────────────────────────────────────────
+function crossingStatusVariant(status: string): ChipVariant {
+  return CROSSING_STATUS_VARIANTS[status] ?? "neutral";
+}
 
 export function DiagnosticsPanel() {
   const diagnostics = useProcessorStore((s) => s.diagnostics);
@@ -615,7 +606,6 @@ export function DiagnosticsPanel() {
               value={diagnostics.baseline_artifact_ratio.toExponential(3)}
             />
 
-            {/* v0.2 metric breakdown */}
             {diagnostics.metric_components && (
               <div className="mt-2 pt-2 border-t border-border/20 space-y-0.5">
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50 mb-1">
@@ -653,30 +643,19 @@ export function DiagnosticsPanel() {
         {/* ── Fit ── */}
         <TabsContent value="fit" className="space-y-3 mt-3">
 
-          {/* Status chips */}
           <div className="flex gap-2">
             <StatusChip
               heading="Fit"
               value={diagnostics.fit_status?.status ?? "unknown"}
-              variant={
-                diagnostics.fit_status?.status === "success" ? "ok"
-                : diagnostics.fit_status?.status === "failed" ? "error"
-                : diagnostics.fit_status?.status === "skipped" ? "warn"
-                : "neutral"
-              }
+              variant={fitStatusVariant(diagnostics.fit_status?.status)}
             />
             <StatusChip
               heading="Root"
               value={diagnostics.crossing_status}
-              variant={
-                diagnostics.crossing_status === "found" ? "ok"
-                : diagnostics.crossing_status === "not_found_in_range" ? "warn"
-                : "neutral"
-              }
+              variant={crossingStatusVariant(diagnostics.crossing_status)}
             />
           </div>
 
-          {/* Fit failure reason */}
           {"status" in diagnostics.fit_status &&
             diagnostics.fit_status.status !== "success" &&
             "reason" in diagnostics.fit_status && (
@@ -685,14 +664,12 @@ export function DiagnosticsPanel() {
               </p>
             )}
 
-          {/* Polynomial */}
           {diagnostics.fit_coefficients && (
             <div className="border-t border-border/30 pt-3">
               <PolyCoeffTable {...diagnostics.fit_coefficients} />
             </div>
           )}
 
-          {/* Fit quality */}
           {diagnostics.fit_quality && (
             <div className="border-t border-border/30 pt-3 space-y-2">
               <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
@@ -725,7 +702,6 @@ export function DiagnosticsPanel() {
             </div>
           )}
 
-          {/* Robustness */}
           {diagnostics.robustness && (
             <div className="border-t border-border/30 pt-3 space-y-2">
               <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
@@ -745,27 +721,26 @@ export function DiagnosticsPanel() {
         {/* ── Provenance ── */}
         <TabsContent value="provenance" className="mt-3">
           <div className="space-y-1">
-            {Object.entries(diagnostics.provenance).map(([stage, level]) => (
-              <div key={stage} className="flex items-center justify-between py-0.5">
-                <span className="text-[13px] text-muted-foreground capitalize">
-                  {stage.replace(/_/g, " ")}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <div
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      provenanceDots[level as string] ?? "bg-muted-foreground"
-                    }`}
-                  />
-                  <span
-                    className={`text-xs font-mono ${
-                      provenanceColors[level as string] ?? "text-muted-foreground"
-                    }`}
-                  >
-                    {provenanceLabels[level as string] ?? level}
+            {Object.entries(diagnostics.provenance).map(([stage, level]) => {
+              const prov = PROVENANCE_STYLES[level as string];
+              return (
+                <div key={stage} className="flex items-center justify-between py-0.5">
+                  <span className="text-[13px] text-muted-foreground capitalize">
+                    {stage.replace(/_/g, " ")}
                   </span>
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      className={`w-1.5 h-1.5 rounded-full ${prov?.dot ?? "bg-muted-foreground"}`}
+                    />
+                    <span
+                      className={`text-xs font-mono ${prov?.text ?? "text-muted-foreground"}`}
+                    >
+                      {prov?.label ?? level}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </TabsContent>
 

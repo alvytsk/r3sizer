@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "typegen")]
+use ts_rs::TS;
+
 use crate::CoreError;
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,7 @@ impl LinearRgbImage {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ImageSize {
     pub width: u32,
     pub height: u32,
@@ -97,6 +101,7 @@ pub struct ImageSize {
 
 /// How sharpening is applied to the image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharpenMode {
     /// Apply unsharp mask directly to all RGB channels.
@@ -114,6 +119,7 @@ pub enum SharpenMode {
 /// Orthogonal to [`SharpenMode`] (which selects *channels*).
 /// `SharpenModel` selects the *operator*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharpenModel {
     /// Gaussian unsharp mask — engineering choice, not paper-confirmed.
@@ -126,6 +132,7 @@ pub enum SharpenModel {
 
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetricMode {
     /// P_total(s): absolute fraction of channel values outside [0,1].
@@ -143,6 +150,7 @@ pub enum MetricMode {
 /// Orthogonal to [`MetricMode`] (which selects absolute vs relative comparison).
 /// `ArtifactMetric` selects *what* is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactMetric {
     /// Per-channel: fraction of f32 channel values outside [0,1]. Denominator = W*H*3.
@@ -157,6 +165,7 @@ pub enum ArtifactMetric {
 
 /// Status of the polynomial fit attempt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum FitStatus {
     /// Cubic polynomial was fitted successfully.
@@ -169,6 +178,7 @@ pub enum FitStatus {
 
 /// Whether the polynomial crossing P_hat(s*) = P0 was found in the probe interval.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum CrossingStatus {
     /// A root was found inside [s_min, s_max].
@@ -181,6 +191,7 @@ pub enum CrossingStatus {
 
 /// How the final sharpening strength was selected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionMode {
     /// Optimal s* from the cubic polynomial root.
@@ -202,6 +213,7 @@ pub enum SelectionMode {
 /// Used in diagnostics to give callers (GUI, CLI, JSON consumers) a
 /// machine-readable honesty signal per pipeline stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     /// Matches a formula explicitly stated in the papers.
@@ -218,6 +230,7 @@ pub enum Provenance {
 
 /// Per-stage provenance tags filled in by the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct StageProvenance {
     pub color_conversion: Provenance,
     pub resize: Provenance,
@@ -234,6 +247,7 @@ pub struct StageProvenance {
 
 /// Controls which sharpening strengths are probed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum ProbeConfig {
     /// `count` values linearly spaced over `[min, max]`.
     Range { min: f32, max: f32, count: usize },
@@ -282,6 +296,7 @@ impl ProbeConfig {
 
 /// Polynomial fit strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum FitStrategy {
     /// Least-squares cubic fit; fall back to direct sampled search if numerically unstable.
     Cubic,
@@ -291,6 +306,7 @@ pub enum FitStrategy {
 
 /// How to handle out-of-range values at the final output stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum ClampPolicy {
     /// Hard clamp: values < 0.0 -> 0.0, values > 1.0 -> 1.0.
     Clamp,
@@ -300,6 +316,7 @@ pub enum ClampPolicy {
 
 /// All parameters controlling the auto-sharpness downscale pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct AutoSharpParams {
     pub target_width: u32,
     pub target_height: u32,
@@ -394,6 +411,7 @@ impl AutoSharpParams {
 
 /// Quality metrics for the polynomial fit.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct FitQuality {
     /// Sum of squared residuals between fitted polynomial and data points.
     pub residual_sum_of_squares: f64,
@@ -407,6 +425,7 @@ pub struct FitQuality {
 
 /// Robustness assessment of the probe data and fit.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct RobustnessFlags {
     /// P(s) is non-decreasing across all probes.
     pub monotonic: bool,
@@ -424,6 +443,7 @@ pub struct RobustnessFlags {
 
 /// Why the pipeline fell back from polynomial root to sample-based selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FallbackReason {
     /// Cubic fit failed numerically (singular matrix, insufficient data).
@@ -442,6 +462,7 @@ pub enum FallbackReason {
 
 /// Per-stage wall-clock timing in microseconds.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct StageTiming {
     pub resize_us: u64,
     pub contrast_us: u64,
@@ -467,6 +488,7 @@ pub struct StageTiming {
 
 /// Individual components of the composite artifact metric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetricComponent {
     /// Fraction of channel values outside [0, 1] (existing metric_v0).
@@ -481,6 +503,7 @@ pub enum MetricComponent {
 
 /// Per-component breakdown of the composite artifact metric.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct MetricBreakdown {
     /// Individual component scores.
     pub components: std::collections::BTreeMap<MetricComponent, f32>,
@@ -503,6 +526,7 @@ pub struct MetricBreakdown {
 /// Provenance: `EngineeringProxy` — these are starting-point defaults,
 /// not paper-confirmed. Must be validated against the evaluation harness.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct MetricWeights {
     pub gamut_excursion: f32,
     pub halo_ringing: f32,
@@ -523,6 +547,7 @@ impl Default for MetricWeights {
 
 /// Controls verbosity of serialized diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticsLevel {
     /// Final measurement breakdown only (compact JSON).
@@ -546,6 +571,7 @@ pub const REGION_CLASS_COUNT: usize = 5;
 ///
 /// Provenance: `EngineeringChoice` — taxonomy is not paper-confirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
 pub enum RegionClass {
@@ -637,6 +663,7 @@ impl GainMap {
 ///
 /// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct GainTable {
     pub flat: f32,
     pub textured: f32,
@@ -704,6 +731,7 @@ impl GainTable {
 ///
 /// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ClassificationParams {
     pub gradient_low_threshold: f32,
     pub gradient_high_threshold: f32,
@@ -769,6 +797,7 @@ impl Default for ClassificationParams {
 /// `SharpenStrategy` controls whether strength is applied uniformly or modulated
 /// per-pixel by a region-based gain map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "strategy")]
 pub enum SharpenStrategy {
     /// Current behaviour: single global strength applied everywhere.
@@ -787,6 +816,7 @@ pub enum SharpenStrategy {
 
 /// Per-class pixel coverage computed from a [`RegionMap`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct RegionCoverage {
     pub total_pixels: u32,
     pub flat: u32,
@@ -830,6 +860,7 @@ impl RegionCoverage {
 ///
 /// `target_metric` is not duplicated here — it lives in [`AutoSharpParams::target_artifact_ratio`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "outcome")]
 pub enum AdaptiveValidationOutcome {
     /// Adaptive result met budget on first try.
@@ -854,6 +885,7 @@ pub enum AdaptiveValidationOutcome {
 
 /// A single measured sample of the artifact-vs-strength relationship.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ProbeSample {
     /// Sharpening strength `s`.
     pub strength: f32,
@@ -872,6 +904,7 @@ pub struct ProbeSample {
 ///
 /// `P_hat(s) = a*s^3 + b*s^2 + c*s + d`
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct CubicPolynomial {
     pub a: f64,
     pub b: f64,
@@ -891,6 +924,7 @@ impl CubicPolynomial {
 
 /// Diagnostics emitted by the pipeline; serializable for CLI JSON output and GUI display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct AutoSharpDiagnostics {
     // --- Size ---
     pub input_size: ImageSize,

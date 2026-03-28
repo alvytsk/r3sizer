@@ -29,11 +29,14 @@ cargo run -p r3sizer-cli -- --input photo.jpg --output out.png --width 800 --hei
 
 # Run the CLI (sweep mode)
 cargo run -p r3sizer-cli -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
+
+# Regenerate TypeScript types from Rust (after changing types.rs)
+cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 ```
 
 ## Architecture
 
-Three crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer-cli`.
+Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer-cli`, and `r3sizer-core` ← `r3sizer-wasm`.
 
 **`r3sizer-core`** — all image processing logic, no I/O. This is the library meant to be reused in a future Tauri GUI or WASM build. Modules map 1:1 to pipeline stages:
 
@@ -52,6 +55,14 @@ Three crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io`
 
 **`r3sizer-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
+**`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). Single entry point: `process_image(srgb_rgba_data, width, height, params_json) → JsValue`. Accepts sRGB RGBA u8 pixels (canvas `getImageData()`), returns a JS object with `imageData` (Uint8Array), `outputWidth`, `outputHeight`, and `diagnostics`. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion between RGBA u8 and `LinearRgbImage` is in `convert.rs`.
+
+**`web/`** — React 19 + Vite + Tailwind diagnostic UI. Communicates with `r3sizer-wasm` via a Web Worker (`wasm.ts` / `wasm-worker.ts`). State managed by Zustand (`processor-store.ts`). TypeScript types are auto-generated from Rust via `ts-rs` (see below).
+
+### TypeScript type generation (`ts-rs`)
+
+All serializable types in `r3sizer-core/src/types.rs` have `#[cfg_attr(feature = "typegen", derive(TS))]`. Running `cargo test -p r3sizer-core --features typegen export_typescript_bindings` writes `web/src/types/generated.ts` containing all type definitions and serialized `Default` constants. The web app imports from `web/src/types/wasm-types.ts` which re-exports everything from `generated.ts` and adds WASM-specific types (`ProcessResult`) and web overrides (e.g. `diagnostics_level: "full"`). When changing types in Rust, regenerate and commit `generated.ts`.
+
 ## Key design decisions to preserve
 
 - **f32 for pixels, f64 for polynomial fitting** — the Vandermonde matrix has terms up to `s^6`; f32 causes catastrophic cancellation.
@@ -64,6 +75,7 @@ Three crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io`
 - **Robustness checks gate the polynomial root** — monotonicity, R² > 0.85, condition number (min pivot > 1e-8), and leave-one-out stability are checked after fitting. If any check fails, the pipeline falls back to direct search and records a typed `FallbackReason`.
 - **Per-stage timing is always collected** — `StageTiming` records microsecond-resolution wall-clock time for each pipeline stage. Zero overhead when unused (no allocation, just `Instant::now()`).
 - **Composite metric scaffold is in place** — `MetricBreakdown` with `MetricComponent` variants (GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening) is populated per probe. For v0.1, only GamutExcursion is active; others return 0.0. The `aggregate` field preserves backward compatibility with the scalar fitting path.
+- **TypeScript types are generated from Rust, not handwritten** — `ts-rs` with `serde-compat` reads `#[serde(...)]` attributes and produces matching TypeScript. The `typegen` feature flag keeps `ts-rs` out of production builds. Default constants are serialized from Rust `Default` impls so they stay in sync. `generated.ts` must be committed; the Docker build regenerates it to ensure freshness.
 
 ## Algorithm summary
 

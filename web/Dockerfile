@@ -18,6 +18,12 @@ COPY crates/ crates/
 RUN --mount=type=cache,target=/workspace/target \
     wasm-pack build crates/r3sizer-wasm --target web --out-dir /wasm-out
 
+# Generate TypeScript type definitions from Rust types (ts-rs).
+# Output goes to web/src/types/generated.ts which is copied in stage 2.
+RUN --mount=type=cache,target=/workspace/target \
+    mkdir -p web/src/types && \
+    cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
+
 
 # ── Stage 2: Build the React/Vite app ───────────────────────────────────────
 FROM node:24-alpine AS web-builder
@@ -29,9 +35,10 @@ COPY web/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
-# Copy source, then inject WASM package built in stage 1
+# Copy source, then inject artifacts built in stage 1
 COPY web/ ./
 COPY --from=wasm-builder /wasm-out ./src/wasm-pkg
+COPY --from=wasm-builder /workspace/web/src/types/generated.ts ./src/types/generated.ts
 
 # Run TypeScript check + Vite build (skip the build:wasm step; already done above)
 RUN npx tsc -b && npx vite build
@@ -40,7 +47,7 @@ RUN npx tsc -b && npx vite build
 # ── Stage 3: Serve static files with nginx ──────────────────────────────────
 FROM nginx:1.29-alpine AS runtime
 
-COPY --from=web-builder /app/dist /usr/share/nginx/html
+COPY --from=web-builder /app/dist /usr/share/nginx/html/r3sizer
 COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
