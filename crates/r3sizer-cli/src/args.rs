@@ -73,6 +73,15 @@ pub struct Cli {
     #[arg(long, default_value = "channel-clipping")]
     pub artifact_metric: ArtifactMetricArg,
 
+    /// Composite metric weights as W1,W2,W3,W4.
+    /// Order: gamut_excursion, halo_ringing, edge_overshoot, texture_flattening.
+    #[arg(long, value_delimiter = ',', value_name = "W1,W2,W3,W4")]
+    pub metric_weights: Option<Vec<f32>>,
+
+    /// Diagnostics verbosity: "summary" (final breakdown only) or "full" (per-probe breakdowns).
+    #[arg(long, default_value = "summary")]
+    pub diagnostics_level: DiagnosticsLevelArg,
+
     // --- Sweep mode ---
 
     /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
@@ -148,6 +157,21 @@ impl From<ArtifactMetricArg> for r3sizer_core::ArtifactMetric {
         match val {
             ArtifactMetricArg::ChannelClipping => r3sizer_core::ArtifactMetric::ChannelClippingRatio,
             ArtifactMetricArg::PixelOutOfGamut => r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum DiagnosticsLevelArg {
+    Summary,
+    Full,
+}
+
+impl From<DiagnosticsLevelArg> for r3sizer_core::DiagnosticsLevel {
+    fn from(val: DiagnosticsLevelArg) -> Self {
+        match val {
+            DiagnosticsLevelArg::Summary => r3sizer_core::DiagnosticsLevel::Summary,
+            DiagnosticsLevelArg::Full => r3sizer_core::DiagnosticsLevel::Full,
         }
     }
 }

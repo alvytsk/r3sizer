@@ -1,7 +1,7 @@
 /// Core run logic: load → process → save → diagnostics.
 use anyhow::{bail, Context, Result};
 
-use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, ProbeConfig};
+use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
 use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
@@ -33,6 +33,22 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0])
     };
 
+    let metric_weights = if let Some(ref w) = args.metric_weights {
+        if w.len() == 4 {
+            MetricWeights {
+                gamut_excursion: w[0],
+                halo_ringing: w[1],
+                edge_overshoot: w[2],
+                texture_flattening: w[3],
+            }
+        } else {
+            eprintln!("Warning: --metric-weights requires exactly 4 values, using defaults");
+            MetricWeights::default()
+        }
+    } else {
+        MetricWeights::default()
+    };
+
     AutoSharpParams {
         target_width,
         target_height,
@@ -46,6 +62,8 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         sharpen_model: args.sharpen_model.into(),
         metric_mode: args.metric_mode.into(),
         artifact_metric: args.artifact_metric.into(),
+        metric_weights,
+        diagnostics_level: args.diagnostics_level.into(),
     }
 }
 

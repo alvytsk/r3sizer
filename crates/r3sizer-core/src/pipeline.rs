@@ -24,10 +24,18 @@ use crate::{
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness, find_sharpness_direct},
     ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FallbackReason,
-    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, ProbeSample,
+    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeSample,
     ProcessOutput, Provenance, RobustnessFlags, SelectionMode, SharpenMode, SharpenModel,
     StageTiming, StageProvenance, CoreError,
 };
+
+/// Pipeline-internal result of a sharpening step.
+struct SharpenResult {
+    image: LinearRgbImage,
+    /// Luminance in linear domain, before clamp/transfer.
+    /// Hard invariant: luminance.len() == image.width() * image.height()
+    luminance: Vec<f32>,
+}
 
 /// Run the full automatic-sharpness downscale pipeline.
 ///
@@ -106,6 +114,7 @@ pub fn process_auto_sharp_downscale(
         params.artifact_metric,
         baseline_artifact_ratio,
         &kernel,
+        &params.metric_weights,
     )?;
     let probing_us = t0.elapsed().as_micros() as u64;
 
@@ -228,7 +237,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     let t0 = Instant::now();
     let selected_strength = solve_result.selected_strength;
-    let mut final_image = sharpen_image(
+    let final_result = sharpen_image(
         &base,
         base_luminance.as_deref(),
         params.sharpen_mode,
@@ -241,13 +250,26 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 9. Measure actual artifact ratio (pre-clamp)
     // -------------------------------------------------------------------
-    let final_breakdown = crate::metrics::compute_metric_breakdown(&final_image, params.artifact_metric);
-    let measured_artifact_ratio = final_breakdown.aggregate;
+    let base_luma_for_metrics: Vec<f32> = match base_luminance.as_deref() {
+        Some(l) => l.to_vec(),
+        None => color::extract_luminance(&base),
+    };
+    let final_breakdown = crate::metrics::compute_metric_breakdown(
+        &final_result.image,
+        &base,
+        &base_luma_for_metrics,
+        &final_result.luminance,
+        params.artifact_metric,
+        &params.metric_weights,
+    );
+    let measured_artifact_ratio = final_breakdown.selection_score;
     let measured_metric_value = compute_metric_value(
         measured_artifact_ratio,
         baseline_artifact_ratio,
         params.metric_mode,
     );
+
+    let mut final_image = final_result.image;
 
     // -------------------------------------------------------------------
     // 10. Apply clamp policy
@@ -288,6 +310,14 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 11. Return
     // -------------------------------------------------------------------
+    // Strip per-probe breakdowns in Summary mode to reduce serialization size.
+    let mut probe_samples = probe_samples;
+    if matches!(params.diagnostics_level, crate::DiagnosticsLevel::Summary) {
+        for sample in &mut probe_samples {
+            sample.breakdown = None;
+        }
+    }
+
     let diagnostics = AutoSharpDiagnostics {
         input_size,
         output_size: target,
@@ -310,6 +340,8 @@ pub fn process_auto_sharp_downscale(
         measured_artifact_ratio,
         measured_metric_value,
         metric_components: Some(final_breakdown),
+        metric_weights: params.metric_weights,
+        metric_weights_provenance: Provenance::EngineeringProxy,
         timing: StageTiming {
             resize_us,
             contrast_us,
@@ -350,6 +382,10 @@ pub fn process_auto_sharp_downscale(
 // ---------------------------------------------------------------------------
 
 /// Apply sharpening to the base image using the configured mode, model, and a pre-built kernel.
+///
+/// Returns `SharpenResult` with the sharpened image and its luminance channel.
+/// In lightness mode, luminance is the already-computed sharpened luma (no extra allocation).
+/// In RGB mode, luminance is extracted from the result (one `Vec<f32>` per call).
 fn sharpen_image(
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
@@ -357,9 +393,13 @@ fn sharpen_image(
     model: SharpenModel,
     amount: f32,
     kernel: &[f32],
-) -> Result<LinearRgbImage, CoreError> {
+) -> Result<SharpenResult, CoreError> {
     match mode {
-        SharpenMode::Rgb => Ok(unsharp_mask_with_kernel(base, amount, kernel)),
+        SharpenMode::Rgb => {
+            let image = unsharp_mask_with_kernel(base, amount, kernel);
+            let luminance = color::extract_luminance(&image);
+            Ok(SharpenResult { image, luminance })
+        }
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
             let w = base.width() as usize;
@@ -372,7 +412,8 @@ fn sharpen_image(
                     crate::paper_sharpen::paper_sharpen_lightness(lum, w, h, amount, kernel)
                 }
             };
-            Ok(color::reconstruct_rgb_from_lightness(base, &sharpened_l))
+            let image = color::reconstruct_rgb_from_lightness(base, &sharpened_l);
+            Ok(SharpenResult { image, luminance: sharpened_l })
         }
     }
 }
@@ -394,11 +435,25 @@ fn probe_strengths(
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     kernel: &[f32],
+    weights: &MetricWeights,
 ) -> Result<Vec<ProbeSample>, CoreError> {
+    // Base luminance for metric evaluation (needed even in RGB mode for v0.2 metrics).
+    let base_luma_for_metrics: Vec<f32> = match base_luminance {
+        Some(l) => l.to_vec(),
+        None => color::extract_luminance(base),
+    };
+
     let probe_one = |&s: &f32| -> Result<ProbeSample, CoreError> {
-        let sharpened = sharpen_image(base, base_luminance, sharpen_mode, sharpen_model, s, kernel)?;
-        let breakdown = crate::metrics::compute_metric_breakdown(&sharpened, artifact_metric);
-        let p_total = breakdown.aggregate;
+        let result = sharpen_image(base, base_luminance, sharpen_mode, sharpen_model, s, kernel)?;
+        let breakdown = crate::metrics::compute_metric_breakdown(
+            &result.image,
+            base,
+            &base_luma_for_metrics,
+            &result.luminance,
+            artifact_metric,
+            weights,
+        );
+        let p_total = breakdown.selection_score;
         let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
         Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: Some(breakdown) })
     };

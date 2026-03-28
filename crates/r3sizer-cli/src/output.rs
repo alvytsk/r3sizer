@@ -1,7 +1,7 @@
 /// Formatted stdout output.
 use r3sizer_core::{
-    ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus, MetricMode,
-    Provenance, SelectionMode, SharpenMode, SharpenModel,
+    ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus,
+    MetricComponent, MetricMode, Provenance, SelectionMode, SharpenMode, SharpenModel,
 };
 
 /// Print a human-readable summary of the pipeline diagnostics to stdout.
@@ -66,6 +66,37 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         println!(
             "Fallback reason             : {}",
             fallback_reason_label(reason)
+        );
+    }
+
+    // Selection and metric breakdown
+    if let Some(ref mc) = diag.metric_components {
+        println!();
+        println!("Selection:");
+        println!(
+            "  metric                    : {}",
+            metric_component_label(mc.selected_metric)
+        );
+        println!(
+            "  selection_score           : {:.6}",
+            mc.selection_score
+        );
+        println!();
+        println!("Metric breakdown (v0.2 — diagnostic only):");
+        for (component, value) in &mc.components {
+            println!("  {:24}: {:.6}", metric_component_label(*component), value);
+        }
+        println!(
+            "  composite_score           : {:.6}  (not used for selection)",
+            mc.composite_score
+        );
+        println!(
+            "  weights                   : [{:.1}, {:.1}, {:.1}, {:.1}]  ({})",
+            diag.metric_weights.gamut_excursion,
+            diag.metric_weights.halo_ringing,
+            diag.metric_weights.edge_overshoot,
+            diag.metric_weights.texture_flattening,
+            provenance_label(diag.metric_weights_provenance),
         );
     }
 
@@ -179,6 +210,15 @@ fn fallback_reason_label(r: &FallbackReason) -> &'static str {
         FallbackReason::MetricNonMonotonic => "metric non-monotonic",
         FallbackReason::BudgetTooStrictForContent => "budget too strict for content",
         FallbackReason::DirectSearchConfigured => "direct search configured",
+    }
+}
+
+fn metric_component_label(c: MetricComponent) -> &'static str {
+    match c {
+        MetricComponent::GamutExcursion => "gamut_excursion",
+        MetricComponent::HaloRinging => "halo_ringing",
+        MetricComponent::EdgeOvershoot => "edge_overshoot",
+        MetricComponent::TextureFlattening => "texture_flattening",
     }
 }
 

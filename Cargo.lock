@@ -968,6 +968,7 @@ dependencies = [
  "image",
  "rayon",
  "serde",
+ "serde_json",
  "thiserror",
  "web-time",
 ]

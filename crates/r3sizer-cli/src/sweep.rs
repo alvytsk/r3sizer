@@ -26,6 +26,11 @@ struct FileResult {
     fit_r_squared: Option<f64>,
     monotonic: Option<bool>,
     total_us: u64,
+    gamut_excursion: f32,
+    halo_ringing: f32,
+    edge_overshoot: f32,
+    texture_flattening: f32,
+    composite_score: f32,
 }
 
 /// Error entry for a file that failed processing.
@@ -33,6 +38,15 @@ struct FileResult {
 struct FileError {
     input: String,
     error: String,
+}
+
+/// Per-component aggregate statistics.
+#[derive(Debug, Clone, Serialize)]
+struct ComponentStats {
+    mean: f32,
+    median: f32,
+    p90: f32,
+    p95: f32,
 }
 
 /// Aggregate statistics across all successfully processed files.
@@ -46,6 +60,11 @@ struct AggregateStats {
     mean_total_us: f64,
     selection_mode_counts: SelectionModeCounts,
     fit_success_rate: f32,
+    gamut_excursion: ComponentStats,
+    halo_ringing: ComponentStats,
+    edge_overshoot: ComponentStats,
+    texture_flattening: ComponentStats,
+    composite_score: ComponentStats,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -193,6 +212,17 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     };
 
     let diag = &output.diagnostics;
+    let (ge, hr, eo, tf, cs) = if let Some(ref mc) = diag.metric_components {
+        (
+            mc.components.get(&r3sizer_core::MetricComponent::GamutExcursion).copied().unwrap_or(0.0),
+            mc.components.get(&r3sizer_core::MetricComponent::HaloRinging).copied().unwrap_or(0.0),
+            mc.components.get(&r3sizer_core::MetricComponent::EdgeOvershoot).copied().unwrap_or(0.0),
+            mc.components.get(&r3sizer_core::MetricComponent::TextureFlattening).copied().unwrap_or(0.0),
+            mc.composite_score,
+        )
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0)
+    };
     Ok(FileResult {
         input: input_path.display().to_string(),
         output: output_path,
@@ -204,10 +234,41 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
         fit_r_squared: diag.fit_quality.map(|q| q.r_squared),
         monotonic: diag.robustness.map(|r| r.monotonic),
         total_us: diag.timing.total_us,
+        gamut_excursion: ge,
+        halo_ringing: hr,
+        edge_overshoot: eo,
+        texture_flattening: tf,
+        composite_score: cs,
     })
 }
 
+fn percentile(sorted: &[f32], p: f32) -> f32 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let idx = (p / 100.0 * (sorted.len() - 1) as f32).round() as usize;
+    sorted[idx.min(sorted.len() - 1)]
+}
+
+fn compute_component_stats(values: &[f32]) -> ComponentStats {
+    if values.is_empty() {
+        return ComponentStats { mean: 0.0, median: 0.0, p90: 0.0, p95: 0.0 };
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let n = sorted.len();
+    let mean = sorted.iter().sum::<f32>() / n as f32;
+    let median = if n.is_multiple_of(2) { (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0 } else { sorted[n / 2] };
+    ComponentStats {
+        mean,
+        median,
+        p90: percentile(&sorted, 90.0),
+        p95: percentile(&sorted, 95.0),
+    }
+}
+
 fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
+    let empty_cs = ComponentStats { mean: 0.0, median: 0.0, p90: 0.0, p95: 0.0 };
     let n = results.len();
     if n == 0 {
         return AggregateStats {
@@ -219,6 +280,11 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
             mean_total_us: 0.0,
             selection_mode_counts: SelectionModeCounts::default(),
             fit_success_rate: 0.0,
+            gamut_excursion: empty_cs.clone(),
+            halo_ringing: empty_cs.clone(),
+            edge_overshoot: empty_cs.clone(),
+            texture_flattening: empty_cs.clone(),
+            composite_score: empty_cs,
         };
     }
 
@@ -255,5 +321,10 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
         mean_total_us: mean_us,
         selection_mode_counts: counts,
         fit_success_rate,
+        gamut_excursion: compute_component_stats(&results.iter().map(|r| r.gamut_excursion).collect::<Vec<_>>()),
+        halo_ringing: compute_component_stats(&results.iter().map(|r| r.halo_ringing).collect::<Vec<_>>()),
+        edge_overshoot: compute_component_stats(&results.iter().map(|r| r.edge_overshoot).collect::<Vec<_>>()),
+        texture_flattening: compute_component_stats(&results.iter().map(|r| r.texture_flattening).collect::<Vec<_>>()),
+        composite_score: compute_component_stats(&results.iter().map(|r| r.composite_score).collect::<Vec<_>>()),
     }
 }

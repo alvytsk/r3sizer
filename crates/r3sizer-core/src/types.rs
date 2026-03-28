@@ -322,6 +322,10 @@ pub struct AutoSharpParams {
     pub metric_mode: MetricMode,
     /// Which artifact metric function to use. Default: `ChannelClippingRatio`.
     pub artifact_metric: ArtifactMetric,
+    /// Weights for the composite diagnostic metric. Default: [1.0, 0.3, 0.3, 0.1].
+    pub metric_weights: MetricWeights,
+    /// Verbosity level for serialized diagnostics.
+    pub diagnostics_level: DiagnosticsLevel,
 }
 
 impl Default for AutoSharpParams {
@@ -341,6 +345,8 @@ impl Default for AutoSharpParams {
             sharpen_model: SharpenModel::PracticalUsm,
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
+            metric_weights: MetricWeights::default(),
+            diagnostics_level: DiagnosticsLevel::default(),
         }
     }
 }
@@ -443,26 +449,70 @@ pub struct StageTiming {
 // ---------------------------------------------------------------------------
 
 /// Individual components of the composite artifact metric.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MetricComponent {
     /// Fraction of channel values outside [0, 1] (existing metric_v0).
     GamutExcursion,
-    /// Anomalous oscillations near strong edges (v0.2 — not yet implemented).
+    /// Sign-alternating oscillations near strong edges (v0.2).
     HaloRinging,
-    /// Local contrast exceeding reasonable edge envelope (v0.2 — not yet implemented).
+    /// Sharpening exceeding local edge-strength proxy (v0.2).
     EdgeOvershoot,
-    /// Loss of micro-texture or unnatural over-sharpening (v0.2 — not yet implemented).
+    /// Changes in fine-scale local variance in textured regions (v0.2).
     TextureFlattening,
 }
 
 /// Per-component breakdown of the composite artifact metric.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricBreakdown {
-    /// Individual component scores with their labels.
-    pub components: Vec<(MetricComponent, f32)>,
-    /// Weighted aggregate scalar used for fitting and selection.
+    /// Individual component scores.
+    pub components: std::collections::BTreeMap<MetricComponent, f32>,
+
+    /// Which metric drove solver selection (GamutExcursion in v0.2).
+    pub selected_metric: MetricComponent,
+    /// The value of the selected metric.
+    pub selection_score: f32,
+
+    /// Weighted composite score (diagnostic only in v0.2 — not used for selection).
+    pub composite_score: f32,
+
+    /// Legacy alias for `selection_score`. Kept for backward compatibility.
+    #[deprecated(note = "use selection_score")]
     pub aggregate: f32,
+}
+
+/// Weights for the composite artifact metric.
+///
+/// Provenance: `EngineeringProxy` — these are starting-point defaults,
+/// not paper-confirmed. Must be validated against the evaluation harness.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MetricWeights {
+    pub gamut_excursion: f32,
+    pub halo_ringing: f32,
+    pub edge_overshoot: f32,
+    pub texture_flattening: f32,
+}
+
+impl Default for MetricWeights {
+    fn default() -> Self {
+        Self {
+            gamut_excursion: 1.0,
+            halo_ringing: 0.3,
+            edge_overshoot: 0.3,
+            texture_flattening: 0.1,
+        }
+    }
+}
+
+/// Controls verbosity of serialized diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticsLevel {
+    /// Final measurement breakdown only (compact JSON).
+    #[default]
+    Summary,
+    /// Per-probe breakdowns included (evaluation mode).
+    Full,
 }
 
 // ---------------------------------------------------------------------------
@@ -555,9 +605,14 @@ pub struct AutoSharpDiagnostics {
     pub measured_artifact_ratio: f32,
     /// Metric value of the final output (relative or absolute depending on mode).
     pub measured_metric_value: f32,
-    /// Per-component breakdown of the final artifact metric (v0.2 scaffold).
+    /// Per-component breakdown of the final artifact metric.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metric_components: Option<MetricBreakdown>,
+
+    /// Weights used for composite score computation.
+    pub metric_weights: MetricWeights,
+    /// Provenance of the metric weights.
+    pub metric_weights_provenance: Provenance,
 
     // --- Timing ---
     /// Per-stage wall-clock timing.

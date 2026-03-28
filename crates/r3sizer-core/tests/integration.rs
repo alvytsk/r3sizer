@@ -1,7 +1,8 @@
 use r3sizer_core::{
-    ArtifactMetric, AutoSharpParams, ClampPolicy, CrossingStatus, FallbackReason, FitStrategy,
-    ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig, Provenance,
-    SelectionMode, SharpenMode, SharpenModel, process_auto_sharp_downscale,
+    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus,
+    DiagnosticsLevel, FallbackReason, FitStrategy, ImageSize, LinearRgbImage, MetricComponent,
+    MetricMode, ProbeConfig, Provenance, SelectionMode, SharpenMode, SharpenModel,
+    process_auto_sharp_downscale,
 };
 
 // ---------------------------------------------------------------------------
@@ -506,29 +507,127 @@ fn metric_breakdown_present_in_diagnostics() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.expect("metric_components should be present");
     assert_eq!(mc.components.len(), 4);
-    assert_eq!(mc.components[0].0, MetricComponent::GamutExcursion);
-    // In v0.1, aggregate == gamut excursion.
-    assert!((mc.aggregate - mc.components[0].1).abs() < 1e-10);
+    assert_eq!(mc.selected_metric, MetricComponent::GamutExcursion);
+    assert!(mc.selection_score.is_finite());
+    assert!(mc.composite_score.is_finite());
+    // selection_score == gamut excursion component
+    let gamut = mc.components[&MetricComponent::GamutExcursion];
+    assert!((mc.selection_score - gamut).abs() < 1e-10);
 }
 
 #[test]
-fn probe_samples_have_breakdown() {
+fn probe_samples_have_breakdown_in_full_mode() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for sample in &out.diagnostics.probe_samples {
-        let bd = sample.breakdown.as_ref().expect("each probe should have breakdown");
-        // aggregate should match artifact_ratio (for v0.1 where aggregate == gamut excursion)
-        assert!((bd.aggregate - sample.artifact_ratio).abs() < 1e-6,
-            "breakdown aggregate {} != artifact_ratio {}", bd.aggregate, sample.artifact_ratio);
+        let bd = sample.breakdown.as_ref().expect("each probe should have breakdown in Full mode");
+        assert!((bd.selection_score - sample.artifact_ratio).abs() < 1e-6,
+            "breakdown selection_score {} != artifact_ratio {}", bd.selection_score, sample.artifact_ratio);
     }
 }
 
 #[test]
-fn metric_breakdown_aggregate_matches_measured_artifact_ratio() {
+fn probe_samples_stripped_in_summary_mode() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16); // default = Summary
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    for sample in &out.diagnostics.probe_samples {
+        assert!(sample.breakdown.is_none(), "breakdown should be stripped in Summary mode");
+    }
+}
+
+#[test]
+fn metric_breakdown_selection_score_matches_measured() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.unwrap();
-    assert!((mc.aggregate - out.diagnostics.measured_artifact_ratio).abs() < 1e-6);
+    assert!((mc.selection_score - out.diagnostics.measured_artifact_ratio).abs() < 1e-6);
+}
+
+#[test]
+fn composite_score_equals_weighted_sum() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let mc = out.diagnostics.metric_components.unwrap();
+    let w = &out.diagnostics.metric_weights;
+    let expected = w.gamut_excursion * mc.components[&MetricComponent::GamutExcursion]
+        + w.halo_ringing * mc.components[&MetricComponent::HaloRinging]
+        + w.edge_overshoot * mc.components[&MetricComponent::EdgeOvershoot]
+        + w.texture_flattening * mc.components[&MetricComponent::TextureFlattening];
+    assert!((mc.composite_score - expected).abs() < 1e-6,
+        "composite_score {} != weighted sum {}", mc.composite_score, expected);
+}
+
+#[test]
+fn diagnostics_contain_metric_weights() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let w = &out.diagnostics.metric_weights;
+    assert_eq!(w.gamut_excursion, 1.0);
+    assert_eq!(w.halo_ringing, 0.3);
+    assert_eq!(w.edge_overshoot, 0.3);
+    assert_eq!(w.texture_flattening, 0.1);
+    assert_eq!(out.diagnostics.metric_weights_provenance, Provenance::EngineeringProxy);
+}
+
+#[test]
+fn v02_components_are_finite_and_nonnegative() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let mc = out.diagnostics.metric_components.unwrap();
+    for (&_component, &value) in &mc.components {
+        assert!(value.is_finite(), "component value must be finite");
+        assert!(value >= 0.0, "component value must be non-negative: {value}");
+    }
+    for sample in &out.diagnostics.probe_samples {
+        let bd = sample.breakdown.as_ref().unwrap();
+        for (&_component, &value) in &bd.components {
+            assert!(value.is_finite(), "probe component value must be finite");
+            assert!(value >= 0.0, "probe component value must be non-negative: {value}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backward compatibility and JSON round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+#[allow(deprecated)]
+fn aggregate_equals_selection_score() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let mc = out.diagnostics.metric_components.unwrap();
+    assert_eq!(mc.aggregate, mc.selection_score);
+}
+
+#[test]
+fn diagnostics_json_round_trip() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let json = serde_json::to_string_pretty(&out.diagnostics).expect("serialize");
+    let deser: AutoSharpDiagnostics = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(deser.selected_strength, out.diagnostics.selected_strength);
+    assert_eq!(deser.metric_weights, out.diagnostics.metric_weights);
+    let mc_orig = out.diagnostics.metric_components.unwrap();
+    let mc_deser = deser.metric_components.unwrap();
+    assert_eq!(mc_orig.components.len(), mc_deser.components.len());
+    assert!((mc_orig.selection_score - mc_deser.selection_score).abs() < 1e-10);
+    assert!((mc_orig.composite_score - mc_deser.composite_score).abs() < 1e-10);
 }
