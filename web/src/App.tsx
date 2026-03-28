@@ -83,7 +83,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen flex flex-col relative grain">
+    <div className="h-screen flex flex-col relative grain overflow-hidden">
       {/* Hidden file input for "Open" */}
       <input
         ref={fileInputRef}

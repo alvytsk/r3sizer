@@ -1,73 +1,76 @@
-# React + TypeScript + Vite
+# r3sizer — web client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite frontend for the r3sizer image-processing pipeline.
+Calls into the core algorithm via a WebAssembly module compiled from `crates/r3sizer-wasm`.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Tool | Minimum version | Purpose |
+|------|----------------|---------|
+| Node.js | 22 | JS runtime & npm |
+| Rust toolchain | stable | WASM compilation |
+| [wasm-pack](https://rustwasm.github.io/wasm-pack/) | 0.13 | Build WASM bindings |
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Install wasm-pack:
+```sh
+cargo install wasm-pack
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Local development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Run from the `web/` directory.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+# 1. Build the WASM package (required once, and after core changes)
+npm run build:wasm
+
+# 2. Start the dev server with HMR
+npm run dev
+```
+
+The dev server starts at `http://localhost:5173`.
+
+Re-run `build:wasm` whenever you change anything under `crates/r3sizer-wasm` or `crates/r3sizer-core`.
+
+## Build
+
+```sh
+# Full production build (WASM + TypeScript + Vite)
+npm run build
+
+# Preview the production build locally
+npm run preview
+```
+
+Output is written to `web/dist/`.
+
+## Docker
+
+Build and run the web client as a self-contained nginx container.
+Run the following commands from the **repository root** (the build context must include the Rust crates):
+
+```sh
+# Build the image
+docker build -f web/Dockerfile -t r3sizer-web .
+
+# Run on port 8080
+docker run --rm -p 8080:80 r3sizer-web
+```
+
+Then open `http://localhost:8080`.
+
+### Build stages
+
+| Stage | Base image | What it does |
+|-------|-----------|--------------|
+| `wasm-builder` | `rust:1` | Compiles `crates/r3sizer-wasm` with wasm-pack |
+| `web-builder` | `node:22-alpine` | Runs TypeScript + Vite build |
+| `runtime` | `nginx:1.27-alpine` | Serves `dist/` as static files |
+
+BuildKit cache mounts are used for the Cargo registry and npm cache, so incremental builds are fast.
+
+## Lint
+
+```sh
+npm run lint
 ```
