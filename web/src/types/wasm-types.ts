@@ -5,6 +5,63 @@ export type ArtifactMetric = "channel_clipping_ratio" | "pixel_out_of_gamut_rati
 export type FitStrategy = "Cubic" | "DirectSearch";
 export type ClampPolicy = "Clamp" | "Normalize";
 export type DiagnosticsLevel = "summary" | "full";
+
+// ── v0.3 Content-adaptive types ──────────────────────────────────────────────
+
+export interface GainTable {
+  flat: number;
+  textured: number;
+  strong_edge: number;
+  microtexture: number;
+  risky_halo_zone: number;
+}
+
+export interface ClassificationParams {
+  gradient_low_threshold: number;
+  gradient_high_threshold: number;
+  variance_low_threshold: number;
+  variance_high_threshold: number;
+  variance_window: number;
+}
+
+export type SharpenStrategy =
+  | { strategy: "uniform" }
+  | {
+      strategy: "content_adaptive";
+      classification: ClassificationParams;
+      gain_table: GainTable;
+      max_backoff_iterations: number;
+      backoff_scale_factor: number;
+    };
+
+export interface RegionCoverage {
+  total_pixels: number;
+  flat: number;
+  textured: number;
+  strong_edge: number;
+  microtexture: number;
+  risky_halo_zone: number;
+  flat_fraction: number;
+  textured_fraction: number;
+  strong_edge_fraction: number;
+  microtexture_fraction: number;
+  risky_halo_zone_fraction: number;
+}
+
+export type AdaptiveValidationOutcome =
+  | { outcome: "passed_direct"; measured_metric: number }
+  | {
+      outcome: "passed_after_backoff";
+      iterations: number;
+      final_scale: number;
+      measured_metric: number;
+    }
+  | {
+      outcome: "failed_budget_exceeded";
+      iterations: number;
+      best_scale: number;
+      best_metric: number;
+    };
 export type FitStatus =
   | { status: "success" }
   | { status: "failed"; reason: string }
@@ -56,6 +113,7 @@ export interface AutoSharpParams {
   artifact_metric: ArtifactMetric;
   metric_weights: MetricWeights;
   diagnostics_level: DiagnosticsLevel;
+  sharpen_strategy: SharpenStrategy;
 }
 
 export interface ImageSize {
@@ -96,6 +154,8 @@ export interface StageTiming {
   final_sharpen_us: number;
   clamp_us: number;
   total_us: number;
+  classification_us?: number;
+  adaptive_validation_us?: number;
 }
 
 export type MetricComponentName =
@@ -155,6 +215,8 @@ export interface AutoSharpDiagnostics {
   metric_weights_provenance: Provenance;
   timing: StageTiming;
   provenance: StageProvenance;
+  region_coverage: RegionCoverage | null;
+  adaptive_validation: AdaptiveValidationOutcome | null;
 }
 
 export interface ProcessResult {
@@ -169,6 +231,32 @@ export const DEFAULT_METRIC_WEIGHTS: MetricWeights = {
   halo_ringing: 0.3,
   edge_overshoot: 0.3,
   texture_flattening: 0.1,
+};
+
+export const DEFAULT_GAIN_TABLE: GainTable = {
+  flat: 0.75,
+  textured: 0.95,
+  strong_edge: 1.0,
+  microtexture: 1.1,
+  risky_halo_zone: 0.7,
+};
+
+export const DEFAULT_CLASSIFICATION_PARAMS: ClassificationParams = {
+  gradient_low_threshold: 0.05,
+  gradient_high_threshold: 0.4,
+  variance_low_threshold: 0.001,
+  variance_high_threshold: 0.01,
+  variance_window: 5,
+};
+
+export const DEFAULT_SHARPEN_STRATEGY: SharpenStrategy = { strategy: "uniform" };
+
+export const DEFAULT_CONTENT_ADAPTIVE_STRATEGY: SharpenStrategy = {
+  strategy: "content_adaptive",
+  classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
+  gain_table: { ...DEFAULT_GAIN_TABLE },
+  max_backoff_iterations: 4,
+  backoff_scale_factor: 0.8,
 };
 
 export const DEFAULT_PARAMS: AutoSharpParams = {
@@ -186,4 +274,5 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   artifact_metric: "channel_clipping_ratio",
   metric_weights: { ...DEFAULT_METRIC_WEIGHTS },
   diagnostics_level: "full",
+  sharpen_strategy: { ...DEFAULT_SHARPEN_STRATEGY },
 };

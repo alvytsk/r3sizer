@@ -3,7 +3,12 @@ import { useProcessorStore } from "@/stores/processor-store";
 import { StatusIndicators } from "./StatusIndicators";
 import { ProbeChart } from "./ProbeChart";
 import { TimingBar } from "./TimingBar";
-import type { AutoSharpDiagnostics, RobustnessFlags } from "@/types/wasm-types";
+import type {
+  AutoSharpDiagnostics,
+  RobustnessFlags,
+  RegionCoverage,
+  AdaptiveValidationOutcome,
+} from "@/types/wasm-types";
 
 const COMPONENT_LABELS: Record<string, string> = {
   gamut_excursion: "Gamut Excursion",
@@ -11,6 +16,99 @@ const COMPONENT_LABELS: Record<string, string> = {
   edge_overshoot: "Edge Overshoot",
   texture_flattening: "Texture Flattening",
 };
+
+const REGION_LABELS: [keyof RegionCoverage, keyof RegionCoverage, string][] = [
+  ["flat", "flat_fraction", "Flat"],
+  ["textured", "textured_fraction", "Textured"],
+  ["strong_edge", "strong_edge_fraction", "Strong Edge"],
+  ["microtexture", "microtexture_fraction", "Microtexture"],
+  ["risky_halo_zone", "risky_halo_zone_fraction", "Risky Halo"],
+];
+
+const REGION_COLORS = [
+  "bg-chart-4",
+  "bg-chart-2",
+  "bg-chart-1",
+  "bg-chart-3",
+  "bg-chart-5",
+];
+
+function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50">
+        Region Coverage
+      </div>
+      {/* Stacked bar */}
+      <div className="flex h-2 rounded-[2px] overflow-hidden bg-background border border-border/20">
+        {REGION_LABELS.map(([, fracKey], i) => {
+          const pct = (coverage[fracKey] as number) * 100;
+          if (pct < 0.3) return null;
+          return (
+            <div
+              key={fracKey}
+              className={`${REGION_COLORS[i]} opacity-70`}
+              style={{ width: `${pct}%` }}
+            />
+          );
+        })}
+      </div>
+      {/* Per-class rows */}
+      <div className="space-y-0.5">
+        {REGION_LABELS.map(([countKey, fracKey, label], i) => {
+          const frac = coverage[fracKey] as number;
+          const count = coverage[countKey] as number;
+          return (
+            <div key={countKey} className="flex items-center gap-2 text-[11px]">
+              <div className={`w-1.5 h-1.5 rounded-[1px] shrink-0 ${REGION_COLORS[i]}`} />
+              <span className="text-muted-foreground flex-1">{label}</span>
+              <span className="font-mono tabular-nums text-foreground/70 w-[42px] text-right">
+                {(frac * 100).toFixed(1)}%
+              </span>
+              <span className="font-mono tabular-nums text-muted-foreground/50 w-[52px] text-right">
+                {count.toLocaleString()}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcome }) {
+  const isPassed =
+    outcome.outcome === "passed_direct" || outcome.outcome === "passed_after_backoff";
+  const borderColor = isPassed ? "border-chart-3/25" : "border-destructive/30";
+  const bgColor = isPassed ? "bg-chart-3/5" : "bg-destructive/5";
+  const dotColor = isPassed ? "bg-chart-3" : "bg-destructive";
+  const headlineColor = isPassed ? "text-chart-3" : "text-destructive";
+
+  let headline: string;
+  let detail: string;
+  if (outcome.outcome === "passed_direct") {
+    headline = "Adaptive: passed direct";
+    detail = `No backoff needed. Measured metric: ${outcome.measured_metric.toExponential(3)}`;
+  } else if (outcome.outcome === "passed_after_backoff") {
+    headline = `Adaptive: passed after ${outcome.iterations} backoff`;
+    detail = `Final scale: ${outcome.final_scale.toFixed(3)}, measured metric: ${outcome.measured_metric.toExponential(3)}`;
+  } else {
+    headline = `Adaptive: budget exceeded (${outcome.iterations} iterations)`;
+    detail = `Best scale: ${outcome.best_scale.toFixed(3)}, best metric: ${outcome.best_metric.toExponential(3)}`;
+  }
+
+  return (
+    <div className={`rounded-sm border ${borderColor} ${bgColor} px-3 py-2`}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+        <span className={`text-[10px] font-mono font-medium uppercase tracking-[0.12em] ${headlineColor}`}>
+          {headline}
+        </span>
+      </div>
+      <p className="text-[12px] text-muted-foreground leading-relaxed pl-3">{detail}</p>
+    </div>
+  );
+}
 
 function Readout({ label, value }: { label: string; value: string | number }) {
   return (
@@ -493,6 +591,12 @@ export function DiagnosticsPanel() {
         <TabsContent value="summary" className="space-y-3 mt-3">
           <StatusIndicators diagnostics={diagnostics} />
           <DiagnosisCard diagnostics={diagnostics} />
+          {diagnostics.adaptive_validation && (
+            <AdaptiveValidationCard outcome={diagnostics.adaptive_validation} />
+          )}
+          {diagnostics.region_coverage && (
+            <RegionCoverageBar coverage={diagnostics.region_coverage} />
+          )}
           <div className="space-y-0.5 border-t border-border/30 pt-2">
             <Readout
               label="Selected strength"

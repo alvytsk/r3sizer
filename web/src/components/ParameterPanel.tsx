@@ -16,8 +16,13 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { useProcessorStore } from "@/stores/processor-store";
-import type { MetricWeights } from "@/types/wasm-types";
-import { DEFAULT_METRIC_WEIGHTS } from "@/types/wasm-types";
+import type { MetricWeights, GainTable, ClassificationParams } from "@/types/wasm-types";
+import {
+  DEFAULT_METRIC_WEIGHTS,
+  DEFAULT_GAIN_TABLE,
+  DEFAULT_CLASSIFICATION_PARAMS,
+  DEFAULT_CONTENT_ADAPTIVE_STRATEGY,
+} from "@/types/wasm-types";
 
 function sliderValue(v: number | readonly number[]): number {
   return Array.isArray(v) ? v[0] : (v as number);
@@ -206,6 +211,11 @@ const CLAMP_POLICY: Record<string, string> = {
   Normalize: "Normalize",
 };
 
+const SHARPEN_STRATEGY: Record<string, string> = {
+  uniform: "Uniform",
+  content_adaptive: "Content Adaptive",
+};
+
 function SelectedLabel({ labels, value }: { labels: Record<string, string>; value: string }) {
   return (
     <span className="flex flex-1 text-left truncate" data-slot="select-value">
@@ -332,6 +342,260 @@ export function ParameterPanel() {
             </Select>
           </div>
         </div>
+        <div>
+          <ValueLabel>Strategy</ValueLabel>
+          <Select
+            value={params.sharpen_strategy.strategy}
+            onValueChange={(v) => {
+              if (!v) return;
+              if (v === "uniform") {
+                updateParams({ sharpen_strategy: { strategy: "uniform" } });
+              } else {
+                updateParams({
+                  sharpen_strategy: { ...DEFAULT_CONTENT_ADAPTIVE_STRATEGY },
+                });
+              }
+            }}
+          >
+            <SelectTrigger className="h-8 text-sm font-mono">
+              <SelectedLabel labels={SHARPEN_STRATEGY} value={params.sharpen_strategy.strategy} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="uniform">Uniform</SelectItem>
+              <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {params.sharpen_strategy.strategy === "content_adaptive" && (
+          <Collapsible defaultOpen>
+            <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
+              <ChevronDown className="h-3 w-3" />
+              Adaptive Settings
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3 pt-2">
+              {/* Gain table */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <ValueLabel>Gain Table</ValueLabel>
+                  <button
+                    type="button"
+                    className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
+                    onClick={() => {
+                      if (params.sharpen_strategy.strategy === "content_adaptive") {
+                        updateParams({
+                          sharpen_strategy: {
+                            ...params.sharpen_strategy,
+                            gain_table: { ...DEFAULT_GAIN_TABLE },
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    reset
+                  </button>
+                </div>
+                {(
+                  [
+                    ["flat", "Flat"],
+                    ["textured", "Textured"],
+                    ["strong_edge", "Strong Edge"],
+                    ["microtexture", "Microtexture"],
+                    ["risky_halo_zone", "Risky Halo"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key}>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[11px] text-muted-foreground/70">{label}</span>
+                      <span className="text-[10px] font-mono text-primary">
+                        {params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.gain_table[key].toFixed(2)
+                          : "—"}
+                      </span>
+                    </div>
+                    <Slider
+                      min={0.25}
+                      max={2.0}
+                      step={0.05}
+                      value={[
+                        params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.gain_table[key]
+                          : 1.0,
+                      ]}
+                      onValueChange={(v) => {
+                        if (params.sharpen_strategy.strategy === "content_adaptive") {
+                          const gt: GainTable = {
+                            ...params.sharpen_strategy.gain_table,
+                            [key]: sliderValue(v),
+                          };
+                          updateParams({
+                            sharpen_strategy: { ...params.sharpen_strategy, gain_table: gt },
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Classification thresholds */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <ValueLabel>Classification</ValueLabel>
+                  <button
+                    type="button"
+                    className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
+                    onClick={() => {
+                      if (params.sharpen_strategy.strategy === "content_adaptive") {
+                        updateParams({
+                          sharpen_strategy: {
+                            ...params.sharpen_strategy,
+                            classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    reset
+                  </button>
+                </div>
+                {(
+                  [
+                    ["gradient_low_threshold", "Grad Low", 0, 1, 0.01],
+                    ["gradient_high_threshold", "Grad High", 0, 2, 0.01],
+                    ["variance_low_threshold", "Var Low", 0, 0.1, 0.001],
+                    ["variance_high_threshold", "Var High", 0, 0.1, 0.001],
+                  ] as const
+                ).map(([key, label, min, max, step]) => (
+                  <div key={key}>
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[11px] text-muted-foreground/70">{label}</span>
+                      <span className="text-[10px] font-mono text-primary">
+                        {params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.classification[key].toFixed(3)
+                          : "—"}
+                      </span>
+                    </div>
+                    <Slider
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={[
+                        params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.classification[key]
+                          : 0,
+                      ]}
+                      onValueChange={(v) => {
+                        if (params.sharpen_strategy.strategy === "content_adaptive") {
+                          const cp: ClassificationParams = {
+                            ...params.sharpen_strategy.classification,
+                            [key]: sliderValue(v),
+                          };
+                          updateParams({
+                            sharpen_strategy: { ...params.sharpen_strategy, classification: cp },
+                          });
+                        }
+                      }}
+                    />
+                  </div>
+                ))}
+                <div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[11px] text-muted-foreground/70">Var Window</span>
+                    <span className="text-[10px] font-mono text-primary">
+                      {params.sharpen_strategy.strategy === "content_adaptive"
+                        ? params.sharpen_strategy.classification.variance_window
+                        : "—"}
+                    </span>
+                  </div>
+                  <Slider
+                    min={3}
+                    max={11}
+                    step={2}
+                    value={[
+                      params.sharpen_strategy.strategy === "content_adaptive"
+                        ? params.sharpen_strategy.classification.variance_window
+                        : 5,
+                    ]}
+                    onValueChange={(v) => {
+                      if (params.sharpen_strategy.strategy === "content_adaptive") {
+                        const cp: ClassificationParams = {
+                          ...params.sharpen_strategy.classification,
+                          variance_window: sliderValue(v),
+                        };
+                        updateParams({
+                          sharpen_strategy: { ...params.sharpen_strategy, classification: cp },
+                        });
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Backoff */}
+              <div className="space-y-1.5">
+                <ValueLabel>Backoff</ValueLabel>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[11px] text-muted-foreground/70">Max Iterations</span>
+                    <Slider
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={[
+                        params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.max_backoff_iterations
+                          : 4,
+                      ]}
+                      onValueChange={(v) => {
+                        if (params.sharpen_strategy.strategy === "content_adaptive") {
+                          updateParams({
+                            sharpen_strategy: {
+                              ...params.sharpen_strategy,
+                              max_backoff_iterations: sliderValue(v),
+                            },
+                          });
+                        }
+                      }}
+                    />
+                    <span className="text-[10px] font-mono text-primary">
+                      {params.sharpen_strategy.strategy === "content_adaptive"
+                        ? params.sharpen_strategy.max_backoff_iterations
+                        : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-muted-foreground/70">Scale Factor</span>
+                    <Slider
+                      min={0.1}
+                      max={0.95}
+                      step={0.05}
+                      value={[
+                        params.sharpen_strategy.strategy === "content_adaptive"
+                          ? params.sharpen_strategy.backoff_scale_factor
+                          : 0.8,
+                      ]}
+                      onValueChange={(v) => {
+                        if (params.sharpen_strategy.strategy === "content_adaptive") {
+                          updateParams({
+                            sharpen_strategy: {
+                              ...params.sharpen_strategy,
+                              backoff_scale_factor: sliderValue(v),
+                            },
+                          });
+                        }
+                      }}
+                    />
+                    <span className="text-[10px] font-mono text-primary">
+                      {params.sharpen_strategy.strategy === "content_adaptive"
+                        ? params.sharpen_strategy.backoff_scale_factor.toFixed(2)
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </div>
 
       {/* Metric */}
