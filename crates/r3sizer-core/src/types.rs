@@ -326,6 +326,9 @@ pub struct AutoSharpParams {
     pub metric_weights: MetricWeights,
     /// Verbosity level for serialized diagnostics.
     pub diagnostics_level: DiagnosticsLevel,
+    /// Strength distribution strategy. Default: `Uniform`.
+    #[serde(default)]
+    pub sharpen_strategy: SharpenStrategy,
 }
 
 impl Default for AutoSharpParams {
@@ -347,6 +350,7 @@ impl Default for AutoSharpParams {
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
             metric_weights: MetricWeights::default(),
             diagnostics_level: DiagnosticsLevel::default(),
+            sharpen_strategy: SharpenStrategy::default(),
         }
     }
 }
@@ -371,6 +375,13 @@ impl AutoSharpParams {
             return Err(CoreError::InvalidParams(
                 "PaperLightnessApprox requires SharpenMode::Lightness".into(),
             ));
+        }
+        if let SharpenStrategy::ContentAdaptive { backoff_scale_factor, .. } = &self.sharpen_strategy {
+            if *backoff_scale_factor <= 0.0 || *backoff_scale_factor >= 1.0 {
+                return Err(CoreError::InvalidParams(
+                    "backoff_scale_factor must be in (0.0, 1.0)".into(),
+                ));
+            }
         }
         self.probe_strengths.resolve()?;
         Ok(())
@@ -442,6 +453,12 @@ pub struct StageTiming {
     pub final_sharpen_us: u64,
     pub clamp_us: u64,
     pub total_us: u64,
+    /// Region classification time (None when Uniform).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_us: Option<u64>,
+    /// Adaptive validation + backoff time (None when Uniform).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_validation_us: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -513,6 +530,322 @@ pub enum DiagnosticsLevel {
     Summary,
     /// Per-probe breakdowns included (evaluation mode).
     Full,
+}
+
+// ---------------------------------------------------------------------------
+// Content-adaptive sharpening types (v0.3)
+// ---------------------------------------------------------------------------
+
+/// Number of region classes.
+pub const REGION_CLASS_COUNT: usize = 5;
+
+/// Classification of a pixel's local content for adaptive sharpening.
+///
+/// Stable `as usize` ordering is part of the public contract:
+/// Flat=0, Textured=1, StrongEdge=2, Microtexture=3, RiskyHaloZone=4.
+///
+/// Provenance: `EngineeringChoice` — taxonomy is not paper-confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum RegionClass {
+    Flat = 0,
+    Textured = 1,
+    StrongEdge = 2,
+    Microtexture = 3,
+    RiskyHaloZone = 4,
+}
+
+/// Per-pixel region classification map with embedded dimensions.
+///
+/// Dimensions are part of the type to prevent accidental reuse with
+/// a wrong-sized image.
+#[derive(Debug, Clone)]
+pub struct RegionMap {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<RegionClass>,
+}
+
+impl RegionMap {
+    /// Create a new region map. Returns error if `data.len() != width * height`.
+    pub fn new(width: u32, height: u32, data: Vec<RegionClass>) -> Result<Self, CoreError> {
+        let expected = (width as usize) * (height as usize);
+        if data.len() != expected {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: expected,
+                got_len: data.len(),
+            });
+        }
+        Ok(Self { width, height, data })
+    }
+
+    /// Read the class at pixel (x, y).
+    #[inline]
+    pub fn get(&self, x: u32, y: u32) -> RegionClass {
+        self.data[(y as usize) * (self.width as usize) + (x as usize)]
+    }
+
+    /// Read-only access to the underlying data slice.
+    pub fn data(&self) -> &[RegionClass] {
+        &self.data
+    }
+}
+
+/// Per-pixel gain multiplier map with embedded dimensions.
+#[derive(Debug, Clone)]
+pub struct GainMap {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<f32>,
+}
+
+impl GainMap {
+    /// Create a new gain map. Returns error if `data.len() != width * height`.
+    pub fn new(width: u32, height: u32, data: Vec<f32>) -> Result<Self, CoreError> {
+        let expected = (width as usize) * (height as usize);
+        if data.len() != expected {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: expected,
+                got_len: data.len(),
+            });
+        }
+        Ok(Self { width, height, data })
+    }
+
+    /// Read the gain at pixel (x, y).
+    #[inline]
+    pub fn get(&self, x: u32, y: u32) -> f32 {
+        self.data[(y as usize) * (self.width as usize) + (x as usize)]
+    }
+
+    /// Read-only access to the underlying data slice.
+    pub fn data(&self) -> &[f32] {
+        &self.data
+    }
+}
+
+/// Per-class gain multipliers for adaptive sharpening.
+///
+/// **Hard validation bound:** all values must be in `[0.25, 4.0]`.
+/// This prevents absurd configuration but does not imply values near the
+/// bounds are supported or tested.
+///
+/// **Recommended operating range:** `[0.5, 1.5]`.
+///
+/// **Design criterion:** misclassification should degrade gently, not dramatically.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GainTable {
+    pub flat: f32,
+    pub textured: f32,
+    pub strong_edge: f32,
+    pub microtexture: f32,
+    pub risky_halo_zone: f32,
+}
+
+impl GainTable {
+    const MIN_GAIN: f32 = 0.25;
+    const MAX_GAIN: f32 = 4.0;
+
+    /// Construct with validation: all values must be in `[0.25, 4.0]`.
+    pub fn new(
+        flat: f32,
+        textured: f32,
+        strong_edge: f32,
+        microtexture: f32,
+        risky_halo_zone: f32,
+    ) -> Result<Self, CoreError> {
+        let vals = [flat, textured, strong_edge, microtexture, risky_halo_zone];
+        for &v in &vals {
+            if !(Self::MIN_GAIN..=Self::MAX_GAIN).contains(&v) {
+                return Err(CoreError::InvalidParams(format!(
+                    "gain value {v} outside allowed range [{}, {}]",
+                    Self::MIN_GAIN,
+                    Self::MAX_GAIN,
+                )));
+            }
+        }
+        Ok(Self { flat, textured, strong_edge, microtexture, risky_halo_zone })
+    }
+
+    /// Canonical v0.3 preset. Range `[0.70, 1.10]`.
+    pub fn v03_default() -> Self {
+        Self {
+            flat: 0.75,
+            textured: 0.95,
+            strong_edge: 1.00,
+            microtexture: 1.10,
+            risky_halo_zone: 0.70,
+        }
+    }
+
+    /// Look up the gain for a given region class.
+    #[inline]
+    pub fn gain_for(&self, class: RegionClass) -> f32 {
+        match class {
+            RegionClass::Flat => self.flat,
+            RegionClass::Textured => self.textured,
+            RegionClass::StrongEdge => self.strong_edge,
+            RegionClass::Microtexture => self.microtexture,
+            RegionClass::RiskyHaloZone => self.risky_halo_zone,
+        }
+    }
+}
+
+/// Thresholds for the four-pass pixel classifier.
+///
+/// All thresholds are tied to the specific operators in `classifier.rs`:
+/// - Gradient thresholds: **unnormalized Sobel scale** (max ≈ 5.66 for luminance in [0,1]).
+/// - Variance thresholds: **squared-luminance units** (max 0.25 for bounded data).
+///
+/// Changing the Sobel normalization or variance formula invalidates these defaults.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ClassificationParams {
+    pub gradient_low_threshold: f32,
+    pub gradient_high_threshold: f32,
+    pub variance_low_threshold: f32,
+    pub variance_high_threshold: f32,
+    pub variance_window: usize,
+}
+
+impl ClassificationParams {
+    /// Construct with validation.
+    pub fn new(
+        gradient_low_threshold: f32,
+        gradient_high_threshold: f32,
+        variance_low_threshold: f32,
+        variance_high_threshold: f32,
+        variance_window: usize,
+    ) -> Result<Self, CoreError> {
+        if gradient_low_threshold > gradient_high_threshold {
+            return Err(CoreError::InvalidParams(
+                "gradient_low_threshold must be <= gradient_high_threshold".into(),
+            ));
+        }
+        if variance_low_threshold > variance_high_threshold {
+            return Err(CoreError::InvalidParams(
+                "variance_low_threshold must be <= variance_high_threshold".into(),
+            ));
+        }
+        if variance_window < 3 {
+            return Err(CoreError::InvalidParams(
+                "variance_window must be >= 3".into(),
+            ));
+        }
+        if variance_window.is_multiple_of(2) {
+            return Err(CoreError::InvalidParams(
+                "variance_window must be odd".into(),
+            ));
+        }
+        Ok(Self {
+            gradient_low_threshold,
+            gradient_high_threshold,
+            variance_low_threshold,
+            variance_high_threshold,
+            variance_window,
+        })
+    }
+}
+
+impl Default for ClassificationParams {
+    fn default() -> Self {
+        Self {
+            gradient_low_threshold: 0.05,
+            gradient_high_threshold: 0.40,
+            variance_low_threshold: 0.001,
+            variance_high_threshold: 0.010,
+            variance_window: 5,
+        }
+    }
+}
+
+/// Orchestration axis for sharpening strength distribution.
+///
+/// Orthogonal to [`SharpenMode`] (Rgb/Lightness) and [`SharpenModel`] (operator).
+/// `SharpenStrategy` controls whether strength is applied uniformly or modulated
+/// per-pixel by a region-based gain map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "strategy")]
+pub enum SharpenStrategy {
+    /// Current behaviour: single global strength applied everywhere.
+    #[default]
+    Uniform,
+    /// Per-pixel gain modulated by region classification.
+    ContentAdaptive {
+        classification: ClassificationParams,
+        gain_table: GainTable,
+        /// Maximum backoff iterations if adaptive result exceeds budget. Default: 4.
+        max_backoff_iterations: u8,
+        /// Scale reduction per backoff iteration. Must be in (0.0, 1.0). Default: 0.8.
+        backoff_scale_factor: f32,
+    },
+}
+
+/// Per-class pixel coverage computed from a [`RegionMap`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RegionCoverage {
+    pub total_pixels: u32,
+    pub flat: u32,
+    pub textured: u32,
+    pub strong_edge: u32,
+    pub microtexture: u32,
+    pub risky_halo_zone: u32,
+    pub flat_fraction: f32,
+    pub textured_fraction: f32,
+    pub strong_edge_fraction: f32,
+    pub microtexture_fraction: f32,
+    pub risky_halo_zone_fraction: f32,
+}
+
+impl RegionCoverage {
+    /// Compute coverage statistics from a region map.
+    pub fn from_region_map(map: &RegionMap) -> Self {
+        let mut counts = [0u32; REGION_CLASS_COUNT];
+        for &c in map.data() {
+            counts[c as usize] += 1;
+        }
+        let total = map.width * map.height;
+        let frac = |c: u32| if total > 0 { c as f32 / total as f32 } else { 0.0 };
+        Self {
+            total_pixels: total,
+            flat: counts[0],
+            textured: counts[1],
+            strong_edge: counts[2],
+            microtexture: counts[3],
+            risky_halo_zone: counts[4],
+            flat_fraction: frac(counts[0]),
+            textured_fraction: frac(counts[1]),
+            strong_edge_fraction: frac(counts[2]),
+            microtexture_fraction: frac(counts[3]),
+            risky_halo_zone_fraction: frac(counts[4]),
+        }
+    }
+}
+
+/// Outcome of the adaptive validation / backoff phase.
+///
+/// `target_metric` is not duplicated here — it lives in [`AutoSharpParams::target_artifact_ratio`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum AdaptiveValidationOutcome {
+    /// Adaptive result met budget on first try.
+    PassedDirect { measured_metric: f32 },
+    /// Budget met after scaling down global strength.
+    PassedAfterBackoff {
+        iterations: u8,
+        final_scale: f32,
+        measured_metric: f32,
+    },
+    /// Budget not met after all backoff iterations; best result returned.
+    FailedBudgetExceeded {
+        iterations: u8,
+        best_scale: f32,
+        best_metric: f32,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -614,6 +947,14 @@ pub struct AutoSharpDiagnostics {
     /// Provenance of the metric weights.
     pub metric_weights_provenance: Provenance,
 
+    // --- Content-adaptive (v0.3) ---
+    /// Per-class region coverage. None when `SharpenStrategy::Uniform`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_coverage: Option<RegionCoverage>,
+    /// Outcome of adaptive validation. None when `SharpenStrategy::Uniform`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_validation: Option<AdaptiveValidationOutcome>,
+
     // --- Timing ---
     /// Per-stage wall-clock timing.
     #[serde(default)]
@@ -629,4 +970,151 @@ pub struct ProcessOutput {
     /// Final processed image (clamped according to `ClampPolicy`).
     pub image: LinearRgbImage,
     pub diagnostics: AutoSharpDiagnostics,
+}
+
+// ---------------------------------------------------------------------------
+// Tests — content-adaptive types
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod adaptive_tests {
+    use super::*;
+
+    #[test]
+    fn region_class_as_usize_stable_ordering() {
+        assert_eq!(RegionClass::Flat as usize, 0);
+        assert_eq!(RegionClass::Textured as usize, 1);
+        assert_eq!(RegionClass::StrongEdge as usize, 2);
+        assert_eq!(RegionClass::Microtexture as usize, 3);
+        assert_eq!(RegionClass::RiskyHaloZone as usize, 4);
+    }
+
+    #[test]
+    fn region_map_valid_construction() {
+        let data = vec![RegionClass::Flat; 12];
+        let map = RegionMap::new(4, 3, data).unwrap();
+        assert_eq!(map.width, 4);
+        assert_eq!(map.height, 3);
+        assert_eq!(map.get(0, 0), RegionClass::Flat);
+        assert_eq!(map.get(3, 2), RegionClass::Flat);
+    }
+
+    #[test]
+    fn region_map_wrong_length_fails() {
+        let data = vec![RegionClass::Flat; 10];
+        assert!(RegionMap::new(4, 3, data).is_err());
+    }
+
+    #[test]
+    fn gain_map_valid_construction() {
+        let data = vec![1.0f32; 6];
+        let map = GainMap::new(3, 2, data).unwrap();
+        assert_eq!(map.width, 3);
+        assert_eq!(map.height, 2);
+        assert!((map.get(0, 0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_map_wrong_length_fails() {
+        let data = vec![1.0f32; 5];
+        assert!(GainMap::new(3, 2, data).is_err());
+    }
+
+    #[test]
+    fn gain_table_v03_default_values() {
+        let gt = GainTable::v03_default();
+        assert!((gt.flat - 0.75).abs() < 1e-6);
+        assert!((gt.textured - 0.95).abs() < 1e-6);
+        assert!((gt.strong_edge - 1.00).abs() < 1e-6);
+        assert!((gt.microtexture - 1.10).abs() < 1e-6);
+        assert!((gt.risky_halo_zone - 0.70).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_table_gain_for_each_class() {
+        let gt = GainTable::v03_default();
+        assert!((gt.gain_for(RegionClass::Flat) - 0.75).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::Textured) - 0.95).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::StrongEdge) - 1.00).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::Microtexture) - 1.10).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::RiskyHaloZone) - 0.70).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_table_out_of_bounds_rejected() {
+        assert!(GainTable::new(0.2, 1.0, 1.0, 1.0, 1.0).is_err());
+        assert!(GainTable::new(1.0, 5.0, 1.0, 1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn gain_table_at_bounds_accepted() {
+        assert!(GainTable::new(0.25, 4.0, 1.0, 1.0, 1.0).is_ok());
+    }
+
+    #[test]
+    fn classification_params_default_valid() {
+        let cp = ClassificationParams::default();
+        assert!(cp.gradient_low_threshold <= cp.gradient_high_threshold);
+        assert!(cp.variance_low_threshold <= cp.variance_high_threshold);
+        assert!(cp.variance_window >= 3);
+        assert!(cp.variance_window % 2 == 1);
+    }
+
+    #[test]
+    fn classification_params_inverted_gradient_rejected() {
+        let result = ClassificationParams::new(0.5, 0.1, 0.001, 0.01, 5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_inverted_variance_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.1, 0.01, 5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_even_window_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.001, 0.01, 4);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_window_too_small_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.001, 0.01, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sharpen_strategy_default_is_uniform() {
+        assert!(matches!(SharpenStrategy::default(), SharpenStrategy::Uniform));
+    }
+
+    #[test]
+    fn sharpen_strategy_content_adaptive_construction() {
+        let strategy = SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::v03_default(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        };
+        assert!(matches!(strategy, SharpenStrategy::ContentAdaptive { .. }));
+    }
+
+    #[test]
+    fn region_coverage_invariant() {
+        let rc = RegionCoverage::from_region_map(&RegionMap::new(
+            2, 2,
+            vec![
+                RegionClass::Flat,
+                RegionClass::Textured,
+                RegionClass::StrongEdge,
+                RegionClass::Flat,
+            ],
+        ).unwrap());
+        assert_eq!(rc.total_pixels, 4);
+        assert_eq!(rc.flat + rc.textured + rc.strong_edge + rc.microtexture + rc.risky_halo_zone, 4);
+        assert_eq!(rc.flat, 2);
+        assert_eq!(rc.textured, 1);
+        assert_eq!(rc.strong_edge, 1);
+    }
 }

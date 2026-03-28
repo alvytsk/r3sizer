@@ -1,7 +1,8 @@
 use r3sizer_core::{
-    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus,
-    DiagnosticsLevel, FallbackReason, FitStrategy, ImageSize, LinearRgbImage, MetricComponent,
-    MetricMode, ProbeConfig, Provenance, SelectionMode, SharpenMode, SharpenModel,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel, FallbackReason,
+    FitStrategy, GainTable, ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig,
+    Provenance, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy,
     process_auto_sharp_downscale,
 };
 
@@ -630,4 +631,126 @@ fn diagnostics_json_round_trip() {
     assert_eq!(mc_orig.components.len(), mc_deser.components.len());
     assert!((mc_orig.selection_score - mc_deser.selection_score).abs() < 1e-10);
     assert!((mc_orig.composite_score - mc_deser.composite_score).abs() < 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+// Content-adaptive sharpening (v0.3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uniform_strategy_identical_to_default() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+
+    // New fields are None for Uniform
+    assert!(d.region_coverage.is_none(), "region_coverage should be None for Uniform");
+    assert!(d.adaptive_validation.is_none(), "adaptive_validation should be None for Uniform");
+    assert!(d.timing.classification_us.is_none());
+    assert!(d.timing.adaptive_validation_us.is_none());
+
+    // Existing semantics unchanged
+    assert!(d.selected_strength > 0.0);
+    assert!(d.measured_artifact_ratio.is_finite());
+    assert!(d.measured_metric_value.is_finite());
+}
+
+#[test]
+fn content_adaptive_happy_path() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        target_artifact_ratio: 0.1, // generous P0
+        sharpen_strategy: SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::v03_default(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        },
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+
+    // Region coverage present and sums to pixel count
+    let cov = d.region_coverage.as_ref().expect("region_coverage should be Some");
+    assert_eq!(cov.total_pixels, 16 * 16);
+    assert_eq!(
+        cov.flat + cov.textured + cov.strong_edge + cov.microtexture + cov.risky_halo_zone,
+        cov.total_pixels,
+    );
+
+    // Adaptive validation present
+    let val = d.adaptive_validation.as_ref().expect("adaptive_validation should be Some");
+    match val {
+        AdaptiveValidationOutcome::PassedDirect { measured_metric } => {
+            assert!(*measured_metric <= 0.1);
+        }
+        AdaptiveValidationOutcome::PassedAfterBackoff { measured_metric, .. } => {
+            assert!(*measured_metric <= 0.1);
+        }
+        _ => {} // FailedBudgetExceeded is acceptable — it's content-dependent
+    }
+
+    // Timing fields populated
+    assert!(d.timing.classification_us.is_some());
+    assert!(d.timing.adaptive_validation_us.is_some());
+
+    // Output is valid
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.image.height(), 16);
+    for &v in out.image.pixels() {
+        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1] after clamping");
+    }
+}
+
+#[test]
+fn content_adaptive_deterministic() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        sharpen_strategy: SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::v03_default(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        },
+        ..default_params(16, 16)
+    };
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out1.image.pixels(), out2.image.pixels(), "adaptive pipeline must be deterministic");
+    assert_eq!(
+        out1.diagnostics.selected_strength,
+        out2.diagnostics.selected_strength,
+    );
+}
+
+#[test]
+fn content_adaptive_tight_budget_triggers_backoff_or_failure() {
+    let src = checkerboard(32, 32);
+    let params = AutoSharpParams {
+        target_artifact_ratio: 0.0001, // very tight
+        sharpen_strategy: SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::new(1.5, 1.5, 2.0, 2.0, 1.5).unwrap(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        },
+        ..default_params(8, 8)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let val = out.diagnostics.adaptive_validation.as_ref()
+        .expect("adaptive_validation should be Some");
+
+    match val {
+        AdaptiveValidationOutcome::PassedDirect { .. } => {
+            // Possible but unlikely with these params
+        }
+        AdaptiveValidationOutcome::PassedAfterBackoff { iterations, .. } => {
+            assert!(*iterations > 0);
+        }
+        AdaptiveValidationOutcome::FailedBudgetExceeded { iterations, .. } => {
+            assert!(*iterations > 0);
+        }
+    }
 }

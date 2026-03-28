@@ -1,7 +1,7 @@
 /// Core run logic: load → process → save → diagnostics.
 use anyhow::{bail, Context, Result};
 
-use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
+use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig, SharpenStrategy};
 use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
@@ -64,6 +64,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         artifact_metric: args.artifact_metric.into(),
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
+        sharpen_strategy: SharpenStrategy::default(),
     }
 }
 

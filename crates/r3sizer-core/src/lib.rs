@@ -12,6 +12,7 @@
 //! All intermediate calculations use `f32` pixel buffers.
 //! Polynomial fitting uses `f64` for numerical stability.
 
+pub mod classifier;
 pub mod color;
 pub mod contrast;
 pub mod fit;
@@ -26,11 +27,13 @@ pub mod types;
 // Re-export the complete public surface.
 pub use pipeline::process_auto_sharp_downscale;
 pub use types::{
-    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, CrossingStatus,
-    CubicPolynomial, DiagnosticsLevel, FallbackReason, FitQuality, FitStatus, FitStrategy,
-    ImageSize, LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights,
-    ProbeSample, ProbeConfig, ProcessOutput, Provenance, RobustnessFlags, SelectionMode,
-    SharpenMode, SharpenModel, StageTiming, StageProvenance,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial, DiagnosticsLevel,
+    FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageSize,
+    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample,
+    ProbeConfig, ProcessOutput, Provenance, RegionClass, RegionCoverage, RegionMap,
+    RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy, StageTiming,
+    StageProvenance, REGION_CLASS_COUNT,
 };
 
 // ---------------------------------------------------------------------------
