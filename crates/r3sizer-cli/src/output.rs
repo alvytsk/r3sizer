@@ -1,5 +1,5 @@
 /// Formatted stdout output.
-use imgsharp_core::{
+use r3sizer_core::{
     ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus, MetricMode,
     Provenance, SelectionMode, SharpenMode, SharpenModel,
 };

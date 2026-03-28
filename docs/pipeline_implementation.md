@@ -1,14 +1,14 @@
 # Pipeline Implementation Summary
 
-Detailed walkthrough of the `process_auto_sharp_downscale` pipeline as implemented in `imgsharp-core`. This document traces one invocation from entry to return, covering data flow, allocations, numerical decisions, and fallback logic.
+Detailed walkthrough of the `process_auto_sharp_downscale` pipeline as implemented in `r3sizer-core`. This document traces one invocation from entry to return, covering data flow, allocations, numerical decisions, and fallback logic.
 
 ---
 
 ## Entry Point
 
-`crates/imgsharp-core/src/pipeline.rs` — `process_auto_sharp_downscale(input, params)`
+`crates/r3sizer-core/src/pipeline.rs` — `process_auto_sharp_downscale(input, params)`
 
-The caller supplies a `LinearRgbImage` (already in linear RGB — the sRGB-to-linear conversion is the responsibility of `imgsharp-io` or the caller) and an `AutoSharpParams` struct.
+The caller supplies a `LinearRgbImage` (already in linear RGB — the sRGB-to-linear conversion is the responsibility of `r3sizer-io` or the caller) and an `AutoSharpParams` struct.
 
 Returns `Result<ProcessOutput, CoreError>` where `ProcessOutput` contains the final image and a full `AutoSharpDiagnostics` record.
 
@@ -31,7 +31,7 @@ Validation is fail-fast; any violation returns `CoreError::InvalidParams`.
 
 `downscale(input, target)`
 
-Implementation: `crates/imgsharp-core/src/resize.rs`
+Implementation: `crates/r3sizer-core/src/resize.rs`
 
 - Wraps the flat `Vec<f32>` as an `image::ImageBuffer<Rgb<f32>>` (zero-copy layout match)
 - Calls `imageops::resize` with `FilterType::Lanczos3`
@@ -46,7 +46,7 @@ Implementation: `crates/imgsharp-core/src/resize.rs`
 
 ## Stage 3: Contrast Leveling (optional, disabled by default)
 
-Implementation: `crates/imgsharp-core/src/contrast.rs`
+Implementation: `crates/r3sizer-core/src/contrast.rs`
 
 When `enable_contrast_leveling = false` (default), this is a true no-op — returns immediately without touching the buffer.
 
@@ -65,7 +65,7 @@ When enabled, applies a per-channel percentile stretch:
 
 ## Stage 4: Baseline Measurement
 
-Implementation: `crates/imgsharp-core/src/metrics.rs`
+Implementation: `crates/r3sizer-core/src/metrics.rs`
 
 The artifact ratio of the base image is measured using the configured `ArtifactMetric`:
 
@@ -98,7 +98,7 @@ Result is always sorted ascending. Default: `[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0
 
 `make_kernel(params.sharpen_sigma)`
 
-Implementation: `crates/imgsharp-core/src/sharpen.rs`
+Implementation: `crates/r3sizer-core/src/sharpen.rs`
 
 Builds a 1-D normalized Gaussian kernel with `radius = ceil(3 * sigma)`. Default sigma = 1.0 gives kernel size 7 (radius 3). The kernel is built once and reused across all probes and the final sharpen.
 
@@ -157,7 +157,7 @@ Equivalent to `input[i] + amount * (input[i] - blur[i])` but computed as a singl
 
 ### Gaussian blur implementation
 
-`crates/imgsharp-core/src/sharpen.rs` — `gaussian_blur()` (RGB) / `gaussian_blur_single_channel()` (single-channel)
+`crates/r3sizer-core/src/sharpen.rs` — `gaussian_blur()` (RGB) / `gaussian_blur_single_channel()` (single-channel)
 
 Separable 2-pass (horizontal then vertical) with explicit edge handling:
 1. **Left/top edge:** clamped indexing (`saturating_sub`)
@@ -196,7 +196,7 @@ Two strategies:
 
 ### Cubic fit internals
 
-`crates/imgsharp-core/src/fit.rs` — `fit_cubic_with_quality()`
+`crates/r3sizer-core/src/fit.rs` — `fit_cubic_with_quality()`
 
 Fits `P_hat(s) = a*s^3 + b*s^2 + c*s + d` by solving the 4x4 Vandermonde normal equations:
 
@@ -258,7 +258,7 @@ When the pipeline does not use the polynomial root, `determine_fallback_reason` 
 
 ## Stage 7: Root Solving
 
-`crates/imgsharp-core/src/solve.rs` — `find_sharpness()`
+`crates/r3sizer-core/src/solve.rs` — `find_sharpness()`
 
 Solves `P_hat(s*) = P0` for the optimal sharpening strength.
 
@@ -366,7 +366,7 @@ Returns `ProcessOutput { image, diagnostics }`.
 
 ## Data Types
 
-All types defined in `crates/imgsharp-core/src/types.rs`.
+All types defined in `crates/r3sizer-core/src/types.rs`.
 
 ### `LinearRgbImage`
 - Interleaved `[R, G, B, R, G, B, ...]` flat `Vec<f32>`, row-major

@@ -1,12 +1,12 @@
 [package]
-name    = "imgsharp-cli"
+name    = "r3sizer-cli"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
 description = "CLI for automatic-sharpness image downscaling"
 
 [[bin]]
-name = "imgsharp"
+name = "r3sizer"
 path = "src/main.rs"
 
 [dependencies]
@@ -15,5 +15,5 @@ anyhow        = "1"
 serde         = { workspace = true }
 serde_json    = { workspace = true }
 glob          = "0.3"
-imgsharp-core = { path = "../imgsharp-core" }
-imgsharp-io   = { path = "../imgsharp-io" }
+r3sizer-core = { path = "../r3sizer-core" }
+r3sizer-io   = { path = "../r3sizer-io" }

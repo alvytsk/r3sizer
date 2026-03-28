@@ -1,13 +1,13 @@
 # Algorithm: Automatic Sharpness Adjustment When Reducing Digital Images
 
-This document describes the pipeline implemented in `imgsharp-core`.
+This document describes the pipeline implemented in `r3sizer-core`.
 
 ---
 
 ## Stage overview
 
 ```
-1.  Input decoding              (imgsharp-io / load.rs)
+1.  Input decoding              (r3sizer-io / load.rs)
 2.  sRGB -> linear RGB          (color.rs)
 3.  Downscale                   (resize.rs)
 4.  Contrast leveling           (contrast.rs)       -- optional
@@ -17,14 +17,14 @@ This document describes the pipeline implemented in `imgsharp-core`.
 8.  Root solving                (solve.rs)
 9.  Final sharpening            (sharpen.rs + color.rs)
 10. Clamp + output              (pipeline.rs + color.rs)
-11. Save                        (imgsharp-io / save.rs)
+11. Save                        (r3sizer-io / save.rs)
 ```
 
 ---
 
 ## Stage 1: Input decoding
 
-`imgsharp-io::load::load_as_linear` opens the file via the `image` crate,
+`r3sizer-io::load::load_as_linear` opens the file via the `image` crate,
 converts to `Rgb8`, normalises bytes to f32 [0, 1], and immediately applies
 the sRGB -> linear transform.  The returned `LinearRgbImage` is already in
 linear light.

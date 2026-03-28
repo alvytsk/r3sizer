@@ -1,4 +1,4 @@
-import { initSync, process_image } from "./wasm-pkg/imgsharp_wasm";
+import { initSync, process_image } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 

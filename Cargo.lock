@@ -596,54 +596,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 
 [[package]]
-name = "imgsharp-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "glob",
- "imgsharp-core",
- "imgsharp-io",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "imgsharp-core"
-version = "0.1.0"
-dependencies = [
- "approx",
- "criterion",
- "image",
- "rayon",
- "serde",
- "thiserror",
- "web-time",
-]
-
-[[package]]
-name = "imgsharp-io"
-version = "0.1.0"
-dependencies = [
- "image",
- "imgsharp-core",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "imgsharp-wasm"
-version = "0.1.0"
-dependencies = [
- "imgsharp-core",
- "js-sys",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "interpolate_name"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -993,6 +945,54 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r3sizer-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "glob",
+ "r3sizer-core",
+ "r3sizer-io",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "r3sizer-core"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "criterion",
+ "image",
+ "rayon",
+ "serde",
+ "thiserror",
+ "web-time",
+]
+
+[[package]]
+name = "r3sizer-io"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "r3sizer-core",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "r3sizer-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "r3sizer-core",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "rand"

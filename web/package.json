@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build:wasm": "wasm-pack build ../crates/imgsharp-wasm --target web --out-dir ../../web/src/wasm-pkg",
+    "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg",
     "dev": "vite",
     "build": "npm run build:wasm && tsc -b && vite build",
     "lint": "eslint .",

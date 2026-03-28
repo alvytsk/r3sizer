@@ -31,7 +31,7 @@ use crate::{
 
 /// Run the full automatic-sharpness downscale pipeline.
 ///
-/// `input` should already be in linear RGB space (use `imgsharp-io` to load
+/// `input` should already be in linear RGB space (use `r3sizer-io` to load
 /// and convert from a file).
 ///
 /// # Errors

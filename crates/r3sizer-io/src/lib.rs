@@ -1,6 +1,6 @@
-//! imgsharp-io — image loading and saving.
+//! r3sizer-io — image loading and saving.
 //!
-//! Bridges the `image` crate's file I/O to `imgsharp_core::LinearRgbImage`.
+//! Bridges the `image` crate's file I/O to `r3sizer_core::LinearRgbImage`.
 //!
 //! Load path:  file → u8/u16 pixels → normalized f32 → sRGB → linear RGB
 //! Save path:  linear RGB → sRGB → u8 clamp → file
@@ -21,7 +21,7 @@ pub enum IoError {
     Io(#[from] std::io::Error),
 
     #[error("core error: {0}")]
-    Core(#[from] imgsharp_core::CoreError),
+    Core(#[from] r3sizer_core::CoreError),
 
     #[error("unsupported pixel format: {0}")]
     UnsupportedFormat(String),

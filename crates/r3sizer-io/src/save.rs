@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use image::{ImageBuffer, Rgb};
-use imgsharp_core::{color, LinearRgbImage};
+use r3sizer_core::{color, LinearRgbImage};
 
 use crate::{convert::linear_image_to_u8_rgb, IoError};
 

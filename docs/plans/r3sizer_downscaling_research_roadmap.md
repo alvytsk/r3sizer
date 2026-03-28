@@ -1,11 +1,11 @@
-# r3sizer / imgsharp — обзор современных подходов к уменьшению фотографий и roadmap
+# r3sizer / r3sizer — обзор современных подходов к уменьшению фотографий и roadmap
 
 ## 1. Цель документа
 
 Этот документ собирает в одном месте:
 
 - краткий обзор **актуальных подходов** к уменьшению фотографий с сохранением визуального качества;
-- выводы, которые **полезны именно для `r3sizer` / `imgsharp-core`**;
+- выводы, которые **полезны именно для `r3sizer` / `r3sizer-core`**;
 - практический **roadmap для production-grade Rust core**;
 - явное разделение на:
   - **подтвержденное источниками**;
@@ -163,7 +163,7 @@ P(s) = proportion of linear RGB channel values outside [0, 1] after sharpening
 
 ---
 
-## 6. Архитектурный вектор для `imgsharp-core`
+## 6. Архитектурный вектор для `r3sizer-core`
 
 ### 6.1. Базовые модули
 
@@ -189,10 +189,10 @@ P(s) = proportion of linear RGB channel values outside [0, 1] after sharpening
 
 ### 6.3. Suggested workspace direction
 
-- `imgsharp-core` — algorithms and pipeline
-- `imgsharp-io` — loading/saving and buffer conversion
-- `imgsharp-cli` — command line interface and batch sweeps
-- `imgsharp-tauri` — future GUI shell
+- `r3sizer-core` — algorithms and pipeline
+- `r3sizer-io` — loading/saving and buffer conversion
+- `r3sizer-cli` — command line interface and batch sweeps
+- `r3sizer-tauri` — future GUI shell
 
 ---
 
@@ -456,7 +456,7 @@ s_local(x, y) = s_global * region_gain(class(x, y))
 
 ---
 
-## 9. Что нужно от `imgsharp-cli`
+## 9. Что нужно от `r3sizer-cli`
 
 CLI должен быть не просто «оберткой над core», а полноценным исследовательским инструментом.
 
@@ -627,7 +627,7 @@ CLI должен быть не просто «оберткой над core», а
 
 ## 14. Final recommendation
 
-Для `r3sizer` / `imgsharp` наиболее сильная стратегия сейчас выглядит так:
+Для `r3sizer` / `r3sizer` наиболее сильная стратегия сейчас выглядит так:
 
 - сохранить текущий deterministic linear-space pipeline как основу;
 - формально отделить confirmed facts от engineering approximations;

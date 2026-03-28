@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-/// Command-line arguments for `imgsharp`.
+/// Command-line arguments for `r3sizer`.
 #[derive(clap::Parser, Debug)]
 #[command(
-    name = "imgsharp",
+    name = "r3sizer",
     about = "Downscale an image with automatic sharpness adjustment",
     long_about = "Downscales an image in linear RGB space and selects the sharpening \
                   strength automatically by fitting a cubic model P(s) of out-of-gamut \
@@ -98,11 +98,11 @@ pub enum SharpenModeArg {
     Lightness,
 }
 
-impl From<SharpenModeArg> for imgsharp_core::SharpenMode {
+impl From<SharpenModeArg> for r3sizer_core::SharpenMode {
     fn from(val: SharpenModeArg) -> Self {
         match val {
-            SharpenModeArg::Rgb => imgsharp_core::SharpenMode::Rgb,
-            SharpenModeArg::Lightness => imgsharp_core::SharpenMode::Lightness,
+            SharpenModeArg::Rgb => r3sizer_core::SharpenMode::Rgb,
+            SharpenModeArg::Lightness => r3sizer_core::SharpenMode::Lightness,
         }
     }
 }
@@ -113,11 +113,11 @@ pub enum MetricModeArg {
     Relative,
 }
 
-impl From<MetricModeArg> for imgsharp_core::MetricMode {
+impl From<MetricModeArg> for r3sizer_core::MetricMode {
     fn from(val: MetricModeArg) -> Self {
         match val {
-            MetricModeArg::Absolute => imgsharp_core::MetricMode::AbsoluteTotal,
-            MetricModeArg::Relative => imgsharp_core::MetricMode::RelativeToBase,
+            MetricModeArg::Absolute => r3sizer_core::MetricMode::AbsoluteTotal,
+            MetricModeArg::Relative => r3sizer_core::MetricMode::RelativeToBase,
         }
     }
 }
@@ -128,11 +128,11 @@ pub enum SharpenModelArg {
     PaperLightnessApprox,
 }
 
-impl From<SharpenModelArg> for imgsharp_core::SharpenModel {
+impl From<SharpenModelArg> for r3sizer_core::SharpenModel {
     fn from(val: SharpenModelArg) -> Self {
         match val {
-            SharpenModelArg::PracticalUsm => imgsharp_core::SharpenModel::PracticalUsm,
-            SharpenModelArg::PaperLightnessApprox => imgsharp_core::SharpenModel::PaperLightnessApprox,
+            SharpenModelArg::PracticalUsm => r3sizer_core::SharpenModel::PracticalUsm,
+            SharpenModelArg::PaperLightnessApprox => r3sizer_core::SharpenModel::PaperLightnessApprox,
         }
     }
 }
@@ -143,11 +143,11 @@ pub enum ArtifactMetricArg {
     PixelOutOfGamut,
 }
 
-impl From<ArtifactMetricArg> for imgsharp_core::ArtifactMetric {
+impl From<ArtifactMetricArg> for r3sizer_core::ArtifactMetric {
     fn from(val: ArtifactMetricArg) -> Self {
         match val {
-            ArtifactMetricArg::ChannelClipping => imgsharp_core::ArtifactMetric::ChannelClippingRatio,
-            ArtifactMetricArg::PixelOutOfGamut => imgsharp_core::ArtifactMetric::PixelOutOfGamutRatio,
+            ArtifactMetricArg::ChannelClipping => r3sizer_core::ArtifactMetric::ChannelClippingRatio,
+            ArtifactMetricArg::PixelOutOfGamut => r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio,
         }
     }
 }

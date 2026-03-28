@@ -1,4 +1,4 @@
-use imgsharp_core::{
+use r3sizer_core::{
     ArtifactMetric, AutoSharpParams, ClampPolicy, CrossingStatus, FallbackReason, FitStrategy,
     ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig, Provenance,
     SelectionMode, SharpenMode, SharpenModel, process_auto_sharp_downscale,
@@ -271,7 +271,7 @@ fn diagnostics_have_valid_status_enums() {
     let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
     let d = &out.diagnostics;
 
-    assert!(matches!(d.fit_status, imgsharp_core::FitStatus::Success));
+    assert!(matches!(d.fit_status, r3sizer_core::FitStatus::Success));
     assert!(matches!(
         d.crossing_status,
         CrossingStatus::Found | CrossingStatus::NotFoundInRange

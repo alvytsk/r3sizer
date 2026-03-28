@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-use imgsharp_core::SelectionMode;
-use imgsharp_io::{load_as_linear, save_from_linear};
+use r3sizer_core::SelectionMode;
+use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::args::Cli;
 use crate::run::{build_params, resolve_dimensions};
@@ -19,8 +19,8 @@ struct FileResult {
     input: String,
     output: Option<String>,
     selected_strength: f32,
-    selection_mode: imgsharp_core::SelectionMode,
-    fallback_reason: Option<imgsharp_core::FallbackReason>,
+    selection_mode: r3sizer_core::SelectionMode,
+    fallback_reason: Option<r3sizer_core::FallbackReason>,
     measured_artifact_ratio: f32,
     measured_metric_value: f32,
     fit_r_squared: Option<f64>,
@@ -178,7 +178,7 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     let (tw, th) = resolve_dimensions(args, input.width(), input.height())?;
     let params = build_params(args, tw, th);
 
-    let output = imgsharp_core::process_auto_sharp_downscale(&input, &params)
+    let output = r3sizer_core::process_auto_sharp_downscale(&input, &params)
         .context("pipeline failed")?;
 
     // Save output image if sweep_output_dir is set.

@@ -1,4 +1,4 @@
-//! imgsharp-core — pure image processing library
+//! r3sizer-core — pure image processing library
 //!
 //! Pipeline summary:
 //!   1. sRGB → linear RGB  (`color`)

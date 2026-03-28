@@ -1,8 +1,8 @@
 /// Core run logic: load → process → save → diagnostics.
 use anyhow::{bail, Context, Result};
 
-use imgsharp_core::{AutoSharpParams, ClampPolicy, FitStrategy, ProbeConfig};
-use imgsharp_io::{load_as_linear, save_from_linear};
+use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, ProbeConfig};
+use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
 
@@ -64,7 +64,7 @@ pub fn run(args: &Cli) -> Result<()> {
     let params = build_params(args, target_width, target_height);
 
     // --- Process ---
-    let output = imgsharp_core::process_auto_sharp_downscale(&input, &params)
+    let output = r3sizer_core::process_auto_sharp_downscale(&input, &params)
         .context("pipeline processing failed")?;
 
     // --- Save image ---

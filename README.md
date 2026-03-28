@@ -11,9 +11,9 @@ heuristic.
 ## Quick start
 
 ```sh
-cargo build --release -p imgsharp-cli
+cargo build --release -p r3sizer-cli
 
-./target/release/imgsharp \
+./target/release/r3sizer \
   --input photo.jpg \
   --output out.png \
   --width 800 \
@@ -68,7 +68,7 @@ Timing (us):
 Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
 
 ```sh
-imgsharp -i photo.jpg -o out.png --width 800 -p
+r3sizer -i photo.jpg -o out.png --width 800 -p
 ```
 
 ### Sweep mode
@@ -76,7 +76,7 @@ imgsharp -i photo.jpg -o out.png --width 800 -p
 Process a directory of images and produce an aggregate summary:
 
 ```sh
-imgsharp \
+r3sizer \
   --sweep-dir ./photos \
   --sweep-output-dir ./out \
   --sweep-summary summary.json \
@@ -92,12 +92,12 @@ and aggregate statistics (mean/median strength, fit success rate, selection mode
 
 ```
 crates/
-  imgsharp-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
-  imgsharp-io/     image I/O (PNG/JPEG load/save via the `image` crate)
-  imgsharp-cli/    command-line interface
+  r3sizer-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
+  r3sizer-io/     image I/O (PNG/JPEG load/save via the `image` crate)
+  r3sizer-cli/    command-line interface
 ```
 
-`imgsharp-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
+`r3sizer-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
 compiled to WASM without modification.
 
 ---
@@ -170,17 +170,17 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 
 # Benchmarks
-cargo bench -p imgsharp-core
+cargo bench -p r3sizer-core
 ```
 
 ---
 
 ## Library usage
 
-`imgsharp-core` exposes the pipeline as a single function:
+`r3sizer-core` exposes the pipeline as a single function:
 
 ```rust
-use imgsharp_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
+use r3sizer_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
 
 let params = AutoSharpParams {
     target_width: 800,

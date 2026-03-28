@@ -90,12 +90,12 @@ separable blur, not the probe dispatch.
 
 ## Tauri GUI integration
 
-`imgsharp-core` is deliberately free of I/O, async, and GUI concerns.  The
+`r3sizer-core` is deliberately free of I/O, async, and GUI concerns.  The
 integration path is:
 
-1. Add a `crates/imgsharp-tauri/` crate with `tauri = "2"` as a dependency.
+1. Add a `crates/r3sizer-tauri/` crate with `tauri = "2"` as a dependency.
 2. Expose `process_auto_sharp_downscale` as a Tauri command using `#[tauri::command]`.
-3. Use `imgsharp-io` for file I/O inside the Tauri command handler.
+3. Use `r3sizer-io` for file I/O inside the Tauri command handler.
 4. Stream `AutoSharpDiagnostics` (it is `serde::Serialize`) back to the frontend
    as a JSON event for live display of the probe curve.
 
@@ -114,11 +114,11 @@ Suggested GUI features:
 
 ## WASM / browser support
 
-`imgsharp-core` has no platform-specific dependencies.  It can be compiled to
+`r3sizer-core` has no platform-specific dependencies.  It can be compiled to
 WASM with `wasm-pack` to run the algorithm in the browser:
 
 ```sh
-wasm-pack build crates/imgsharp-core --target web
+wasm-pack build crates/r3sizer-core --target web
 ```
 
 The only dependency that may need attention is the `image` crate's `Lanczos3`
@@ -129,4 +129,4 @@ resize (used in `resize.rs`), which is pure Rust and should compile fine.
 ## Documentation
 
 - Add `#[doc = ...]` examples to the public API in `lib.rs`.
-- Publish `imgsharp-core` on crates.io once the API stabilises.
+- Publish `r3sizer-core` on crates.io once the API stabilises.

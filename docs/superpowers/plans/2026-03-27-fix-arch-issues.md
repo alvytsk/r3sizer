@@ -4,29 +4,29 @@
 
 **Goal:** Fix the six architectural issues identified in the 2026-03-27 review: stray dependency, misleading error variant, dead enum variant, misplaced helpers, allocation waste in probe loop, and monolithic types file.
 
-**Architecture:** All changes are confined to `imgsharp-core` and `imgsharp-io`. No public pipeline API signature changes. Tasks are ordered from smallest blast radius to largest.
+**Architecture:** All changes are confined to `r3sizer-core` and `r3sizer-io`. No public pipeline API signature changes. Tasks are ordered from smallest blast radius to largest.
 
 **Tech Stack:** Rust 2021, `thiserror`, `serde`, `image` crate. Test framework: built-in + `approx`. Build: `cargo test --workspace && cargo clippy --workspace -- -D warnings`.
 
 ---
 
-## Task 1: Remove `serde_json` from `imgsharp-io`
+## Task 1: Remove `serde_json` from `r3sizer-io`
 
-`imgsharp-io` lists `serde_json` as a dependency but nothing in that crate uses JSON. JSON serialization happens in `imgsharp-cli`.
+`r3sizer-io` lists `serde_json` as a dependency but nothing in that crate uses JSON. JSON serialization happens in `r3sizer-cli`.
 
 **Files:**
-- Modify: `crates/imgsharp-io/Cargo.toml`
+- Modify: `crates/r3sizer-io/Cargo.toml`
 
-- [ ] **Step 1: Verify `serde_json` is unused in `imgsharp-io`**
+- [ ] **Step 1: Verify `serde_json` is unused in `r3sizer-io`**
 
 ```bash
-grep -r "serde_json" crates/imgsharp-io/src/
+grep -r "serde_json" crates/r3sizer-io/src/
 ```
 Expected output: no matches.
 
 - [ ] **Step 2: Remove the dependency**
 
-In `crates/imgsharp-io/Cargo.toml`, remove line 9:
+In `crates/r3sizer-io/Cargo.toml`, remove line 9:
 ```toml
 serde_json    = { workspace = true }
 ```
@@ -36,7 +36,7 @@ Final `[dependencies]` section should read:
 [dependencies]
 thiserror     = { workspace = true }
 image         = { workspace = true }
-imgsharp-core = { path = "../imgsharp-core" }
+r3sizer-core = { path = "../r3sizer-core" }
 ```
 
 - [ ] **Step 3: Verify it still compiles**
@@ -56,8 +56,8 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/imgsharp-io/Cargo.toml
-git commit -m "chore: remove unused serde_json dep from imgsharp-io"
+git add crates/r3sizer-io/Cargo.toml
+git commit -m "chore: remove unused serde_json dep from r3sizer-io"
 ```
 
 ---
@@ -67,13 +67,13 @@ git commit -m "chore: remove unused serde_json dep from imgsharp-io"
 `NoValidRoot` is only reachable when `solve::find_sharpness` or `solve::find_sharpness_direct` is called with an empty `probe_samples` slice. Through `process_auto_sharp_downscale`, this cannot happen because `params.validate()` enforces at least 4 probe strengths. The current doc-comment on `process_auto_sharp_downscale` says "in pathological cases" without explaining what those cases are.
 
 **Files:**
-- Modify: `crates/imgsharp-core/src/lib.rs` (error variant doc comment)
-- Modify: `crates/imgsharp-core/src/solve.rs` (doc on `fallback_from_samples`)
-- Modify: `crates/imgsharp-core/src/pipeline.rs` (function-level doc)
+- Modify: `crates/r3sizer-core/src/lib.rs` (error variant doc comment)
+- Modify: `crates/r3sizer-core/src/solve.rs` (doc on `fallback_from_samples`)
+- Modify: `crates/r3sizer-core/src/pipeline.rs` (function-level doc)
 
 - [ ] **Step 1: Add a doc comment to `CoreError::NoValidRoot`**
 
-In `crates/imgsharp-core/src/lib.rs`, replace:
+In `crates/r3sizer-core/src/lib.rs`, replace:
 ```rust
     #[error("no valid sharpening root found: {reason}")]
     NoValidRoot { reason: String },
@@ -93,7 +93,7 @@ with:
 
 - [ ] **Step 2: Add a note to `fallback_from_samples` in `solve.rs`**
 
-In `crates/imgsharp-core/src/solve.rs`, replace the opening of `fallback_from_samples`:
+In `crates/r3sizer-core/src/solve.rs`, replace the opening of `fallback_from_samples`:
 ```rust
 fn fallback_from_samples(
     samples: &[ProbeSample],
@@ -124,7 +124,7 @@ fn fallback_from_samples(
 
 - [ ] **Step 3: Tighten the pipeline doc comment**
 
-In `crates/imgsharp-core/src/pipeline.rs`, replace:
+In `crates/r3sizer-core/src/pipeline.rs`, replace:
 ```rust
 /// # Errors
 ///
@@ -153,7 +153,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/imgsharp-core/src/lib.rs crates/imgsharp-core/src/solve.rs crates/imgsharp-core/src/pipeline.rs
+git add crates/r3sizer-core/src/lib.rs crates/r3sizer-core/src/solve.rs crates/r3sizer-core/src/pipeline.rs
 git commit -m "docs: clarify CoreError::NoValidRoot reachability"
 ```
 
@@ -164,12 +164,12 @@ git commit -m "docs: clarify CoreError::NoValidRoot reachability"
 `ForcedLinear` is documented as "Force a linear (degree-1) fit" but is matched together with `Cubic` in `pipeline.rs` and calls `fit_cubic`. It has no distinct behaviour. No test exercises any `ForcedLinear`-specific path.
 
 **Files:**
-- Modify: `crates/imgsharp-core/src/types.rs`
-- Modify: `crates/imgsharp-core/src/pipeline.rs`
+- Modify: `crates/r3sizer-core/src/types.rs`
+- Modify: `crates/r3sizer-core/src/pipeline.rs`
 
 - [ ] **Step 1: Remove the variant from `FitStrategy`**
 
-In `crates/imgsharp-core/src/types.rs`, replace:
+In `crates/r3sizer-core/src/types.rs`, replace:
 ```rust
 /// Polynomial fit strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,7 +196,7 @@ pub enum FitStrategy {
 
 - [ ] **Step 2: Fix the match in `pipeline.rs`**
 
-In `crates/imgsharp-core/src/pipeline.rs`, replace:
+In `crates/r3sizer-core/src/pipeline.rs`, replace:
 ```rust
         FitStrategy::ForcedLinear | FitStrategy::Cubic => {
 ```
@@ -222,7 +222,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/imgsharp-core/src/types.rs crates/imgsharp-core/src/pipeline.rs
+git add crates/r3sizer-core/src/types.rs crates/r3sizer-core/src/pipeline.rs
 git commit -m "refactor: remove FitStrategy::ForcedLinear (unimplemented, same as Cubic)"
 ```
 
@@ -233,13 +233,13 @@ git commit -m "refactor: remove FitStrategy::ForcedLinear (unimplemented, same a
 These are color-conversion helpers that live in `pipeline.rs` but belong in `color.rs`. They wrap `color::image_srgb_to_linear` and `color::image_linear_to_srgb` with no added logic.
 
 **Files:**
-- Modify: `crates/imgsharp-core/src/color.rs`
-- Modify: `crates/imgsharp-core/src/pipeline.rs`
-- Modify: `crates/imgsharp-core/src/lib.rs`
+- Modify: `crates/r3sizer-core/src/color.rs`
+- Modify: `crates/r3sizer-core/src/pipeline.rs`
+- Modify: `crates/r3sizer-core/src/lib.rs`
 
 - [ ] **Step 1: Add the public functions to `color.rs`**
 
-At the end of `crates/imgsharp-core/src/color.rs`, after `image_linear_to_srgb` and before the `#[cfg(test)]` block, add:
+At the end of `crates/r3sizer-core/src/color.rs`, after `image_linear_to_srgb` and before the `#[cfg(test)]` block, add:
 
 ```rust
 /// Convenience alias: convert an sRGB-encoded `LinearRgbImage` to linear light in place.
@@ -259,7 +259,7 @@ pub fn to_srgb_inplace(img: &mut LinearRgbImage) {
 
 - [ ] **Step 2: Remove the functions from `pipeline.rs`**
 
-In `crates/imgsharp-core/src/pipeline.rs`, delete the entire section from line 271 to the end of the file (the block starting with `// Convert sRGB-encoded...`):
+In `crates/r3sizer-core/src/pipeline.rs`, delete the entire section from line 271 to the end of the file (the block starting with `// Convert sRGB-encoded...`):
 
 ```rust
 // ---------------------------------------------------------------------------
@@ -282,7 +282,7 @@ pub fn to_srgb_inplace(img: &mut LinearRgbImage) {
 
 - [ ] **Step 3: Update `lib.rs` re-exports**
 
-In `crates/imgsharp-core/src/lib.rs`, add re-exports for the moved functions. After the existing `pub use pipeline::process_auto_sharp_downscale;` line, add:
+In `crates/r3sizer-core/src/lib.rs`, add re-exports for the moved functions. After the existing `pub use pipeline::process_auto_sharp_downscale;` line, add:
 
 ```rust
 pub use color::{to_linear_inplace, to_srgb_inplace};
@@ -298,7 +298,7 @@ Expected: all pass. The public API surface is unchanged (same names, same signat
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/imgsharp-core/src/color.rs crates/imgsharp-core/src/pipeline.rs crates/imgsharp-core/src/lib.rs
+git add crates/r3sizer-core/src/color.rs crates/r3sizer-core/src/pipeline.rs crates/r3sizer-core/src/lib.rs
 git commit -m "refactor: move to_linear_inplace/to_srgb_inplace from pipeline to color"
 ```
 
@@ -309,13 +309,13 @@ git commit -m "refactor: move to_linear_inplace/to_srgb_inplace from pipeline to
 Each probe iteration calls `sharpen_image(...)` which returns a fresh `LinearRgbImage` allocation (~6 MB at 960×540). With 7 probes that's 7 allocations; only the measurement matters, not the storage lifetime. Adding `_inplace` variants to the sharpening functions reduces this to a single scratch allocation that is overwritten each iteration.
 
 **Files:**
-- Modify: `crates/imgsharp-core/src/sharpen.rs` (add `_inplace` variants)
-- Modify: `crates/imgsharp-core/src/color.rs` (add `reconstruct_rgb_from_lightness_inplace`)
-- Modify: `crates/imgsharp-core/src/pipeline.rs` (pre-allocate scratch, use `_inplace` in loop)
+- Modify: `crates/r3sizer-core/src/sharpen.rs` (add `_inplace` variants)
+- Modify: `crates/r3sizer-core/src/color.rs` (add `reconstruct_rgb_from_lightness_inplace`)
+- Modify: `crates/r3sizer-core/src/pipeline.rs` (pre-allocate scratch, use `_inplace` in loop)
 
 - [ ] **Step 1: Add `unsharp_mask_inplace` to `sharpen.rs`**
 
-In `crates/imgsharp-core/src/sharpen.rs`, after `unsharp_mask_single_channel` and before `#[cfg(test)]`, add:
+In `crates/r3sizer-core/src/sharpen.rs`, after `unsharp_mask_single_channel` and before `#[cfg(test)]`, add:
 
 ```rust
 /// Apply unsharp-mask to `src`, writing the result into `out`.
@@ -380,7 +380,7 @@ pub fn unsharp_mask_single_channel_inplace(
 
 - [ ] **Step 2: Add `reconstruct_rgb_from_lightness_inplace` to `color.rs`**
 
-In `crates/imgsharp-core/src/color.rs`, after `reconstruct_rgb_from_lightness` and before `image_srgb_to_linear`, add:
+In `crates/r3sizer-core/src/color.rs`, after `reconstruct_rgb_from_lightness` and before `image_srgb_to_linear`, add:
 
 ```rust
 /// Reconstruct RGB from original linear RGB and sharpened luminance, writing into `out`.
@@ -427,7 +427,7 @@ pub fn reconstruct_rgb_from_lightness_inplace(
 
 - [ ] **Step 3: Add a `sharpen_image_inplace` helper to `pipeline.rs`**
 
-In `crates/imgsharp-core/src/pipeline.rs`, update the imports at the top to include the new inplace functions:
+In `crates/r3sizer-core/src/pipeline.rs`, update the imports at the top to include the new inplace functions:
 
 ```rust
 use crate::{
@@ -487,7 +487,7 @@ fn sharpen_image_inplace(
 
 - [ ] **Step 4: Pre-allocate scratch buffers and use `_inplace` in the probe loop**
 
-In `crates/imgsharp-core/src/pipeline.rs`, replace the probe-loop section (from the `let mut probe_samples` line through the closing `}` of the `for &s in &strengths` loop) with:
+In `crates/r3sizer-core/src/pipeline.rs`, replace the probe-loop section (from the `let mut probe_samples` line through the closing `}` of the `for &s in &strengths` loop) with:
 
 ```rust
     let mut probe_samples: Vec<ProbeSample> = Vec::with_capacity(strengths.len());
@@ -538,7 +538,7 @@ Expected: all pass. The `sharpen_image` (allocating) function is still used by t
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/imgsharp-core/src/sharpen.rs crates/imgsharp-core/src/color.rs crates/imgsharp-core/src/pipeline.rs
+git add crates/r3sizer-core/src/sharpen.rs crates/r3sizer-core/src/color.rs crates/r3sizer-core/src/pipeline.rs
 git commit -m "perf: pre-allocate probe scratch buffer to avoid N heap allocs per pipeline run"
 ```
 
@@ -549,18 +549,18 @@ git commit -m "perf: pre-allocate probe scratch buffer to avoid N heap allocs pe
 `types.rs` is 382 lines containing four unrelated domains: the image buffer, configuration parameters, status enums, and result types. Each becomes its own file under a `types/` subdirectory. The re-export surface in `types/mod.rs` keeps the public API identical — no other files change.
 
 **Files to create:**
-- `crates/imgsharp-core/src/types/image.rs`
-- `crates/imgsharp-core/src/types/params.rs`
-- `crates/imgsharp-core/src/types/status.rs`
-- `crates/imgsharp-core/src/types/results.rs`
-- `crates/imgsharp-core/src/types/mod.rs` (replaces `types.rs`)
+- `crates/r3sizer-core/src/types/image.rs`
+- `crates/r3sizer-core/src/types/params.rs`
+- `crates/r3sizer-core/src/types/status.rs`
+- `crates/r3sizer-core/src/types/results.rs`
+- `crates/r3sizer-core/src/types/mod.rs` (replaces `types.rs`)
 
 **Files to delete:**
-- `crates/imgsharp-core/src/types.rs`
+- `crates/r3sizer-core/src/types.rs`
 
 - [ ] **Step 1: Create `types/image.rs`**
 
-Create file `crates/imgsharp-core/src/types/image.rs` with this exact content:
+Create file `crates/r3sizer-core/src/types/image.rs` with this exact content:
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -652,7 +652,7 @@ pub struct ImageSize {
 
 - [ ] **Step 2: Create `types/status.rs`**
 
-Create file `crates/imgsharp-core/src/types/status.rs` with this exact content:
+Create file `crates/r3sizer-core/src/types/status.rs` with this exact content:
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -698,7 +698,7 @@ pub enum SelectionMode {
 
 - [ ] **Step 3: Create `types/params.rs`**
 
-Create file `crates/imgsharp-core/src/types/params.rs` with this exact content:
+Create file `crates/r3sizer-core/src/types/params.rs` with this exact content:
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -866,7 +866,7 @@ impl AutoSharpParams {
 
 - [ ] **Step 4: Create `types/results.rs`**
 
-Create file `crates/imgsharp-core/src/types/results.rs` with this exact content:
+Create file `crates/r3sizer-core/src/types/results.rs` with this exact content:
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -955,10 +955,10 @@ pub struct ProcessOutput {
 
 - [ ] **Step 5: Create `types/mod.rs`**
 
-Create file `crates/imgsharp-core/src/types/mod.rs` with this exact content:
+Create file `crates/r3sizer-core/src/types/mod.rs` with this exact content:
 
 ```rust
-//! Shared data types for the imgsharp-core pipeline.
+//! Shared data types for the r3sizer-core pipeline.
 //!
 //! Organised into four focused sub-modules:
 //!
@@ -985,7 +985,7 @@ pub use status::{CrossingStatus, FitStatus, SelectionMode};
 - [ ] **Step 6: Delete the old `types.rs`**
 
 ```bash
-rm crates/imgsharp-core/src/types.rs
+rm crates/r3sizer-core/src/types.rs
 ```
 
 - [ ] **Step 7: Build and test**
@@ -998,7 +998,7 @@ Expected: all pass. The split is purely internal — all public re-exports are i
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/imgsharp-core/src/types/ crates/imgsharp-core/src/
+git add crates/r3sizer-core/src/types/ crates/r3sizer-core/src/
 git commit -m "refactor: split types.rs into image/params/status/results submodules"
 ```
 
@@ -1010,7 +1010,7 @@ git commit -m "refactor: split types.rs into image/params/status/results submodu
 
 | Issue from review | Task |
 |---|---|
-| `serde_json` in `imgsharp-io` | Task 1 |
+| `serde_json` in `r3sizer-io` | Task 1 |
 | `CoreError::NoValidRoot` underdocumented | Task 2 |
 | `FitStrategy::ForcedLinear` dead variant | Task 3 |
 | `to_linear_inplace`/`to_srgb_inplace` in wrong module | Task 4 |

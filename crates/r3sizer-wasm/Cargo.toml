@@ -1,9 +1,9 @@
 [package]
-name    = "imgsharp-wasm"
+name    = "r3sizer-wasm"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
-description = "WebAssembly bindings for imgsharp-core image processing pipeline"
+description = "WebAssembly bindings for r3sizer-core image processing pipeline"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -14,4 +14,4 @@ js-sys             = "0.3"
 serde              = { workspace = true }
 serde_json         = { workspace = true }
 serde-wasm-bindgen = "0.6"
-imgsharp-core      = { path = "../imgsharp-core", default-features = false }
+r3sizer-core      = { path = "../r3sizer-core", default-features = false }

@@ -1,6 +1,6 @@
 //! Buffer layout helpers shared between load and save.
 
-use imgsharp_core::LinearRgbImage;
+use r3sizer_core::LinearRgbImage;
 
 use crate::IoError;
 

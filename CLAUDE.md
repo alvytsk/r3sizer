@@ -12,30 +12,30 @@ cargo build --workspace
 cargo test --workspace
 
 # Test a single test by name
-cargo test -p imgsharp-core <test_name>
+cargo test -p r3sizer-core <test_name>
 
 # Run integration tests only
-cargo test -p imgsharp-core --test integration
+cargo test -p r3sizer-core --test integration
 
 # Lint (warnings are errors)
 cargo clippy --workspace -- -D warnings
 
 # Run benchmarks
-cargo bench -p imgsharp-core
+cargo bench -p r3sizer-core
 
 # Run the CLI (single file)
-cargo run -p imgsharp-cli -- --input <FILE> --output <FILE> --width <N> --height <N>
-cargo run -p imgsharp-cli -- --input photo.jpg --output out.png --width 800 --height 600 --diagnostics diag.json
+cargo run -p r3sizer-cli -- --input <FILE> --output <FILE> --width <N> --height <N>
+cargo run -p r3sizer-cli -- --input photo.jpg --output out.png --width 800 --height 600 --diagnostics diag.json
 
 # Run the CLI (sweep mode)
-cargo run -p imgsharp-cli -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
+cargo run -p r3sizer-cli -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
 ```
 
 ## Architecture
 
-Three crates with a strict dependency direction: `imgsharp-core` ← `imgsharp-io` ← `imgsharp-cli`.
+Three crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer-cli`.
 
-**`imgsharp-core`** — all image processing logic, no I/O. This is the library meant to be reused in a future Tauri GUI or WASM build. Modules map 1:1 to pipeline stages:
+**`r3sizer-core`** — all image processing logic, no I/O. This is the library meant to be reused in a future Tauri GUI or WASM build. Modules map 1:1 to pipeline stages:
 
 - `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `SharpenModel`, `MetricMode`, `ArtifactMetric`, `Provenance`, `StageProvenance`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, etc.)
 - `color.rs` — sRGB ↔ linear RGB (IEC 61966-2-1), CIE Y luminance extraction, lightness-based RGB reconstruction
@@ -48,9 +48,9 @@ Three crates with a strict dependency direction: `imgsharp-core` ← `imgsharp-i
 - `contrast.rs` — placeholder contrast leveling (percentile stretch); real formula unknown
 - `pipeline.rs` — orchestrates all stages; measures baseline, supports lightness/RGB sharpening and absolute/relative metric modes; dispatches on `SharpenModel` and `ArtifactMetric`; emits per-stage `Provenance` tags; computes `FitQuality`, `RobustnessFlags` (monotonicity + LOO stability), typed `FallbackReason`, per-stage `StageTiming`, and `MetricBreakdown` per probe; public entry point is `process_auto_sharp_downscale`
 
-**`imgsharp-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
+**`r3sizer-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
 
-**`imgsharp-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
+**`r3sizer-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
 ## Key design decisions to preserve
 

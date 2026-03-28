@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use image::GenericImageView;
-use imgsharp_core::{color, LinearRgbImage};
+use r3sizer_core::{color, LinearRgbImage};
 
 use crate::{convert::u8_rgb_to_linear_image, IoError};
 

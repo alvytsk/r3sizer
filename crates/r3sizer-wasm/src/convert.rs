@@ -1,5 +1,5 @@
-use imgsharp_core::{CoreError, LinearRgbImage};
-use imgsharp_core::color::{linear_to_srgb, srgb_to_linear};
+use r3sizer_core::{CoreError, LinearRgbImage};
+use r3sizer_core::color::{linear_to_srgb, srgb_to_linear};
 
 /// Convert RGBA sRGB u8 pixels (from canvas `getImageData`) into a `LinearRgbImage`.
 ///

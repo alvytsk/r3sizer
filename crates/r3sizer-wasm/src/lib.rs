@@ -1,7 +1,7 @@
 mod convert;
 
 use wasm_bindgen::prelude::*;
-use imgsharp_core::{AutoSharpParams, process_auto_sharp_downscale};
+use r3sizer_core::{AutoSharpParams, process_auto_sharp_downscale};
 
 /// Process an image through the automatic sharpness-adjusted downscale pipeline.
 ///

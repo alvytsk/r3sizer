@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/imgsharp-core",
-    "crates/imgsharp-io",
-    "crates/imgsharp-cli",
-    "crates/imgsharp-wasm",
+    "crates/r3sizer-core",
+    "crates/r3sizer-io",
+    "crates/r3sizer-cli",
+    "crates/r3sizer-wasm",
 ]
 resolver = "2"
 

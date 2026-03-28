@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use imgsharp_core::{
+use r3sizer_core::{
     metrics::channel_clipping_ratio,
     sharpen::unsharp_mask,
     ArtifactMetric, AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode,
