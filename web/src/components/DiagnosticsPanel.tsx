@@ -5,6 +5,13 @@ import { ProbeChart } from "./ProbeChart";
 import { TimingBar } from "./TimingBar";
 import type { AutoSharpDiagnostics, RobustnessFlags } from "@/types/wasm-types";
 
+const COMPONENT_LABELS: Record<string, string> = {
+  gamut_excursion: "Gamut Excursion",
+  halo_ringing: "Halo Ringing",
+  edge_overshoot: "Edge Overshoot",
+  texture_flattening: "Texture Flattening",
+};
+
 function Readout({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="flex justify-between text-[13px] py-0.5">
@@ -503,6 +510,30 @@ export function DiagnosticsPanel() {
               label="Baseline P"
               value={diagnostics.baseline_artifact_ratio.toExponential(3)}
             />
+
+            {/* v0.2 metric breakdown */}
+            {diagnostics.metric_components && (
+              <div className="mt-2 pt-2 border-t border-border/20 space-y-0.5">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50 mb-1">
+                  Metric Breakdown
+                </div>
+                {Object.entries(diagnostics.metric_components.components).map(
+                  ([name, value]) => (
+                    <div key={name} className="flex justify-between text-[12px] py-px">
+                      <span className="text-muted-foreground/70">{COMPONENT_LABELS[name] ?? name}</span>
+                      <span className="font-mono text-foreground/80">{(value as number).toExponential(2)}</span>
+                    </div>
+                  )
+                )}
+                <div className="flex justify-between text-[12px] pt-1 border-t border-border/10">
+                  <span className="text-muted-foreground/50 italic">composite</span>
+                  <span className="font-mono text-muted-foreground/60">
+                    {diagnostics.metric_components.composite_score.toExponential(2)}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <Readout
               label="Input"
               value={`${diagnostics.input_size.width}\u00d7${diagnostics.input_size.height}`}

@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { useProcessorStore } from "@/stores/processor-store";
+import type { MetricWeights } from "@/types/wasm-types";
+import { DEFAULT_METRIC_WEIGHTS } from "@/types/wasm-types";
 
 function sliderValue(v: number | readonly number[]): number {
   return Array.isArray(v) ? v[0] : (v as number);
@@ -461,6 +463,53 @@ export function ParameterPanel() {
                 }
               }}
             />
+          </div>
+
+          {/* Metric weights (v0.2 composite) */}
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center justify-between">
+              <ValueLabel>Metric Weights</ValueLabel>
+              <button
+                type="button"
+                className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
+                onClick={() => updateParams({ metric_weights: { ...DEFAULT_METRIC_WEIGHTS } })}
+              >
+                reset
+              </button>
+            </div>
+            {(
+              [
+                ["gamut_excursion", "Gamut"],
+                ["halo_ringing", "Halo"],
+                ["edge_overshoot", "Overshoot"],
+                ["texture_flattening", "Texture"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] text-muted-foreground/70">{label}</span>
+                  <span className="text-[10px] font-mono text-primary">
+                    {params.metric_weights[key].toFixed(1)}
+                  </span>
+                </div>
+                <Slider
+                  min={0}
+                  max={2.0}
+                  step={0.1}
+                  value={[params.metric_weights[key]]}
+                  onValueChange={(v) => {
+                    const w: MetricWeights = {
+                      ...params.metric_weights,
+                      [key]: sliderValue(v),
+                    };
+                    updateParams({ metric_weights: w });
+                  }}
+                />
+              </div>
+            ))}
+            <p className="text-[10px] text-muted-foreground/40 italic">
+              Diagnostic only — does not affect selection
+            </p>
           </div>
         </CollapsibleContent>
       </Collapsible>

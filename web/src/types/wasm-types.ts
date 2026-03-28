@@ -4,6 +4,7 @@ export type MetricMode = "absolute_total" | "relative_to_base";
 export type ArtifactMetric = "channel_clipping_ratio" | "pixel_out_of_gamut_ratio";
 export type FitStrategy = "Cubic" | "DirectSearch";
 export type ClampPolicy = "Clamp" | "Normalize";
+export type DiagnosticsLevel = "summary" | "full";
 export type FitStatus =
   | { status: "success" }
   | { status: "failed"; reason: string }
@@ -33,6 +34,13 @@ export type ProbeConfig =
   | { Range: { min: number; max: number; count: number } }
   | { Explicit: number[] };
 
+export interface MetricWeights {
+  gamut_excursion: number;
+  halo_ringing: number;
+  edge_overshoot: number;
+  texture_flattening: number;
+}
+
 export interface AutoSharpParams {
   target_width: number;
   target_height: number;
@@ -46,6 +54,8 @@ export interface AutoSharpParams {
   sharpen_model: SharpenModel;
   metric_mode: MetricMode;
   artifact_metric: ArtifactMetric;
+  metric_weights: MetricWeights;
+  diagnostics_level: DiagnosticsLevel;
 }
 
 export interface ImageSize {
@@ -88,15 +98,18 @@ export interface StageTiming {
   total_us: number;
 }
 
-export interface MetricComponent {
-  name: string;
-  value: number;
-  weight: number;
-}
+export type MetricComponentName =
+  | "gamut_excursion"
+  | "halo_ringing"
+  | "edge_overshoot"
+  | "texture_flattening";
 
 export interface MetricBreakdown {
-  components: MetricComponent[];
-  aggregate: number;
+  components: Record<MetricComponentName, number>;
+  selected_metric: MetricComponentName;
+  selection_score: number;
+  composite_score: number;
+  aggregate: number; // deprecated legacy alias for selection_score
 }
 
 export interface ProbeSample {
@@ -137,6 +150,9 @@ export interface AutoSharpDiagnostics {
   budget_reachable: boolean;
   measured_artifact_ratio: number;
   measured_metric_value: number;
+  metric_components: MetricBreakdown | null;
+  metric_weights: MetricWeights;
+  metric_weights_provenance: Provenance;
   timing: StageTiming;
   provenance: StageProvenance;
 }
@@ -147,6 +163,13 @@ export interface ProcessResult {
   outputHeight: number;
   diagnostics: AutoSharpDiagnostics;
 }
+
+export const DEFAULT_METRIC_WEIGHTS: MetricWeights = {
+  gamut_excursion: 1.0,
+  halo_ringing: 0.3,
+  edge_overshoot: 0.3,
+  texture_flattening: 0.1,
+};
 
 export const DEFAULT_PARAMS: AutoSharpParams = {
   target_width: 800,
@@ -161,4 +184,6 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   sharpen_model: "practical_usm",
   metric_mode: "relative_to_base",
   artifact_metric: "channel_clipping_ratio",
+  metric_weights: { ...DEFAULT_METRIC_WEIGHTS },
+  diagnostics_level: "full",
 };
