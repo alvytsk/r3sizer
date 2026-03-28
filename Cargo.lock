@@ -529,6 +529,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -566,10 +572,8 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png",
- "qoi",
  "ravif",
  "rayon",
- "rgb",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -590,39 +594,6 @@ name = "imgref"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
-
-[[package]]
-name = "imgsharp-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "imgsharp-core",
- "imgsharp-io",
- "serde_json",
-]
-
-[[package]]
-name = "imgsharp-core"
-version = "0.1.0"
-dependencies = [
- "approx",
- "criterion",
- "image",
- "rayon",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "imgsharp-io"
-version = "0.1.0"
-dependencies = [
- "image",
- "imgsharp-core",
- "serde_json",
- "thiserror",
-]
 
 [[package]]
 name = "interpolate_name"
@@ -955,15 +926,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5a041e753da8b807c9255f28de81879c78c876392ff2469cde94799b2896b9d"
 
 [[package]]
-name = "qoi"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
-dependencies = [
- "bytemuck",
-]
-
-[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -983,6 +945,55 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r3sizer-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "glob",
+ "r3sizer-core",
+ "r3sizer-io",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "r3sizer-core"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "criterion",
+ "image",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "web-time",
+]
+
+[[package]]
+name = "r3sizer-io"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "r3sizer-core",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "r3sizer-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "r3sizer-core",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "rand"
@@ -1141,6 +1152,17 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1362,6 +1384,16 @@ name = "web-sys"
 version = "0.3.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "854ba17bb104abfb26ba36da9729addc7ce7f06f5c0f90f3c391f8461cca21f9"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

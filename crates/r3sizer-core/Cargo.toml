@@ -1,0 +1,26 @@
+[package]
+name    = "r3sizer-core"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
+
+[features]
+default = ["parallel"]
+parallel = ["rayon", "image/rayon"]
+
+[dependencies]
+thiserror = { workspace = true }
+serde     = { workspace = true }
+image     = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+rayon     = { version = "1", optional = true }
+web-time  = { workspace = true }
+
+[dev-dependencies]
+approx     = { workspace = true }
+criterion  = { workspace = true }
+serde_json = { workspace = true }
+
+[[bench]]
+name    = "pipeline_bench"
+harness = false

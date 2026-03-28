@@ -2,6 +2,19 @@
 
 ---
 
+## Recently completed (v0.1)
+
+The following items from the original roadmap are now implemented:
+
+- **Fit quality reporting** — `FitQuality` struct with R², residual sum of squares, max residual, min pivot. Computed in `fit::fit_cubic_with_quality`.
+- **Solver robustness checks** — `RobustnessFlags` with monotonicity, quasi-monotonicity, R² threshold, condition number, LOO stability. Computed in `pipeline.rs`.
+- **Typed fallback reasons** — `FallbackReason` enum with 6 variants, priority-ordered. Replaces implicit fallback logic.
+- **Per-stage timing** — `StageTiming` with microsecond wall-clock times for all 8 pipeline stages.
+- **Composite metric scaffold** — `MetricBreakdown` with `MetricComponent` variants. Only `GamutExcursion` is active in v0.1; others are stubs for v0.2.
+- **CLI sweep mode** — `--sweep-dir`, `--sweep-output-dir`, `--sweep-summary` flags. Batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+
+---
+
 ## Algorithm improvements
 
 ### Exact sharpening operator
@@ -40,6 +53,19 @@ Instead of a fixed probe list, consider a two-pass approach: coarse scan to
 find the approximate crossing region, then dense probing near the crossing.
 This would reduce the number of expensive sharpen+measure operations.
 
+### Composite metric components (v0.2)
+The `MetricBreakdown` scaffold is in place with four `MetricComponent` variants.
+Next steps:
+1. Implement `HaloRinging` detection (edge profile analysis)
+2. Implement `EdgeOvershoot` measurement (gradient-based)
+3. Implement `TextureFlattening` detection (local variance comparison)
+4. Add configurable weights to `compute_metric_breakdown`
+5. Tune aggregate formula to balance components
+
+### Robustness threshold tuning
+Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.5) are engineering
+choices.  Use sweep mode across diverse image corpora to validate and tune.
+
 ---
 
 ## Performance optimisations
@@ -64,12 +90,12 @@ separable blur, not the probe dispatch.
 
 ## Tauri GUI integration
 
-`imgsharp-core` is deliberately free of I/O, async, and GUI concerns.  The
+`r3sizer-core` is deliberately free of I/O, async, and GUI concerns.  The
 integration path is:
 
-1. Add a `crates/imgsharp-tauri/` crate with `tauri = "2"` as a dependency.
+1. Add a `crates/r3sizer-tauri/` crate with `tauri = "2"` as a dependency.
 2. Expose `process_auto_sharp_downscale` as a Tauri command using `#[tauri::command]`.
-3. Use `imgsharp-io` for file I/O inside the Tauri command handler.
+3. Use `r3sizer-io` for file I/O inside the Tauri command handler.
 4. Stream `AutoSharpDiagnostics` (it is `serde::Serialize`) back to the frontend
    as a JSON event for live display of the probe curve.
 
@@ -88,11 +114,11 @@ Suggested GUI features:
 
 ## WASM / browser support
 
-`imgsharp-core` has no platform-specific dependencies.  It can be compiled to
+`r3sizer-core` has no platform-specific dependencies.  It can be compiled to
 WASM with `wasm-pack` to run the algorithm in the browser:
 
 ```sh
-wasm-pack build crates/imgsharp-core --target web
+wasm-pack build crates/r3sizer-core --target web
 ```
 
 The only dependency that may need attention is the `image` crate's `Lanczos3`
@@ -103,4 +129,4 @@ resize (used in `resize.rs`), which is pure Rust and should compile fine.
 ## Documentation
 
 - Add `#[doc = ...]` examples to the public API in `lib.rs`.
-- Publish `imgsharp-core` on crates.io once the API stabilises.
+- Publish `r3sizer-core` on crates.io once the API stabilises.

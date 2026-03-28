@@ -1,0 +1,6 @@
+.git
+.worktrees
+target/
+web/node_modules/
+web/dist/
+web/src/wasm-pkg/

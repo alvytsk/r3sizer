@@ -11,9 +11,9 @@ heuristic.
 ## Quick start
 
 ```sh
-cargo build --release -p imgsharp-cli
+cargo build --release -p r3sizer-cli
 
-./target/release/imgsharp \
+./target/release/r3sizer \
   --input photo.jpg \
   --output out.png \
   --width 800 \
@@ -38,13 +38,53 @@ Budget reachable            : yes
 Fit status                  : success
 Crossing status             : found
 Selection mode              : polynomial root
+
+Fit quality:
+  R²                        : 0.999834
+  Residual sum of squares   : 1.23e-09
+  Max residual              : 2.45e-05
+  Min pivot                 : 3.67e+01
+
+Robustness:
+  Monotonic                 : yes
+  Quasi-monotonic           : yes
+  R² ok                     : yes
+  Well conditioned          : yes
+  LOO stable                : yes
+  Max LOO root change       : 0.0312
+
+Timing (us):
+  Resize                    : 12450
+  Contrast                  : 0
+  Baseline                  : 890
+  Probing                   : 45230
+  Fit                       : 15
+  Robustness                : 98
+  Final sharpen             : 6120
+  Clamp                     : 340
+  Total                     : 65143
 ```
 
 Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
 
 ```sh
-imgsharp -i photo.jpg -o out.png --width 800 -p
+r3sizer -i photo.jpg -o out.png --width 800 -p
 ```
+
+### Sweep mode
+
+Process a directory of images and produce an aggregate summary:
+
+```sh
+r3sizer \
+  --sweep-dir ./photos \
+  --sweep-output-dir ./out \
+  --sweep-summary summary.json \
+  --width 800 --height 600
+```
+
+The summary JSON includes per-file results (selected strength, selection mode, timing)
+and aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
 
 ---
 
@@ -52,12 +92,12 @@ imgsharp -i photo.jpg -o out.png --width 800 -p
 
 ```
 crates/
-  imgsharp-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
-  imgsharp-io/     image I/O (PNG/JPEG load/save via the `image` crate)
-  imgsharp-cli/    command-line interface
+  r3sizer-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
+  r3sizer-io/     image I/O (PNG/JPEG load/save via the `image` crate)
+  r3sizer-cli/    command-line interface
 ```
 
-`imgsharp-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
+`r3sizer-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
 compiled to WASM without modification.
 
 ---
@@ -75,7 +115,8 @@ input (sRGB file)
   ↓ probe N sharpening strengths:
       for each s_i:
         sharpen luminance(s_i)  →  reconstruct RGB via k=L'/L  →  measure P(s_i)
-  ↓ fit cubic  P_hat(s) = a·s³ + b·s² + c·s + d
+  ↓ fit cubic  P_hat(s) = a·s³ + b·s² + c·s + d  (with fit quality: R², residuals)
+  ↓ robustness checks  (monotonicity, LOO stability)
   ↓ solve  P_hat(s*) = P0  (default P0 = 0.001 = 0.1%)
   ↓ apply final sharpening(s*)
   ↓ clamp to [0,1]
@@ -104,9 +145,15 @@ See [`docs/algorithm.md`](docs/algorithm.md) for a full pipeline description.
 | `--sharpen-model` | | `practical-usm` | `practical-usm` or `paper-lightness-approx` |
 | `--artifact-metric` | | `channel-clipping` | `channel-clipping` or `pixel-out-of-gamut` |
 | `--enable-contrast-leveling` | | off | Enable contrast leveling stage (placeholder) |
+| `--sweep-dir` | | — | Directory of images to process in batch mode |
+| `--sweep-output-dir` | | — | Output directory for processed images (sweep mode) |
+| `--sweep-summary` | | — | Path to write sweep summary JSON |
 
-Both `--width` and `--height` are required unless `--preserve-aspect-ratio` is set, in
-which case only one is needed.
+In single-file mode, `--input` and `--output` are required. Both `--width` and `--height`
+are required unless `--preserve-aspect-ratio` is set, in which case only one is needed.
+
+In sweep mode, `--sweep-dir` replaces `--input`/`--output`. The sweep flags
+(`--sweep-output-dir`, `--sweep-summary`) require `--sweep-dir`.
 
 ---
 
@@ -123,17 +170,17 @@ cargo test --workspace
 cargo clippy --workspace -- -D warnings
 
 # Benchmarks
-cargo bench -p imgsharp-core
+cargo bench -p r3sizer-core
 ```
 
 ---
 
 ## Library usage
 
-`imgsharp-core` exposes the pipeline as a single function:
+`r3sizer-core` exposes the pipeline as a single function:
 
 ```rust
-use imgsharp_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
+use r3sizer_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
 
 let params = AutoSharpParams {
     target_width: 800,
@@ -146,13 +193,16 @@ let ProcessOutput { image, diagnostics } =
 ```
 
 `AutoSharpDiagnostics` is `Serialize`-able for JSON export and contains the full probe
-data, fit coefficients, selection mode, and per-stage provenance tags.
+data, fit coefficients, selection mode, per-stage provenance tags, fit quality metrics
+(R², residuals), solver robustness flags (monotonicity, LOO stability), typed fallback
+reasons, per-stage timing, and composite metric breakdowns.
 
 ---
 
 ## Documentation
 
 - [`docs/algorithm.md`](docs/algorithm.md) — implemented pipeline
+- [`docs/pipeline_implementation.md`](docs/pipeline_implementation.md) — detailed walkthrough with data flow and allocations
 - [`docs/assumptions.md`](docs/assumptions.md) — confirmed vs engineering approximations
 - [`docs/future_work.md`](docs/future_work.md) — next steps and Tauri integration
 

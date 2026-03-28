@@ -1,0 +1,12 @@
+[package]
+name    = "r3sizer-io"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+description = "Image I/O layer: load PNG/JPEG into LinearRgbImage, save back to file"
+
+[dependencies]
+thiserror     = { workspace = true }
+serde_json    = { workspace = true }
+image         = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+r3sizer-core = { path = "../r3sizer-core" }
