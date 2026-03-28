@@ -35,6 +35,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
         sharpen_model: SharpenModel::PracticalUsm,
         metric_mode: MetricMode::RelativeToBase,
         artifact_metric: ArtifactMetric::ChannelClippingRatio,
+        ..Default::default()
     };
 
     c.bench_function("full_pipeline_1080p_to_540p", |b| {

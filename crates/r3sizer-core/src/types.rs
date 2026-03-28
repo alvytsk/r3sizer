@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "typegen")]
+use ts_rs::TS;
+
 use crate::CoreError;
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,7 @@ impl LinearRgbImage {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ImageSize {
     pub width: u32,
     pub height: u32,
@@ -97,6 +101,7 @@ pub struct ImageSize {
 
 /// How sharpening is applied to the image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharpenMode {
     /// Apply unsharp mask directly to all RGB channels.
@@ -114,6 +119,7 @@ pub enum SharpenMode {
 /// Orthogonal to [`SharpenMode`] (which selects *channels*).
 /// `SharpenModel` selects the *operator*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SharpenModel {
     /// Gaussian unsharp mask — engineering choice, not paper-confirmed.
@@ -126,6 +132,7 @@ pub enum SharpenModel {
 
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetricMode {
     /// P_total(s): absolute fraction of channel values outside [0,1].
@@ -143,6 +150,7 @@ pub enum MetricMode {
 /// Orthogonal to [`MetricMode`] (which selects absolute vs relative comparison).
 /// `ArtifactMetric` selects *what* is measured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactMetric {
     /// Per-channel: fraction of f32 channel values outside [0,1]. Denominator = W*H*3.
@@ -157,6 +165,7 @@ pub enum ArtifactMetric {
 
 /// Status of the polynomial fit attempt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum FitStatus {
     /// Cubic polynomial was fitted successfully.
@@ -169,6 +178,7 @@ pub enum FitStatus {
 
 /// Whether the polynomial crossing P_hat(s*) = P0 was found in the probe interval.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum CrossingStatus {
     /// A root was found inside [s_min, s_max].
@@ -181,6 +191,7 @@ pub enum CrossingStatus {
 
 /// How the final sharpening strength was selected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionMode {
     /// Optimal s* from the cubic polynomial root.
@@ -202,6 +213,7 @@ pub enum SelectionMode {
 /// Used in diagnostics to give callers (GUI, CLI, JSON consumers) a
 /// machine-readable honesty signal per pipeline stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum Provenance {
     /// Matches a formula explicitly stated in the papers.
@@ -218,6 +230,7 @@ pub enum Provenance {
 
 /// Per-stage provenance tags filled in by the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct StageProvenance {
     pub color_conversion: Provenance,
     pub resize: Provenance,
@@ -234,6 +247,7 @@ pub struct StageProvenance {
 
 /// Controls which sharpening strengths are probed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum ProbeConfig {
     /// `count` values linearly spaced over `[min, max]`.
     Range { min: f32, max: f32, count: usize },
@@ -282,6 +296,7 @@ impl ProbeConfig {
 
 /// Polynomial fit strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum FitStrategy {
     /// Least-squares cubic fit; fall back to direct sampled search if numerically unstable.
     Cubic,
@@ -291,6 +306,7 @@ pub enum FitStrategy {
 
 /// How to handle out-of-range values at the final output stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub enum ClampPolicy {
     /// Hard clamp: values < 0.0 -> 0.0, values > 1.0 -> 1.0.
     Clamp,
@@ -300,6 +316,7 @@ pub enum ClampPolicy {
 
 /// All parameters controlling the auto-sharpness downscale pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct AutoSharpParams {
     pub target_width: u32,
     pub target_height: u32,
@@ -326,6 +343,9 @@ pub struct AutoSharpParams {
     pub metric_weights: MetricWeights,
     /// Verbosity level for serialized diagnostics.
     pub diagnostics_level: DiagnosticsLevel,
+    /// Strength distribution strategy. Default: `Uniform`.
+    #[serde(default)]
+    pub sharpen_strategy: SharpenStrategy,
 }
 
 impl Default for AutoSharpParams {
@@ -347,6 +367,7 @@ impl Default for AutoSharpParams {
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
             metric_weights: MetricWeights::default(),
             diagnostics_level: DiagnosticsLevel::default(),
+            sharpen_strategy: SharpenStrategy::default(),
         }
     }
 }
@@ -372,6 +393,13 @@ impl AutoSharpParams {
                 "PaperLightnessApprox requires SharpenMode::Lightness".into(),
             ));
         }
+        if let SharpenStrategy::ContentAdaptive { backoff_scale_factor, .. } = &self.sharpen_strategy {
+            if *backoff_scale_factor <= 0.0 || *backoff_scale_factor >= 1.0 {
+                return Err(CoreError::InvalidParams(
+                    "backoff_scale_factor must be in (0.0, 1.0)".into(),
+                ));
+            }
+        }
         self.probe_strengths.resolve()?;
         Ok(())
     }
@@ -383,6 +411,7 @@ impl AutoSharpParams {
 
 /// Quality metrics for the polynomial fit.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct FitQuality {
     /// Sum of squared residuals between fitted polynomial and data points.
     pub residual_sum_of_squares: f64,
@@ -396,6 +425,7 @@ pub struct FitQuality {
 
 /// Robustness assessment of the probe data and fit.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct RobustnessFlags {
     /// P(s) is non-decreasing across all probes.
     pub monotonic: bool,
@@ -413,6 +443,7 @@ pub struct RobustnessFlags {
 
 /// Why the pipeline fell back from polynomial root to sample-based selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FallbackReason {
     /// Cubic fit failed numerically (singular matrix, insufficient data).
@@ -431,6 +462,7 @@ pub enum FallbackReason {
 
 /// Per-stage wall-clock timing in microseconds.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct StageTiming {
     pub resize_us: u64,
     pub contrast_us: u64,
@@ -442,6 +474,12 @@ pub struct StageTiming {
     pub final_sharpen_us: u64,
     pub clamp_us: u64,
     pub total_us: u64,
+    /// Region classification time (None when Uniform).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification_us: Option<u64>,
+    /// Adaptive validation + backoff time (None when Uniform).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_validation_us: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +488,7 @@ pub struct StageTiming {
 
 /// Individual components of the composite artifact metric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetricComponent {
     /// Fraction of channel values outside [0, 1] (existing metric_v0).
@@ -464,6 +503,7 @@ pub enum MetricComponent {
 
 /// Per-component breakdown of the composite artifact metric.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct MetricBreakdown {
     /// Individual component scores.
     pub components: std::collections::BTreeMap<MetricComponent, f32>,
@@ -486,6 +526,7 @@ pub struct MetricBreakdown {
 /// Provenance: `EngineeringProxy` — these are starting-point defaults,
 /// not paper-confirmed. Must be validated against the evaluation harness.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct MetricWeights {
     pub gamut_excursion: f32,
     pub halo_ringing: f32,
@@ -506,6 +547,7 @@ impl Default for MetricWeights {
 
 /// Controls verbosity of serialized diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticsLevel {
     /// Final measurement breakdown only (compact JSON).
@@ -516,11 +558,334 @@ pub enum DiagnosticsLevel {
 }
 
 // ---------------------------------------------------------------------------
+// Content-adaptive sharpening types (v0.3)
+// ---------------------------------------------------------------------------
+
+/// Number of region classes.
+pub const REGION_CLASS_COUNT: usize = 5;
+
+/// Classification of a pixel's local content for adaptive sharpening.
+///
+/// Stable `as usize` ordering is part of the public contract:
+/// Flat=0, Textured=1, StrongEdge=2, Microtexture=3, RiskyHaloZone=4.
+///
+/// Provenance: `EngineeringChoice` — taxonomy is not paper-confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum RegionClass {
+    Flat = 0,
+    Textured = 1,
+    StrongEdge = 2,
+    Microtexture = 3,
+    RiskyHaloZone = 4,
+}
+
+/// Per-pixel region classification map with embedded dimensions.
+///
+/// Dimensions are part of the type to prevent accidental reuse with
+/// a wrong-sized image.
+#[derive(Debug, Clone)]
+pub struct RegionMap {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<RegionClass>,
+}
+
+impl RegionMap {
+    /// Create a new region map. Returns error if `data.len() != width * height`.
+    pub fn new(width: u32, height: u32, data: Vec<RegionClass>) -> Result<Self, CoreError> {
+        let expected = (width as usize) * (height as usize);
+        if data.len() != expected {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: expected,
+                got_len: data.len(),
+            });
+        }
+        Ok(Self { width, height, data })
+    }
+
+    /// Read the class at pixel (x, y).
+    #[inline]
+    pub fn get(&self, x: u32, y: u32) -> RegionClass {
+        self.data[(y as usize) * (self.width as usize) + (x as usize)]
+    }
+
+    /// Read-only access to the underlying data slice.
+    pub fn data(&self) -> &[RegionClass] {
+        &self.data
+    }
+}
+
+/// Per-pixel gain multiplier map with embedded dimensions.
+#[derive(Debug, Clone)]
+pub struct GainMap {
+    pub width: u32,
+    pub height: u32,
+    data: Vec<f32>,
+}
+
+impl GainMap {
+    /// Create a new gain map. Returns error if `data.len() != width * height`.
+    pub fn new(width: u32, height: u32, data: Vec<f32>) -> Result<Self, CoreError> {
+        let expected = (width as usize) * (height as usize);
+        if data.len() != expected {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: expected,
+                got_len: data.len(),
+            });
+        }
+        Ok(Self { width, height, data })
+    }
+
+    /// Read the gain at pixel (x, y).
+    #[inline]
+    pub fn get(&self, x: u32, y: u32) -> f32 {
+        self.data[(y as usize) * (self.width as usize) + (x as usize)]
+    }
+
+    /// Read-only access to the underlying data slice.
+    pub fn data(&self) -> &[f32] {
+        &self.data
+    }
+}
+
+/// Per-class gain multipliers for adaptive sharpening.
+///
+/// **Hard validation bound:** all values must be in `[0.25, 4.0]`.
+/// This prevents absurd configuration but does not imply values near the
+/// bounds are supported or tested.
+///
+/// **Recommended operating range:** `[0.5, 1.5]`.
+///
+/// **Design criterion:** misclassification should degrade gently, not dramatically.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct GainTable {
+    pub flat: f32,
+    pub textured: f32,
+    pub strong_edge: f32,
+    pub microtexture: f32,
+    pub risky_halo_zone: f32,
+}
+
+impl GainTable {
+    const MIN_GAIN: f32 = 0.25;
+    const MAX_GAIN: f32 = 4.0;
+
+    /// Construct with validation: all values must be in `[0.25, 4.0]`.
+    pub fn new(
+        flat: f32,
+        textured: f32,
+        strong_edge: f32,
+        microtexture: f32,
+        risky_halo_zone: f32,
+    ) -> Result<Self, CoreError> {
+        let vals = [flat, textured, strong_edge, microtexture, risky_halo_zone];
+        for &v in &vals {
+            if !(Self::MIN_GAIN..=Self::MAX_GAIN).contains(&v) {
+                return Err(CoreError::InvalidParams(format!(
+                    "gain value {v} outside allowed range [{}, {}]",
+                    Self::MIN_GAIN,
+                    Self::MAX_GAIN,
+                )));
+            }
+        }
+        Ok(Self { flat, textured, strong_edge, microtexture, risky_halo_zone })
+    }
+
+    /// Canonical v0.3 preset. Range `[0.70, 1.10]`.
+    pub fn v03_default() -> Self {
+        Self {
+            flat: 0.75,
+            textured: 0.95,
+            strong_edge: 1.00,
+            microtexture: 1.10,
+            risky_halo_zone: 0.70,
+        }
+    }
+
+    /// Look up the gain for a given region class.
+    #[inline]
+    pub fn gain_for(&self, class: RegionClass) -> f32 {
+        match class {
+            RegionClass::Flat => self.flat,
+            RegionClass::Textured => self.textured,
+            RegionClass::StrongEdge => self.strong_edge,
+            RegionClass::Microtexture => self.microtexture,
+            RegionClass::RiskyHaloZone => self.risky_halo_zone,
+        }
+    }
+}
+
+/// Thresholds for the four-pass pixel classifier.
+///
+/// All thresholds are tied to the specific operators in `classifier.rs`:
+/// - Gradient thresholds: **unnormalized Sobel scale** (max ≈ 5.66 for luminance in [0,1]).
+/// - Variance thresholds: **squared-luminance units** (max 0.25 for bounded data).
+///
+/// Changing the Sobel normalization or variance formula invalidates these defaults.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ClassificationParams {
+    pub gradient_low_threshold: f32,
+    pub gradient_high_threshold: f32,
+    pub variance_low_threshold: f32,
+    pub variance_high_threshold: f32,
+    pub variance_window: usize,
+}
+
+impl ClassificationParams {
+    /// Construct with validation.
+    pub fn new(
+        gradient_low_threshold: f32,
+        gradient_high_threshold: f32,
+        variance_low_threshold: f32,
+        variance_high_threshold: f32,
+        variance_window: usize,
+    ) -> Result<Self, CoreError> {
+        if gradient_low_threshold > gradient_high_threshold {
+            return Err(CoreError::InvalidParams(
+                "gradient_low_threshold must be <= gradient_high_threshold".into(),
+            ));
+        }
+        if variance_low_threshold > variance_high_threshold {
+            return Err(CoreError::InvalidParams(
+                "variance_low_threshold must be <= variance_high_threshold".into(),
+            ));
+        }
+        if variance_window < 3 {
+            return Err(CoreError::InvalidParams(
+                "variance_window must be >= 3".into(),
+            ));
+        }
+        if variance_window.is_multiple_of(2) {
+            return Err(CoreError::InvalidParams(
+                "variance_window must be odd".into(),
+            ));
+        }
+        Ok(Self {
+            gradient_low_threshold,
+            gradient_high_threshold,
+            variance_low_threshold,
+            variance_high_threshold,
+            variance_window,
+        })
+    }
+}
+
+impl Default for ClassificationParams {
+    fn default() -> Self {
+        Self {
+            gradient_low_threshold: 0.05,
+            gradient_high_threshold: 0.40,
+            variance_low_threshold: 0.001,
+            variance_high_threshold: 0.010,
+            variance_window: 5,
+        }
+    }
+}
+
+/// Orchestration axis for sharpening strength distribution.
+///
+/// Orthogonal to [`SharpenMode`] (Rgb/Lightness) and [`SharpenModel`] (operator).
+/// `SharpenStrategy` controls whether strength is applied uniformly or modulated
+/// per-pixel by a region-based gain map.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case", tag = "strategy")]
+pub enum SharpenStrategy {
+    /// Current behaviour: single global strength applied everywhere.
+    #[default]
+    Uniform,
+    /// Per-pixel gain modulated by region classification.
+    ContentAdaptive {
+        classification: ClassificationParams,
+        gain_table: GainTable,
+        /// Maximum backoff iterations if adaptive result exceeds budget. Default: 4.
+        max_backoff_iterations: u8,
+        /// Scale reduction per backoff iteration. Must be in (0.0, 1.0). Default: 0.8.
+        backoff_scale_factor: f32,
+    },
+}
+
+/// Per-class pixel coverage computed from a [`RegionMap`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct RegionCoverage {
+    pub total_pixels: u32,
+    pub flat: u32,
+    pub textured: u32,
+    pub strong_edge: u32,
+    pub microtexture: u32,
+    pub risky_halo_zone: u32,
+    pub flat_fraction: f32,
+    pub textured_fraction: f32,
+    pub strong_edge_fraction: f32,
+    pub microtexture_fraction: f32,
+    pub risky_halo_zone_fraction: f32,
+}
+
+impl RegionCoverage {
+    /// Compute coverage statistics from a region map.
+    pub fn from_region_map(map: &RegionMap) -> Self {
+        let mut counts = [0u32; REGION_CLASS_COUNT];
+        for &c in map.data() {
+            counts[c as usize] += 1;
+        }
+        let total = map.width * map.height;
+        let frac = |c: u32| if total > 0 { c as f32 / total as f32 } else { 0.0 };
+        Self {
+            total_pixels: total,
+            flat: counts[0],
+            textured: counts[1],
+            strong_edge: counts[2],
+            microtexture: counts[3],
+            risky_halo_zone: counts[4],
+            flat_fraction: frac(counts[0]),
+            textured_fraction: frac(counts[1]),
+            strong_edge_fraction: frac(counts[2]),
+            microtexture_fraction: frac(counts[3]),
+            risky_halo_zone_fraction: frac(counts[4]),
+        }
+    }
+}
+
+/// Outcome of the adaptive validation / backoff phase.
+///
+/// `target_metric` is not duplicated here — it lives in [`AutoSharpParams::target_artifact_ratio`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum AdaptiveValidationOutcome {
+    /// Adaptive result met budget on first try.
+    PassedDirect { measured_metric: f32 },
+    /// Budget met after scaling down global strength.
+    PassedAfterBackoff {
+        iterations: u8,
+        final_scale: f32,
+        measured_metric: f32,
+    },
+    /// Budget not met after all backoff iterations; best result returned.
+    FailedBudgetExceeded {
+        iterations: u8,
+        best_scale: f32,
+        best_metric: f32,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Probe and fit result types
 // ---------------------------------------------------------------------------
 
 /// A single measured sample of the artifact-vs-strength relationship.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ProbeSample {
     /// Sharpening strength `s`.
     pub strength: f32,
@@ -539,6 +904,7 @@ pub struct ProbeSample {
 ///
 /// `P_hat(s) = a*s^3 + b*s^2 + c*s + d`
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct CubicPolynomial {
     pub a: f64,
     pub b: f64,
@@ -558,6 +924,7 @@ impl CubicPolynomial {
 
 /// Diagnostics emitted by the pipeline; serializable for CLI JSON output and GUI display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
 pub struct AutoSharpDiagnostics {
     // --- Size ---
     pub input_size: ImageSize,
@@ -614,6 +981,14 @@ pub struct AutoSharpDiagnostics {
     /// Provenance of the metric weights.
     pub metric_weights_provenance: Provenance,
 
+    // --- Content-adaptive (v0.3) ---
+    /// Per-class region coverage. None when `SharpenStrategy::Uniform`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region_coverage: Option<RegionCoverage>,
+    /// Outcome of adaptive validation. None when `SharpenStrategy::Uniform`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adaptive_validation: Option<AdaptiveValidationOutcome>,
+
     // --- Timing ---
     /// Per-stage wall-clock timing.
     #[serde(default)]
@@ -629,4 +1004,151 @@ pub struct ProcessOutput {
     /// Final processed image (clamped according to `ClampPolicy`).
     pub image: LinearRgbImage,
     pub diagnostics: AutoSharpDiagnostics,
+}
+
+// ---------------------------------------------------------------------------
+// Tests — content-adaptive types
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod adaptive_tests {
+    use super::*;
+
+    #[test]
+    fn region_class_as_usize_stable_ordering() {
+        assert_eq!(RegionClass::Flat as usize, 0);
+        assert_eq!(RegionClass::Textured as usize, 1);
+        assert_eq!(RegionClass::StrongEdge as usize, 2);
+        assert_eq!(RegionClass::Microtexture as usize, 3);
+        assert_eq!(RegionClass::RiskyHaloZone as usize, 4);
+    }
+
+    #[test]
+    fn region_map_valid_construction() {
+        let data = vec![RegionClass::Flat; 12];
+        let map = RegionMap::new(4, 3, data).unwrap();
+        assert_eq!(map.width, 4);
+        assert_eq!(map.height, 3);
+        assert_eq!(map.get(0, 0), RegionClass::Flat);
+        assert_eq!(map.get(3, 2), RegionClass::Flat);
+    }
+
+    #[test]
+    fn region_map_wrong_length_fails() {
+        let data = vec![RegionClass::Flat; 10];
+        assert!(RegionMap::new(4, 3, data).is_err());
+    }
+
+    #[test]
+    fn gain_map_valid_construction() {
+        let data = vec![1.0f32; 6];
+        let map = GainMap::new(3, 2, data).unwrap();
+        assert_eq!(map.width, 3);
+        assert_eq!(map.height, 2);
+        assert!((map.get(0, 0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_map_wrong_length_fails() {
+        let data = vec![1.0f32; 5];
+        assert!(GainMap::new(3, 2, data).is_err());
+    }
+
+    #[test]
+    fn gain_table_v03_default_values() {
+        let gt = GainTable::v03_default();
+        assert!((gt.flat - 0.75).abs() < 1e-6);
+        assert!((gt.textured - 0.95).abs() < 1e-6);
+        assert!((gt.strong_edge - 1.00).abs() < 1e-6);
+        assert!((gt.microtexture - 1.10).abs() < 1e-6);
+        assert!((gt.risky_halo_zone - 0.70).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_table_gain_for_each_class() {
+        let gt = GainTable::v03_default();
+        assert!((gt.gain_for(RegionClass::Flat) - 0.75).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::Textured) - 0.95).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::StrongEdge) - 1.00).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::Microtexture) - 1.10).abs() < 1e-6);
+        assert!((gt.gain_for(RegionClass::RiskyHaloZone) - 0.70).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gain_table_out_of_bounds_rejected() {
+        assert!(GainTable::new(0.2, 1.0, 1.0, 1.0, 1.0).is_err());
+        assert!(GainTable::new(1.0, 5.0, 1.0, 1.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn gain_table_at_bounds_accepted() {
+        assert!(GainTable::new(0.25, 4.0, 1.0, 1.0, 1.0).is_ok());
+    }
+
+    #[test]
+    fn classification_params_default_valid() {
+        let cp = ClassificationParams::default();
+        assert!(cp.gradient_low_threshold <= cp.gradient_high_threshold);
+        assert!(cp.variance_low_threshold <= cp.variance_high_threshold);
+        assert!(cp.variance_window >= 3);
+        assert!(cp.variance_window % 2 == 1);
+    }
+
+    #[test]
+    fn classification_params_inverted_gradient_rejected() {
+        let result = ClassificationParams::new(0.5, 0.1, 0.001, 0.01, 5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_inverted_variance_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.1, 0.01, 5);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_even_window_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.001, 0.01, 4);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classification_params_window_too_small_rejected() {
+        let result = ClassificationParams::new(0.05, 0.4, 0.001, 0.01, 1);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sharpen_strategy_default_is_uniform() {
+        assert!(matches!(SharpenStrategy::default(), SharpenStrategy::Uniform));
+    }
+
+    #[test]
+    fn sharpen_strategy_content_adaptive_construction() {
+        let strategy = SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::v03_default(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        };
+        assert!(matches!(strategy, SharpenStrategy::ContentAdaptive { .. }));
+    }
+
+    #[test]
+    fn region_coverage_invariant() {
+        let rc = RegionCoverage::from_region_map(&RegionMap::new(
+            2, 2,
+            vec![
+                RegionClass::Flat,
+                RegionClass::Textured,
+                RegionClass::StrongEdge,
+                RegionClass::Flat,
+            ],
+        ).unwrap());
+        assert_eq!(rc.total_pixels, 4);
+        assert_eq!(rc.flat + rc.textured + rc.strong_edge + rc.microtexture + rc.risky_halo_zone, 4);
+        assert_eq!(rc.flat, 2);
+        assert_eq!(rc.textured, 1);
+        assert_eq!(rc.strong_edge, 1);
+    }
 }

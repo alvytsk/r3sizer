@@ -1,20 +1,28 @@
 import type { StageTiming } from "@/types/wasm-types";
 
-const STAGES: {
-  key: keyof Omit<StageTiming, "total_us">;
+interface StageEntry {
+  key: string;
   label: string;
   color: string;
   hint: string;
-}[] = [
+}
+
+const STAGES: StageEntry[] = [
   { key: "resize_us", label: "Resize", color: "bg-chart-2", hint: "Lanczos3 downscale" },
   { key: "contrast_us", label: "Contrast", color: "bg-chart-4", hint: "Percentile stretch (stub)" },
+  { key: "classification_us", label: "Classify", color: "bg-chart-5/80", hint: "Region classification (adaptive)" },
   { key: "baseline_us", label: "Baseline", color: "bg-chart-3", hint: "Pre-sharpen artifact measure" },
   { key: "probing_us", label: "Probing", color: "bg-chart-1", hint: "N-point probe sweep" },
   { key: "fit_us", label: "Fit", color: "bg-primary/70", hint: "Cubic Vandermonde solve" },
   { key: "robustness_us", label: "Robustness", color: "bg-chart-5", hint: "Monotonicity + LOO checks" },
   { key: "final_sharpen_us", label: "Sharpen", color: "bg-primary", hint: "Final sharpening at s*" },
+  { key: "adaptive_validation_us", label: "Validate", color: "bg-chart-2/70", hint: "Adaptive validation + backoff" },
   { key: "clamp_us", label: "Clamp", color: "bg-border", hint: "Output clamping to [0,1]" },
 ];
+
+function getUs(timing: StageTiming, key: string): number | undefined {
+  return (timing as unknown as Record<string, number | undefined>)[key];
+}
 
 function formatUs(us: number): string {
   if (us >= 1_000_000) return `${(us / 1_000_000).toFixed(2)}s`;
@@ -25,18 +33,19 @@ function formatUs(us: number): string {
 export function TimingBar({ timing }: { timing: StageTiming }) {
   const total = timing.total_us || 1;
 
-  const stages = STAGES.map((s) => ({
-    ...s,
-    us: timing[s.key],
-    pct: (timing[s.key] / total) * 100,
-  })).sort((a, b) => b.us - a.us);
+  // Filter out optional stages that are absent (undefined/null)
+  const activeStages = STAGES.filter((s) => getUs(timing, s.key) != null);
+
+  const stages = activeStages.map((s) => {
+    const us = getUs(timing, s.key) ?? 0;
+    return { ...s, us, pct: (us / total) * 100 };
+  }).sort((a, b) => b.us - a.us);
 
   const maxUs = stages[0]?.us ?? 1;
   const dominantKey = stages[0]?.key;
 
   return (
     <div className="space-y-3">
-      {/* Header with total */}
       <div className="flex items-baseline justify-between">
         <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary/70">
           Pipeline Timing
@@ -46,23 +55,22 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
         </span>
       </div>
 
-      {/* Overview stacked bar */}
       <div className="flex h-1.5 rounded-[2px] overflow-hidden bg-background border border-border/20">
-        {STAGES.map(({ key, color }) => {
-          const pct = (timing[key] / total) * 100;
+        {activeStages.map(({ key, color }) => {
+          const us = getUs(timing, key) ?? 0;
+          const pct = (us / total) * 100;
           if (pct < 0.5) return null;
           return (
             <div
               key={key}
               className={`${color} opacity-70`}
               style={{ width: `${pct}%` }}
-              title={`${key.replace("_us", "")}: ${formatUs(timing[key])}`}
+              title={`${key.replace("_us", "")}: ${formatUs(us)}`}
             />
           );
         })}
       </div>
 
-      {/* Row breakdown — sorted by duration */}
       <div className="space-y-0.5">
         {stages.map(({ key, label, color, hint, us, pct }) => {
           const isDominant = key === dominantKey;
@@ -75,7 +83,6 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
               }`}
               title={hint}
             >
-              {/* Dot + name */}
               <div className="flex items-center gap-1.5 w-[84px] shrink-0">
                 <div className={`w-1.5 h-1.5 shrink-0 rounded-[1px] ${color}`} />
                 <span
@@ -86,7 +93,6 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
                   {label}
                 </span>
               </div>
-              {/* Proportional bar */}
               <div className="flex-1 h-2.5 rounded-[2px] bg-background border border-border/20 overflow-hidden">
                 <div
                   className={`h-full ${color} transition-all duration-300 ${
@@ -95,7 +101,6 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
                   style={{ width: `${barWidth}%` }}
                 />
               </div>
-              {/* Time */}
               <span
                 className={`text-[11px] font-mono w-[52px] text-right shrink-0 tabular-nums ${
                   isDominant ? "text-foreground/90" : "text-foreground/55"
@@ -103,7 +108,6 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
               >
                 {formatUs(us)}
               </span>
-              {/* Percent */}
               <span
                 className={`text-[10px] font-mono w-[32px] text-right shrink-0 tabular-nums ${
                   isDominant ? "text-primary/80" : "text-muted-foreground/50"
@@ -116,7 +120,6 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
         })}
       </div>
 
-      {/* Bottleneck hint when one stage clearly dominates */}
       {stages[0] && stages[0].pct > 50 && (
         <p className="text-[11px] font-mono text-muted-foreground/55 border-t border-border/20 pt-2 leading-relaxed">
           <span className="text-primary/60">{stages[0].label}</span>

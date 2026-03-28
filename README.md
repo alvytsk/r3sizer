@@ -95,6 +95,8 @@ crates/
   r3sizer-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
   r3sizer-io/     image I/O (PNG/JPEG load/save via the `image` crate)
   r3sizer-cli/    command-line interface
+  r3sizer-wasm/   WebAssembly bindings for browser use
+web/              React/Vite diagnostic UI (talks to r3sizer-wasm via Web Worker)
 ```
 
 `r3sizer-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
@@ -171,6 +173,38 @@ cargo clippy --workspace -- -D warnings
 
 # Benchmarks
 cargo bench -p r3sizer-core
+```
+
+### TypeScript type generation
+
+TypeScript types for the web UI are auto-generated from the Rust types in `r3sizer-core`
+using [`ts-rs`](https://crates.io/crates/ts-rs). The generated file lives at
+`web/src/types/generated.ts` and should be regenerated whenever types in `types.rs` change:
+
+```sh
+cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
+```
+
+This also serializes Rust `Default` impls as TypeScript constants (`DEFAULT_PARAMS`, etc.)
+so the two sides never drift. The web app re-exports everything through
+`web/src/types/wasm-types.ts`, which adds WASM-specific types (`ProcessResult`) and
+any web-only overrides.
+
+### Web UI
+
+```sh
+cd web
+
+# Local development (requires WASM package to be built first)
+npm run build:wasm
+npm run dev
+
+# Production build (builds WASM + TS check + Vite bundle)
+npm run build
+
+# Docker (from repo root)
+docker build -f web/Dockerfile -t r3sizer-web .
+docker run -p 8080:80 r3sizer-web
 ```
 
 ---

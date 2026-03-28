@@ -16,6 +16,7 @@
 use web_time::Instant;
 
 use crate::{
+    classifier::{classify, gain_map_from_region_map},
     color,
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::{check_monotonicity, fit_cubic, fit_cubic_with_quality},
@@ -23,9 +24,10 @@ use crate::{
     resize::downscale,
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness, find_sharpness_direct},
-    ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy, FallbackReason,
-    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeSample,
-    ProcessOutput, Provenance, RobustnessFlags, SelectionMode, SharpenMode, SharpenModel,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
+    MetricMode, MetricWeights, ProbeSample, ProcessOutput, Provenance, RegionCoverage,
+    RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy,
     StageTiming, StageProvenance, CoreError,
 };
 
@@ -74,6 +76,22 @@ pub fn process_auto_sharp_downscale(
     let cl_params = ContrastLevelingParams { enabled: params.enable_contrast_leveling };
     apply_contrast_leveling(&mut base, &cl_params)?;
     let contrast_us = t0.elapsed().as_micros() as u64;
+
+    // -------------------------------------------------------------------
+    // 2.5. Region classification (ContentAdaptive only)
+    // -------------------------------------------------------------------
+    let t0 = Instant::now();
+    let (gain_map, region_coverage, classification_us) =
+        match &params.sharpen_strategy {
+            SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
+                let rmap = classify(&base, classification);
+                let gmap = gain_map_from_region_map(&rmap, gain_table);
+                let cov = RegionCoverage::from_region_map(&rmap);
+                let us = t0.elapsed().as_micros() as u64;
+                (Some(gmap), Some(cov), Some(us))
+            }
+            SharpenStrategy::Uniform => (None, None, None),
+        };
 
     // -------------------------------------------------------------------
     // 4. Measure baseline artifact ratio (before any sharpening)
@@ -233,18 +251,45 @@ pub fn process_auto_sharp_downscale(
     );
 
     // -------------------------------------------------------------------
-    // 8. Final sharpening
+    // 8. Final sharpening (strategy-dependent)
     // -------------------------------------------------------------------
     let t0 = Instant::now();
     let selected_strength = solve_result.selected_strength;
-    let final_result = sharpen_image(
-        &base,
-        base_luminance.as_deref(),
-        params.sharpen_mode,
-        params.sharpen_model,
-        selected_strength,
-        &kernel,
-    )?;
+
+    let (mut final_image, adaptive_validation, adaptive_validation_us) =
+        match (&params.sharpen_strategy, &gain_map) {
+            (SharpenStrategy::Uniform, _) | (_, None) => {
+                let result = sharpen_image(
+                    &base, base_luminance.as_deref(),
+                    params.sharpen_mode, params.sharpen_model,
+                    selected_strength, &kernel,
+                )?;
+                (result.image, None, None)
+            }
+            (
+                SharpenStrategy::ContentAdaptive {
+                    max_backoff_iterations,
+                    backoff_scale_factor,
+                    ..
+                },
+                Some(gm),
+            ) => {
+                adaptive_sharpen_with_validation(
+                    &base,
+                    base_luminance.as_deref(),
+                    params.sharpen_mode,
+                    selected_strength,
+                    gm,
+                    params.sharpen_sigma,
+                    params.target_artifact_ratio,
+                    params.artifact_metric,
+                    params.metric_mode,
+                    baseline_artifact_ratio,
+                    *max_backoff_iterations,
+                    *backoff_scale_factor,
+                )?
+            }
+        };
     let final_sharpen_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
@@ -254,11 +299,12 @@ pub fn process_auto_sharp_downscale(
         Some(l) => l.to_vec(),
         None => color::extract_luminance(&base),
     };
+    let final_luma = color::extract_luminance(&final_image);
     let final_breakdown = crate::metrics::compute_metric_breakdown(
-        &final_result.image,
+        &final_image,
         &base,
         &base_luma_for_metrics,
-        &final_result.luminance,
+        &final_luma,
         params.artifact_metric,
         &params.metric_weights,
     );
@@ -268,8 +314,6 @@ pub fn process_auto_sharp_downscale(
         baseline_artifact_ratio,
         params.metric_mode,
     );
-
-    let mut final_image = final_result.image;
 
     // -------------------------------------------------------------------
     // 10. Apply clamp policy
@@ -342,6 +386,8 @@ pub fn process_auto_sharp_downscale(
         metric_components: Some(final_breakdown),
         metric_weights: params.metric_weights,
         metric_weights_provenance: Provenance::EngineeringProxy,
+        region_coverage,
+        adaptive_validation,
         timing: StageTiming {
             resize_us,
             contrast_us,
@@ -352,6 +398,8 @@ pub fn process_auto_sharp_downscale(
             final_sharpen_us,
             clamp_us,
             total_us,
+            classification_us,
+            adaptive_validation_us,
         },
         provenance: StageProvenance {
             color_conversion: Provenance::PaperConfirmed,
@@ -582,6 +630,198 @@ fn determine_fallback_reason(
 
     // Catch-all for edge cases (shouldn't normally happen).
     Some(FallbackReason::RootOutOfRange)
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive sharpen + validate + backoff (Stage 9 + 9.5)
+// ---------------------------------------------------------------------------
+
+/// Adaptive sharpen with validation and backoff loop.
+///
+/// Computes detail buffers once, then applies adaptive sharpening. If the
+/// result exceeds the artifact budget P0, iteratively reduces the global scale
+/// factor until budget is met or max iterations reached.
+///
+/// Returns `(final_image, validation_outcome, validation_time_us)`.
+#[allow(clippy::too_many_arguments)]
+fn adaptive_sharpen_with_validation(
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    sharpen_mode: SharpenMode,
+    global_strength: f32,
+    gain_map: &crate::GainMap,
+    sigma: f32,
+    target_p0: f32,
+    artifact_metric: ArtifactMetric,
+    metric_mode: MetricMode,
+    baseline_artifact_ratio: f32,
+    max_backoff: u8,
+    backoff_factor: f32,
+) -> Result<(LinearRgbImage, Option<AdaptiveValidationOutcome>, Option<u64>), CoreError> {
+    let w = base.width() as usize;
+    let h = base.height() as usize;
+
+    let measure = |img: &LinearRgbImage| -> f32 {
+        let raw = match artifact_metric {
+            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+        };
+        compute_metric_value(raw, baseline_artifact_ratio, metric_mode)
+    };
+
+    match sharpen_mode {
+        SharpenMode::Lightness => {
+            let luma = base_luminance.expect("luminance required for lightness mode");
+            let kernel = make_kernel(sigma)?;
+            let blurred = crate::sharpen::gaussian_blur_single_channel(luma, w, h, &kernel);
+            let detail: Vec<f32> = luma.iter().zip(blurred.iter())
+                .map(|(&l, &b)| l - b).collect();
+
+            let apply_at_scale = |scale: f32| -> LinearRgbImage {
+                let sharpened_l = crate::sharpen::apply_adaptive_lightness_from_detail(
+                    luma, &detail, global_strength * scale, gain_map,
+                );
+                crate::color::reconstruct_rgb_from_lightness(base, &sharpened_l)
+            };
+
+            // Initial apply at scale=1.0
+            let result = apply_at_scale(1.0);
+            let p = measure(&result);
+
+            let t_val = Instant::now();
+
+            if p <= target_p0 {
+                let val_us = t_val.elapsed().as_micros() as u64;
+                return Ok((
+                    result,
+                    Some(AdaptiveValidationOutcome::PassedDirect { measured_metric: p }),
+                    Some(val_us),
+                ));
+            }
+
+            // Backoff loop
+            let mut best_scale = 1.0_f32;
+            let mut best_metric = p;
+            let mut best_result = result;
+            let mut scale = 1.0_f32;
+
+            for i in 1..=max_backoff {
+                scale *= backoff_factor;
+                let result = apply_at_scale(scale);
+                let p = measure(&result);
+
+                if p < best_metric {
+                    best_metric = p;
+                    best_scale = scale;
+                    best_result = result;
+                }
+
+                if p <= target_p0 {
+                    let val_us = t_val.elapsed().as_micros() as u64;
+                    return Ok((
+                        best_result,
+                        Some(AdaptiveValidationOutcome::PassedAfterBackoff {
+                            iterations: i,
+                            final_scale: scale,
+                            measured_metric: p,
+                        }),
+                        Some(val_us),
+                    ));
+                }
+            }
+
+            let val_us = t_val.elapsed().as_micros() as u64;
+            Ok((
+                best_result,
+                Some(AdaptiveValidationOutcome::FailedBudgetExceeded {
+                    iterations: max_backoff,
+                    best_scale,
+                    best_metric,
+                }),
+                Some(val_us),
+            ))
+        }
+
+        SharpenMode::Rgb => {
+            let kernel = make_kernel(sigma)?;
+            let blurred = crate::sharpen::gaussian_blur(base, &kernel);
+            let src_px = base.pixels();
+            let blur_px = blurred.pixels();
+            let gain_data = gain_map.data();
+
+            let apply_at_scale = |scale: f32| -> LinearRgbImage {
+                let eff_strength = global_strength * scale;
+                let out: Vec<f32> = src_px.chunks_exact(3)
+                    .zip(blur_px.chunks_exact(3))
+                    .zip(gain_data.iter())
+                    .flat_map(|((s, b), &g)| {
+                        let eff = eff_strength * g;
+                        [
+                            s[0] + eff * (s[0] - b[0]),
+                            s[1] + eff * (s[1] - b[1]),
+                            s[2] + eff * (s[2] - b[2]),
+                        ]
+                    })
+                    .collect();
+                LinearRgbImage::new(base.width(), base.height(), out).unwrap()
+            };
+
+            let result = apply_at_scale(1.0);
+            let p = measure(&result);
+
+            let t_val = Instant::now();
+
+            if p <= target_p0 {
+                let val_us = t_val.elapsed().as_micros() as u64;
+                return Ok((
+                    result,
+                    Some(AdaptiveValidationOutcome::PassedDirect { measured_metric: p }),
+                    Some(val_us),
+                ));
+            }
+
+            let mut best_scale = 1.0_f32;
+            let mut best_metric = p;
+            let mut best_result = result;
+            let mut scale = 1.0_f32;
+
+            for i in 1..=max_backoff {
+                scale *= backoff_factor;
+                let result = apply_at_scale(scale);
+                let p = measure(&result);
+
+                if p < best_metric {
+                    best_metric = p;
+                    best_scale = scale;
+                    best_result = result;
+                }
+
+                if p <= target_p0 {
+                    let val_us = t_val.elapsed().as_micros() as u64;
+                    return Ok((
+                        best_result,
+                        Some(AdaptiveValidationOutcome::PassedAfterBackoff {
+                            iterations: i,
+                            final_scale: scale,
+                            measured_metric: p,
+                        }),
+                        Some(val_us),
+                    ));
+                }
+            }
+
+            let val_us = t_val.elapsed().as_micros() as u64;
+            Ok((
+                best_result,
+                Some(AdaptiveValidationOutcome::FailedBudgetExceeded {
+                    iterations: max_backoff,
+                    best_scale,
+                    best_metric,
+                }),
+                Some(val_us),
+            ))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
