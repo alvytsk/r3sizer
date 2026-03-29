@@ -14,6 +14,12 @@ const selectionLabels: Record<string, string> = {
   budget_unreachable: "Unreachable",
 };
 
+const policyLabels: Record<string, string> = {
+  gamut_only: "Gamut Only",
+  hybrid: "Hybrid",
+  composite_only: "Composite Only",
+};
+
 const fallbackLabels: Record<string, string> = {
   fit_failed: "Fit Failed",
   fit_unstable: "Fit Unstable",
@@ -50,6 +56,16 @@ export function StatusIndicators({
           {diagnostics.budget_reachable ? "Budget OK" : "Unreachable"}
         </span>
       </div>
+
+      {/* Selection policy (shown when non-default) */}
+      {diagnostics.selection_policy && diagnostics.selection_policy !== "gamut_only" && (
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-chart-4" />
+          <span className="text-[13px] font-mono text-chart-4">
+            {policyLabels[diagnostics.selection_policy] ?? diagnostics.selection_policy}
+          </span>
+        </div>
+      )}
 
       {/* Fallback reason */}
       {diagnostics.fallback_reason && (
