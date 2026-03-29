@@ -272,17 +272,17 @@ export default function App() {
               <div className="flex-1 flex items-center justify-center px-6">
                 <div className="flex flex-col items-center gap-8 max-w-lg w-full -mt-10">
                   {/* Hero title */}
-                  <div className="flex flex-col items-center gap-2 text-center">
+                  <div className="flex flex-col items-center gap-2 text-center animate-fade-up">
                     <h2 className="font-mono text-3xl font-bold tracking-tight text-primary glow-amber-text">
                       r3sizer
                     </h2>
-                    <p className="text-sm text-muted-foreground max-w-xs">
+                    <p className="text-sm text-muted-foreground max-w-xs animate-fade-up delay-100">
                       Precision downscaling with automatic sharpness optimization.
                       Runs entirely in your browser.
                     </p>
                   </div>
                   {/* Upload zone with crop marks */}
-                  <div className="relative w-full">
+                  <div className="relative w-full animate-fade-up delay-200">
                     {/* Corner crop marks */}
                     <div className="absolute -top-2 -left-2 w-5 h-5 border-t-2 border-l-2 border-primary/40 rounded-tl-sm" />
                     <div className="absolute -top-2 -right-2 w-5 h-5 border-t-2 border-r-2 border-primary/40 rounded-tr-sm" />
@@ -291,7 +291,7 @@ export default function App() {
                     <ImageUpload />
                   </div>
                   {/* Pipeline hint — hidden on narrow screens */}
-                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50">
+                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50 animate-fade-up delay-300">
                     <span>linearize</span>
                     <span className="text-primary/30">&rarr;</span>
                     <span>downscale</span>

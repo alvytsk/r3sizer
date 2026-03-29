@@ -58,7 +58,7 @@ export function ImageUpload() {
         relative cursor-pointer rounded-lg border border-dashed transition-all duration-200
         ${isDragging
           ? "border-primary bg-primary/5 glow-amber"
-          : "border-border/60 hover:border-primary/40 hover:bg-surface/50"
+          : "upload-idle hover:border-primary/60 hover:bg-surface/50"
         }
       `}
       onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}

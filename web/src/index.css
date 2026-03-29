@@ -168,6 +168,46 @@
   .glow-amber-text {
     text-shadow: 0 0 30px oklch(0.78 0.16 75 / 0.3), 0 0 80px oklch(0.78 0.16 75 / 0.1);
   }
+
+  /* Hero entrance animation */
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-up {
+    animation: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-400 { animation-delay: 400ms; }
+
+  /* Pulsing amber border for upload idle state */
+  @keyframes border-pulse {
+    0%, 100% { border-color: oklch(0.78 0.16 75 / 0.15); }
+    50%       { border-color: oklch(0.78 0.16 75 / 0.40); }
+  }
+
+  .upload-idle {
+    animation: border-pulse 3s ease-in-out infinite;
+  }
+
+  /* Footer top-edge gradient — frames the telemetry strip */
+  .footer-separator {
+    background: linear-gradient(
+      to bottom,
+      oklch(0.78 0.16 75 / 0.08) 0px,
+      transparent 3px
+    );
+  }
 }
 
 /* Styled scrollbar for dark theme */
