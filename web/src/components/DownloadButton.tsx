@@ -91,7 +91,7 @@ export function DownloadButton() {
         variant="outline"
         size="sm"
         onClick={handleDownload}
-        className="font-mono text-[11px]"
+        className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
         title={`Save as ${format.toUpperCase()}`}
       >
         <Download className="h-3.5 w-3.5 mr-1" />
