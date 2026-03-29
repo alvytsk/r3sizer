@@ -7,7 +7,7 @@
     "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg",
     "typegen": "cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture",
     "dev": "vite",
-    "build": "npm run build:wasm && tsc -b && vite build",
+    "build": "npm run build:wasm && tsc -b && vite build && cp dist/index.html dist/404.html",
     "lint": "eslint .",
     "preview": "vite preview"
   },
