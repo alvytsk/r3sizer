@@ -423,11 +423,11 @@ normalization_scale?: number | null,
  */
 out_of_range_fraction?: number | null, };
 
-export type RecommendationKind = "switch_to_content_adaptive" | "lower_strong_edge_gain" | "raise_artifact_budget" | "switch_to_lightness" | "widen_probe_range" | "lower_sigma";
+export type RecommendationKind = "switch_to_content_adaptive" | "lower_strong_edge_gain" | "raise_artifact_budget" | "switch_to_lightness" | "widen_probe_range" | "lower_sigma" | "switch_to_hybrid";
 
 export type Severity = "info" | "suggestion" | "warning";
 
-export type ParamPatch = { sharpen_strategy?: SharpenStrategy | null, target_artifact_ratio?: number | null, sharpen_mode?: SharpenMode | null, probe_strengths?: ProbeConfig | null, sharpen_sigma?: number | null, };
+export type ParamPatch = { sharpen_strategy?: SharpenStrategy | null, target_artifact_ratio?: number | null, sharpen_mode?: SharpenMode | null, probe_strengths?: ProbeConfig | null, sharpen_sigma?: number | null, selection_policy?: SelectionPolicy | null, };
 
 export type Recommendation = { kind: RecommendationKind, severity: Severity, 
 /**

@@ -1261,6 +1261,7 @@ pub enum RecommendationKind {
     SwitchToLightness,
     WidenProbeRange,
     LowerSigma,
+    SwitchToHybrid,
 }
 
 /// Display severity for a recommendation.  Affects UI styling only — does not
@@ -1292,6 +1293,8 @@ pub struct ParamPatch {
     pub probe_strengths: Option<ProbeConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharpen_sigma: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_policy: Option<SelectionPolicy>,
 }
 
 /// An actionable recommendation derived from pipeline diagnostics.
