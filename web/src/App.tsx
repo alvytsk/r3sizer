@@ -163,18 +163,18 @@ export default function App() {
         {inputFile && (
           <aside
             className={[
-              "bg-card border-r border-border/40",
+              "bg-background border-r border-border/40",
               /* Mobile: fixed overlay, slides from left */
-              "fixed top-0 bottom-0 left-0 z-40 w-[min(340px,85vw)] shadow-2xl",
+              "fixed top-0 bottom-0 left-0 z-40 w-[min(300px,85vw)] shadow-2xl",
               "transition-[transform,width] duration-200 ease-in-out",
               sidebarOpen ? "translate-x-0" : "-translate-x-full",
               /* Desktop: inline sidebar, width transitions */
               "lg:static lg:z-auto lg:shadow-none lg:translate-x-0",
               "lg:flex-shrink-0 lg:overflow-hidden",
-              sidebarOpen ? "lg:w-[340px]" : "lg:w-11",
+              sidebarOpen ? "lg:w-[300px]" : "lg:w-11",
             ].join(" ")}
           >
-            <div className="w-full lg:w-[340px] h-full flex flex-col">
+            <div className="w-full lg:w-[300px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -271,18 +271,23 @@ export default function App() {
             {!inputFile ? (
               <div className="flex-1 flex items-center justify-center px-6">
                 <div className="flex flex-col items-center gap-8 max-w-lg w-full -mt-10">
-                  {/* Hero title */}
-                  <div className="flex flex-col items-center gap-2 text-center">
-                    <h2 className="font-mono text-3xl font-bold tracking-tight text-primary glow-amber-text">
-                      r3sizer
-                    </h2>
-                    <p className="text-sm text-muted-foreground max-w-xs">
-                      Precision downscaling with automatic sharpness optimization.
-                      Runs entirely in your browser.
-                    </p>
+                  {/* Hero logo + title */}
+                  <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="animate-fade-up glow-amber rounded-2xl p-2">
+                      <LogoMark className="h-16 w-16 text-primary" />
+                    </div>
+                    <div className="flex flex-col items-center gap-1 animate-fade-up delay-100">
+                      <h2 className="font-mono text-3xl font-bold tracking-tight text-primary glow-amber-text">
+                        r3sizer
+                      </h2>
+                      <p className="text-sm text-muted-foreground max-w-xs">
+                        Precision downscaling with automatic sharpness optimization.
+                        Runs entirely in your browser.
+                      </p>
+                    </div>
                   </div>
                   {/* Upload zone with crop marks */}
-                  <div className="relative w-full">
+                  <div className="relative w-full animate-fade-up delay-300">
                     {/* Corner crop marks */}
                     <div className="absolute -top-2 -left-2 w-5 h-5 border-t-2 border-l-2 border-primary/40 rounded-tl-sm" />
                     <div className="absolute -top-2 -right-2 w-5 h-5 border-t-2 border-r-2 border-primary/40 rounded-tr-sm" />
@@ -291,7 +296,7 @@ export default function App() {
                     <ImageUpload />
                   </div>
                   {/* Pipeline hint — hidden on narrow screens */}
-                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50">
+                  <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50 animate-fade-up delay-400">
                     <span>linearize</span>
                     <span className="text-primary/30">&rarr;</span>
                     <span>downscale</span>
@@ -317,16 +322,16 @@ export default function App() {
             className={[
               "bg-card border-l border-border/40",
               /* Mobile: fixed overlay, slides from right */
-              "fixed top-0 bottom-0 right-0 z-40 w-[min(380px,85vw)] shadow-2xl",
+              "fixed top-0 bottom-0 right-0 z-40 w-[min(420px,85vw)] shadow-2xl",
               "transition-[transform,width] duration-200 ease-in-out",
               diagOpen ? "translate-x-0" : "translate-x-full",
               /* Desktop: inline sidebar, width transitions */
               "lg:static lg:z-auto lg:shadow-none lg:translate-x-0",
               "lg:flex-shrink-0 lg:overflow-hidden",
-              diagOpen ? "lg:w-[380px]" : "lg:w-11",
+              diagOpen ? "lg:w-[420px]" : "lg:w-10",
             ].join(" ")}
           >
-            <div className="w-full lg:w-[380px] h-full flex flex-col">
+            <div className="w-full lg:w-[420px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
                   onClick={() => setDiagOpen(!diagOpen)}
@@ -361,25 +366,31 @@ export default function App() {
         )}
       </div>
 
-      {/* Status bar — always visible */}
-      <footer className="border-t border-border/60 px-5 py-2.5 flex items-center gap-5 text-xs font-mono text-muted-foreground bg-background/80 backdrop-blur-sm">
+      {/* Status bar — instrument telemetry strip */}
+      <footer className="footer-separator border-t border-border/40 px-5 flex items-center gap-6 bg-background/90 backdrop-blur-sm flex-shrink-0 h-11">
         {diagnostics ? (
           <>
-            <span>
-              s* = <span className="text-foreground">{diagnostics.selected_strength.toFixed(4)}</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">S*</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.selected_strength.toFixed(4)}</span>
             </span>
-            <span>
-              P = <span className="text-foreground">{diagnostics.measured_artifact_ratio.toExponential(2)}</span>
+            <span className="w-px h-3 bg-border/40 flex-shrink-0" />
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">P</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.measured_artifact_ratio.toExponential(2)}</span>
             </span>
-            <span>
-              {diagnostics.output_size.width}&times;{diagnostics.output_size.height}
+            <span className="w-px h-3 bg-border/40 flex-shrink-0" />
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">Out</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.output_size.width}&times;{diagnostics.output_size.height}</span>
             </span>
-            <span className="ml-auto">
-              {(diagnostics.timing.total_us / 1000).toFixed(0)}ms
+            <span className="ml-auto flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">Total</span>
+              <span className="text-xs font-mono text-primary tabular-nums">{(diagnostics.timing.total_us / 1000).toFixed(0)}ms</span>
             </span>
           </>
         ) : (
-          <span className="text-muted-foreground/40">ready</span>
+          <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">ready</span>
         )}
       </footer>
     </div>
