@@ -361,25 +361,31 @@ export default function App() {
         )}
       </div>
 
-      {/* Status bar — always visible */}
-      <footer className="border-t border-border/60 px-5 py-2.5 flex items-center gap-5 text-xs font-mono text-muted-foreground bg-background/80 backdrop-blur-sm">
+      {/* Status bar — instrument telemetry strip */}
+      <footer className="footer-separator border-t border-border/40 px-5 flex items-center gap-6 bg-background/90 backdrop-blur-sm flex-shrink-0 h-11">
         {diagnostics ? (
           <>
-            <span>
-              s* = <span className="text-foreground">{diagnostics.selected_strength.toFixed(4)}</span>
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">S*</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.selected_strength.toFixed(4)}</span>
             </span>
-            <span>
-              P = <span className="text-foreground">{diagnostics.measured_artifact_ratio.toExponential(2)}</span>
+            <span className="w-px h-3 bg-border/40 flex-shrink-0" />
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">P</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.measured_artifact_ratio.toExponential(2)}</span>
             </span>
-            <span>
-              {diagnostics.output_size.width}&times;{diagnostics.output_size.height}
+            <span className="w-px h-3 bg-border/40 flex-shrink-0" />
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">Out</span>
+              <span className="text-xs font-mono text-foreground tabular-nums">{diagnostics.output_size.width}&times;{diagnostics.output_size.height}</span>
             </span>
-            <span className="ml-auto">
-              {(diagnostics.timing.total_us / 1000).toFixed(0)}ms
+            <span className="ml-auto flex items-baseline gap-1.5">
+              <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">Total</span>
+              <span className="text-xs font-mono text-primary tabular-nums">{(diagnostics.timing.total_us / 1000).toFixed(0)}ms</span>
             </span>
           </>
         ) : (
-          <span className="text-muted-foreground/40">ready</span>
+          <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">ready</span>
         )}
       </footer>
     </div>
