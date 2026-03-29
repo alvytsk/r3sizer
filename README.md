@@ -6,6 +6,8 @@ The sharpening strength is selected automatically by fitting a cubic model of ar
 ratios and solving for a target out-of-gamut threshold — not by a generic sharpness
 heuristic.
 
+**[Live demo](https://alvytsk.github.io/r3sizer/)** — runs entirely in the browser via WebAssembly.
+
 ---
 
 ## Quick start
@@ -191,6 +193,10 @@ so the two sides never drift. The web app re-exports everything through
 any web-only overrides.
 
 ### Web UI
+
+The web UI is deployed to **GitHub Pages** at [alvytsk.github.io/r3sizer](https://alvytsk.github.io/r3sizer/) via a GitHub Actions workflow (`.github/workflows/deploy.yml`). Every push to `main` triggers a build (Rust → WASM → Vite bundle) and deploys automatically.
+
+For local development:
 
 ```sh
 cd web
