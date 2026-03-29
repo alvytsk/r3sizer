@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageAsync } from "@/wasm";
+import { processImageAsync, prepareImage, setProgressCallback } from "@/wasm";
 
 interface ProcessorState {
   // Input
@@ -19,6 +19,7 @@ interface ProcessorState {
 
   // Processing
   isProcessing: boolean;
+  processingStage: string | null;
   error: string | null;
 
   // Output
@@ -54,6 +55,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   lockDimensions: false,
 
   isProcessing: false,
+  processingStage: null,
   error: null,
 
   outputRgbaData: null,
@@ -89,6 +91,9 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       diagnostics: null,
       error: null,
     });
+
+    // Pre-convert sRGB→linear in the background (fire-and-forget).
+    prepareImage(rgbaData, width, height).catch(() => {});
   },
 
   updateParams: (partial) => {
@@ -131,7 +136,8 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       return;
     }
 
-    set({ isProcessing: true, error: null });
+    set({ isProcessing: true, processingStage: null, error: null });
+    setProgressCallback((stage) => set({ processingStage: stage }));
 
     try {
       const paramsJson = JSON.stringify(state.params);
@@ -149,12 +155,16 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
         diagnostics: result.diagnostics,
         lastProcessedParams: { ...state.params },
         isProcessing: false,
+        processingStage: null,
       });
     } catch (e) {
       set({
         error: e instanceof Error ? e.message : String(e),
         isProcessing: false,
+        processingStage: null,
       });
+    } finally {
+      setProgressCallback(null);
     }
   },
 
@@ -168,6 +178,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       preserveAspectRatio: true,
       lockDimensions: false,
       isProcessing: false,
+      processingStage: null,
       error: null,
       outputRgbaData: null,
       outputWidth: 0,

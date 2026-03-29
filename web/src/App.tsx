@@ -34,6 +34,7 @@ function LogoMark({ className }: { className?: string }) {
 export default function App() {
   const inputFile = useProcessorStore((s) => s.inputFile);
   const isProcessing = useProcessorStore((s) => s.isProcessing);
+  const processingStage = useProcessorStore((s) => s.processingStage);
   const error = useProcessorStore((s) => s.error);
   const diagnostics = useProcessorStore((s) => s.diagnostics);
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
@@ -178,7 +179,7 @@ export default function App() {
               <div className="flex flex-col items-center gap-2.5">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 <span className="text-xs font-mono text-primary/80 tracking-wide">
-                  running pipeline...
+                  {processingStage || "starting..."}
                 </span>
               </div>
             </div>
@@ -206,7 +207,7 @@ export default function App() {
               </Button>
               <span className={`text-[11px] font-mono hidden sm:inline ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}>
                 {isProcessing
-                  ? "running pipeline..."
+                  ? processingStage || "starting..."
                   : paramsChanged
                     ? "parameters changed"
                     : "auto-sharpness downscale"}

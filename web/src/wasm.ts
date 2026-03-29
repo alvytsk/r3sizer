@@ -10,6 +10,20 @@ const pending = new Map<
   { resolve: (r: ProcessResult) => void; reject: (e: Error) => void }
 >();
 
+// ---------------------------------------------------------------------------
+// Progress callback — set by the store to receive pipeline stage updates.
+// ---------------------------------------------------------------------------
+
+let progressCallback: ((stage: string) => void) | null = null;
+
+export function setProgressCallback(cb: ((stage: string) => void) | null) {
+  progressCallback = cb;
+}
+
+// ---------------------------------------------------------------------------
+// Worker lifecycle
+// ---------------------------------------------------------------------------
+
 function ensureWorker(): Promise<void> {
   if (workerReadyPromise) return workerReadyPromise;
 
@@ -39,6 +53,15 @@ function ensureWorker(): Promise<void> {
             return;
           }
 
+          // Pipeline progress — forward to store callback.
+          if (data.type === "progress" && data.stage) {
+            progressCallback?.(data.stage);
+            return;
+          }
+
+          // Ignore "prepared" acknowledgement — fire-and-forget.
+          if (data.type === "prepared") return;
+
           if (data.type === "result" && data.id != null) {
             const cb = pending.get(data.id);
             if (!cb) return;
@@ -62,6 +85,18 @@ function ensureWorker(): Promise<void> {
 
   return workerReadyPromise;
 }
+
+// ---------------------------------------------------------------------------
+// Eager WASM initialization — starts compiling immediately on import.
+// ---------------------------------------------------------------------------
+
+ensureWorker().catch(() => {
+  // Silently ignore — will retry on first processImageAsync call.
+});
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export async function processImageAsync(
   rgbaData: Uint8Array,
@@ -87,4 +122,24 @@ export async function processImageAsync(
     // Output comes back via transfer in the worker's postMessage.
     worker!.postMessage(msg);
   });
+}
+
+/**
+ * Pre-convert sRGB→linear in the worker and cache the result.
+ *
+ * Fire-and-forget: the next `processImageAsync` call with matching dimensions
+ * will use the cached linear image, saving ~100-400ms of conversion time.
+ */
+export async function prepareImage(
+  rgbaData: Uint8Array,
+  width: number,
+  height: number
+): Promise<void> {
+  await ensureWorker();
+  worker!.postMessage({
+    type: "prepare",
+    rgbaData,
+    width,
+    height,
+  } as WorkerRequest);
 }
