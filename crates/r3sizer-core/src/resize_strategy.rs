@@ -2,8 +2,6 @@
 //!
 //! Extends the resize stage to support multiple kernels and per-region
 //! kernel selection based on the content classifier.
-//!
-//! Provenance: `EngineeringChoice` — paper-exact kernel unknown.
 
 use std::collections::{BTreeMap, BTreeSet};
 

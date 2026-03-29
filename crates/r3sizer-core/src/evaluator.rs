@@ -6,8 +6,6 @@
 //!
 //! The trait is designed for future extensibility: an ONNX-based
 //! implementation could be plugged in without changing the pipeline.
-//!
-//! Provenance: `EngineeringChoice`.
 
 use crate::color::extract_luminance;
 use crate::types::{ImageFeatures, LinearRgbImage, QualityEvaluation};

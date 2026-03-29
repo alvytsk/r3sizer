@@ -2,8 +2,6 @@
 //!
 //! Allows the pipeline to accept pre-linearized or HDR data without
 //! going through the standard sRGB→linear conversion in the IO layer.
-//!
-//! Provenance: `EngineeringChoice`.
 
 use crate::{LinearRgbImage, CoreError};
 use crate::types::InputColorSpace;

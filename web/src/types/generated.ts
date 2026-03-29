@@ -11,8 +11,6 @@
 
 export type SharpenMode = "rgb" | "lightness";
 
-export type SharpenModel = "practical_usm" | "paper_lightness_approx";
-
 export type MetricMode = "absolute_total" | "relative_to_base";
 
 export type ArtifactMetric = "channel_clipping_ratio" | "pixel_out_of_gamut_ratio";
@@ -22,8 +20,6 @@ export type FitStrategy = "Cubic" | "DirectSearch";
 export type ClampPolicy = "Clamp" | "Normalize";
 
 export type DiagnosticsLevel = "summary" | "full";
-
-export type Provenance = "paper_confirmed" | "paper_supported" | "engineering_choice" | "engineering_proxy" | "placeholder";
 
 export type CrossingStatus = "found" | "not_found_in_range" | "not_attempted";
 
@@ -77,10 +73,6 @@ sharpen_sigma: number, fit_strategy: FitStrategy, output_clamp: ClampPolicy,
  * Whether to sharpen RGB directly or through lightness channel.
  */
 sharpen_mode: SharpenMode, 
-/**
- * Which sharpening algorithm to use. Default: `PracticalUsm`.
- */
-sharpen_model: SharpenModel, 
 /**
  * How the artifact metric is computed for strength selection.
  */
@@ -234,13 +226,11 @@ ingress_us?: number | null,
  */
 evaluator_us?: number | null, };
 
-export type StageProvenance = { color_conversion: Provenance, resize: Provenance, contrast_leveling: Provenance, sharpen_operator: Provenance, lightness_reconstruction: Provenance, artifact_metric: Provenance, polynomial_fit: Provenance, };
-
 export type RegionCoverage = { total_pixels: number, flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, flat_fraction: number, textured_fraction: number, strong_edge_fraction: number, microtexture_fraction: number, risky_halo_zone_fraction: number, };
 
 export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_metric: number, } | { "outcome": "passed_after_backoff", iterations: number, final_scale: number, measured_metric: number, } | { "outcome": "failed_budget_exceeded", iterations: number, best_scale: number, best_metric: number, };
 
-export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, sharpen_model: SharpenModel, metric_mode: MetricMode, artifact_metric: ArtifactMetric, target_artifact_ratio: number, 
+export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, target_artifact_ratio: number, 
 /**
  * Artifact ratio of the downscaled image before any sharpening is applied.
  */
@@ -282,10 +272,6 @@ metric_components?: MetricBreakdown | null,
  */
 metric_weights: MetricWeights, 
 /**
- * Provenance of the metric weights.
- */
-metric_weights_provenance: Provenance, 
-/**
  * Per-class region coverage. None when `SharpenStrategy::Uniform`.
  */
 region_coverage?: RegionCoverage | null, 
@@ -297,10 +283,6 @@ adaptive_validation?: AdaptiveValidationOutcome | null,
  * Per-stage wall-clock timing.
  */
 timing: StageTiming, 
-/**
- * Per-stage classification of how faithful the implementation is to the papers.
- */
-provenance: StageProvenance, 
 /**
  * Input color-space ingress diagnostics.
  */
@@ -476,7 +458,6 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "fit_strategy": "Cubic",
   "output_clamp": "Clamp",
   "sharpen_mode": "lightness",
-  "sharpen_model": "practical_usm",
   "metric_mode": "relative_to_base",
   "artifact_metric": "channel_clipping_ratio",
   "metric_weights": {

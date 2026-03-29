@@ -2,8 +2,6 @@
 //!
 //! Branch D: extends the sharpening path with chroma monitoring and provides
 //! alternative color spaces for artifact evaluation.
-//!
-//! Provenance: `EngineeringChoice`.
 
 use crate::color::{extract_luminance, luminance_from_linear_srgb, reconstruct_rgb_from_lightness};
 use crate::sharpen::{make_kernel, unsharp_mask_single_channel_with_kernel};

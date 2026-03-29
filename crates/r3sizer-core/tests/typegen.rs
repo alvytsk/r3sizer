@@ -16,10 +16,9 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ProbeConfig, ProbeSample, Provenance, QualityEvaluation,
+    MetricMode, MetricWeights, ProbeConfig, ProbeSample, QualityEvaluation,
     RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy, StageTiming,
-    StageProvenance,
+    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -47,13 +46,11 @@ fn export_typescript_bindings() {
     let declarations: Vec<String> = vec![
         // ── Primitives / enums ──────────────────────────────────────────
         SharpenMode::decl(&cfg),
-        SharpenModel::decl(&cfg),
         MetricMode::decl(&cfg),
         ArtifactMetric::decl(&cfg),
         FitStrategy::decl(&cfg),
         ClampPolicy::decl(&cfg),
         DiagnosticsLevel::decl(&cfg),
-        Provenance::decl(&cfg),
         CrossingStatus::decl(&cfg),
         SelectionMode::decl(&cfg),
         FallbackReason::decl(&cfg),
@@ -78,7 +75,6 @@ fn export_typescript_bindings() {
         // ── Probe / diagnostics ─────────────────────────────────────────
         ProbeSample::decl(&cfg),
         StageTiming::decl(&cfg),
-        StageProvenance::decl(&cfg),
         RegionCoverage::decl(&cfg),
         AdaptiveValidationOutcome::decl(&cfg),
         AutoSharpDiagnostics::decl(&cfg),

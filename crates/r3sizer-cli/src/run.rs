@@ -59,7 +59,6 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
         sharpen_mode: args.sharpen_mode.into(),
-        sharpen_model: args.sharpen_model.into(),
         metric_mode: args.metric_mode.into(),
         artifact_metric: args.artifact_metric.into(),
         metric_weights,
