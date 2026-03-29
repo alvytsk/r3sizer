@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Loader2, FolderOpen, ChevronLeft, ChevronRight, BarChart3, SlidersHorizontal } from "lucide-react";
 import { DownloadButton } from "@/components/DownloadButton";
@@ -119,6 +120,14 @@ export default function App() {
             precision downscaling
           </span>
         )}
+
+        <div className="h-4 w-px bg-border/40 flex-shrink-0 hidden sm:block" />
+        <Link
+          to="/algorithm"
+          className="text-xs font-mono text-muted-foreground/60 hover:text-primary transition-colors hidden sm:block"
+        >
+          algorithm
+        </Link>
 
         <div className="flex-1" />
 

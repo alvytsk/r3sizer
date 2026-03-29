@@ -1,0 +1,37 @@
+import {
+  createRouter,
+  createRoute,
+  createRootRoute,
+  Outlet,
+} from "@tanstack/react-router";
+import App from "./App";
+import AlgorithmPage from "./pages/AlgorithmPage";
+
+const rootRoute = createRootRoute({
+  component: () => <Outlet />,
+});
+
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  component: App,
+});
+
+const algorithmRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/algorithm",
+  component: AlgorithmPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, algorithmRoute]);
+
+export const router = createRouter({
+  routeTree,
+  basepath: "/r3sizer",
+});
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
