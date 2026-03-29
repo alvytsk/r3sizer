@@ -18,8 +18,8 @@ use r3sizer_core::{
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
     MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbeSample, QualityEvaluation,
     Recommendation, RecommendationKind, RegionClass, RegionCoverage, ResizeKernel,
-    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, Severity,
-    SharpenMode, SharpenStrategy, StageTiming,
+    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, SelectionPolicy,
+    Severity, SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -54,6 +54,7 @@ fn export_typescript_bindings() {
         DiagnosticsLevel::decl(&cfg),
         CrossingStatus::decl(&cfg),
         SelectionMode::decl(&cfg),
+        SelectionPolicy::decl(&cfg),
         FallbackReason::decl(&cfg),
         MetricComponent::decl(&cfg),
         RegionClass::decl(&cfg),
