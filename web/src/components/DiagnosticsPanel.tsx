@@ -108,7 +108,7 @@ function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcom
   );
 }
 
-function Readout({ label, value }: { label: string; value: string | number }) {
+function Readout({ label, value }: { label: React.ReactNode; value: string | number }) {
   return (
     <div className="flex justify-between text-[13px] py-0.5">
       <span className="text-muted-foreground">{label}</span>
@@ -545,14 +545,186 @@ function crossingStatusVariant(status: string): ChipVariant {
   return CROSSING_STATUS_VARIANTS[status] ?? "neutral";
 }
 
+interface Advice {
+  icon: string;
+  title: string;
+  body: string;
+  kind: "success" | "tip" | "warning";
+}
+
+function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
+  const advice: Advice[] = [];
+  const ratio = d.measured_artifact_ratio;
+  const target = d.target_artifact_ratio;
+  const strength = d.selected_strength;
+
+  // Overall result quality
+  if (d.selection_mode === "polynomial_root" && ratio <= target * 1.1) {
+    advice.push({
+      icon: "\u2713",
+      title: "Optimal result",
+      body: "The polynomial solve found an analytical root. Sharpening strength is well-calibrated for this image.",
+      kind: "success",
+    });
+  }
+
+  // Budget issues
+  if (d.selection_mode === "budget_unreachable") {
+    advice.push({
+      icon: "!",
+      title: "Budget unreachable",
+      body: "All probe strengths exceeded the artifact budget. Try increasing Target P(s) (e.g. from 1e-3 to 1e-2), reducing output resolution, or switching to Lightness sharpening mode.",
+      kind: "warning",
+    });
+  } else if (ratio > target * 2) {
+    advice.push({
+      icon: "!",
+      title: "Measured artifacts exceed target",
+      body: `Measured P is ${(ratio / target).toFixed(1)}x the target. Consider raising Target P(s) or lowering sigma to reduce sharpening intensity.`,
+      kind: "warning",
+    });
+  }
+
+  // Strength advice
+  if (strength < 0.02 && d.selection_mode !== "budget_unreachable") {
+    advice.push({
+      icon: "\u2193",
+      title: "Very low sharpening applied",
+      body: "Strength is below 0.02 — the image may appear soft. You can raise Target P(s) to allow more sharpening, or this image may simply not need much.",
+      kind: "tip",
+    });
+  }
+
+  const probeMax = d.probe_samples.length > 0
+    ? Math.max(...d.probe_samples.map((p) => p.strength))
+    : 0;
+  if (strength > 0 && probeMax > 0 && strength >= probeMax * 0.95) {
+    advice.push({
+      icon: "\u2191",
+      title: "Strength near probe limit",
+      body: "Selected strength is at the upper edge of probe range. Consider adding higher probe values (e.g. 0.7, 1.0) so the solver has more room to find an optimal point.",
+      kind: "tip",
+    });
+  }
+
+  // Baseline warning
+  if (d.baseline_artifact_ratio > target * 0.5 && d.baseline_artifact_ratio > 0) {
+    advice.push({
+      icon: "\u26A0",
+      title: "High baseline artifacts",
+      body: `The resize step alone produces ${(d.baseline_artifact_ratio * 100).toFixed(2)}% artifacts before any sharpening. This content may be too detailed for the target resolution. Try a larger output size or a smoother resize kernel (Gaussian).`,
+      kind: "warning",
+    });
+  }
+
+  // Sigma advice
+  if (d.sharpen_mode === "rgb") {
+    advice.push({
+      icon: "\u2192",
+      title: "Consider Lightness mode",
+      body: "RGB mode sharpens all color channels independently, which can amplify color fringing. Lightness mode only sharpens luminance — it typically produces fewer color artifacts.",
+      kind: "tip",
+    });
+  }
+
+  // Fit quality
+  if (d.fit_quality && d.fit_quality.r_squared < 0.85) {
+    advice.push({
+      icon: "\u223C",
+      title: "Poor polynomial fit",
+      body: `R\u00b2 = ${d.fit_quality.r_squared.toFixed(3)} is below 0.85. The cubic model doesn't closely match probe data. Try adding more probe points or widening the probe range for a better fit.`,
+      kind: "warning",
+    });
+  }
+
+  // Robustness
+  if (d.robustness && !d.robustness.loo_stable) {
+    advice.push({
+      icon: "\u2248",
+      title: "Result is noise-sensitive",
+      body: "Leave-one-out analysis shows the selected strength shifts significantly when any single probe is removed. Adding more probe samples will stabilize the result.",
+      kind: "tip",
+    });
+  }
+
+  // Region-based advice
+  if (d.region_coverage) {
+    const rc = d.region_coverage;
+    if (rc.risky_halo_zone_fraction > 0.15) {
+      advice.push({
+        icon: "\u25CB",
+        title: "High halo-risk content",
+        body: `${(rc.risky_halo_zone_fraction * 100).toFixed(0)}% of the image is in the halo risk zone (strong edges next to flat areas). Consider Content Adaptive strategy with reduced strong_edge gain, or lower sigma.`,
+        kind: "tip",
+      });
+    }
+    if (rc.flat_fraction > 0.7) {
+      advice.push({
+        icon: "\u2014",
+        title: "Mostly flat image",
+        body: "Over 70% of the image is flat regions. Sharpening has little to enhance — the result should be clean. If you see noise amplification, reduce sigma.",
+        kind: "tip",
+      });
+    }
+  }
+
+  // Evaluator suggestion
+  if (d.evaluator_result && d.evaluator_result.suggested_strength != null) {
+    const diff = Math.abs(d.evaluator_result.suggested_strength - strength);
+    if (diff > 0.05) {
+      advice.push({
+        icon: "\u2606",
+        title: "Quality evaluator suggests different strength",
+        body: `The evaluator recommends s\u2009=\u2009${d.evaluator_result.suggested_strength.toFixed(3)} (confidence: ${(d.evaluator_result.confidence * 100).toFixed(0)}%). Current: ${strength.toFixed(3)}. The evaluator uses image features to predict perceptual quality.`,
+        kind: "tip",
+      });
+    }
+  }
+
+  if (advice.length === 0) {
+    advice.push({
+      icon: "\u2713",
+      title: "Looking good",
+      body: "No issues detected. The current settings appear well-suited for this image.",
+      kind: "success",
+    });
+  }
+
+  return advice;
+}
+
+const ADVICE_STYLES: Record<Advice["kind"], { border: string; bg: string; icon: string; title: string }> = {
+  success: {
+    border: "border-chart-3/25",
+    bg: "bg-chart-3/5",
+    icon: "text-chart-3",
+    title: "text-chart-3",
+  },
+  tip: {
+    border: "border-chart-2/25",
+    bg: "bg-chart-2/5",
+    icon: "text-chart-2",
+    title: "text-chart-2",
+  },
+  warning: {
+    border: "border-primary/25",
+    bg: "bg-primary/5",
+    icon: "text-primary",
+    title: "text-primary",
+  },
+};
+
 export function DiagnosticsPanel() {
   const diagnostics = useProcessorStore((s) => s.diagnostics);
   if (!diagnostics) return null;
 
   return (
     <div className="p-3">
-      <Tabs defaultValue="summary" className="w-full">
-        <TabsList variant="line" className="grid grid-cols-4 w-full h-8">
+      <Tabs defaultValue="advice" className="w-full">
+        <TabsList variant="line" className="grid grid-cols-5 w-full h-8">
+          <TabsTrigger value="advice" className="text-[13px] font-mono">
+            Advice
+          </TabsTrigger>
           <TabsTrigger value="summary" className="text-[13px] font-mono">
             Summary
           </TabsTrigger>
@@ -583,7 +755,7 @@ export function DiagnosticsPanel() {
               value={diagnostics.selected_strength.toFixed(4)}
             />
             <Readout
-              label="Target P\u2080"
+              label={<>Target P<sub>0</sub></>}
               value={diagnostics.target_artifact_ratio.toExponential(2)}
             />
             <Readout
@@ -696,6 +868,30 @@ export function DiagnosticsPanel() {
               )}
             </div>
           )}
+        </TabsContent>
+
+        {/* ── Advice ── */}
+        <TabsContent value="advice" className="space-y-2 mt-3">
+          {buildAdvice(diagnostics).map((item, i) => {
+            const s = ADVICE_STYLES[item.kind];
+            return (
+              <div key={i} className={`rounded-sm border ${s.border} ${s.bg} px-3 py-2.5`}>
+                <div className="flex items-start gap-2">
+                  <span className={`text-[14px] font-mono leading-none mt-0.5 shrink-0 ${s.icon}`}>
+                    {item.icon}
+                  </span>
+                  <div className="space-y-1 min-w-0">
+                    <div className={`text-[12px] font-mono font-medium ${s.title}`}>
+                      {item.title}
+                    </div>
+                    <p className="text-[12px] text-muted-foreground leading-relaxed">
+                      {item.body}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </TabsContent>
 
         {/* ── Fit ── */}

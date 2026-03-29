@@ -55,18 +55,18 @@
     /* Amber accent as primary */
     --primary: oklch(0.78 0.16 75);
     --primary-foreground: oklch(0.17 0.006 270);
-    --secondary: oklch(0.24 0.008 270);
+    --secondary: oklch(0.28 0.01 270);
     --secondary-foreground: oklch(0.78 0.01 80);
-    --muted: oklch(0.24 0.008 270);
-    --muted-foreground: oklch(0.55 0.015 80);
-    --accent: oklch(0.26 0.01 270);
+    --muted: oklch(0.28 0.01 270);
+    --muted-foreground: oklch(0.64 0.015 80);
+    --accent: oklch(0.30 0.01 270);
     --accent-foreground: oklch(0.78 0.16 75);
 
     --destructive: oklch(0.55 0.22 25);
     --destructive-foreground: oklch(0.65 0.22 25);
 
-    --border: oklch(0.28 0.01 270);
-    --input: oklch(0.24 0.008 270);
+    --border: oklch(0.32 0.012 270);
+    --input: oklch(0.30 0.01 270);
     --ring: oklch(0.78 0.16 75);
 
     /* Instrument-grade chart palette */
@@ -77,12 +77,12 @@
     --chart-5: oklch(0.6 0.2 25);
 
     --sidebar-background: oklch(0.20 0.006 270);
-    --sidebar-foreground: oklch(0.55 0.015 80);
+    --sidebar-foreground: oklch(0.64 0.015 80);
     --sidebar-primary: oklch(0.78 0.16 75);
     --sidebar-primary-foreground: oklch(0.17 0.006 270);
-    --sidebar-accent: oklch(0.26 0.01 270);
-    --sidebar-accent-foreground: oklch(0.55 0.015 80);
-    --sidebar-border: oklch(0.28 0.01 270);
+    --sidebar-accent: oklch(0.30 0.01 270);
+    --sidebar-accent-foreground: oklch(0.64 0.015 80);
+    --sidebar-border: oklch(0.32 0.012 270);
     --sidebar-ring: oklch(0.78 0.16 75);
   }
 
@@ -142,8 +142,8 @@
   --color-amber: oklch(0.78 0.16 75);
   --color-amber-dim: oklch(0.55 0.12 75);
   --color-amber-bright: oklch(0.88 0.14 80);
-  --color-surface: oklch(0.22 0.006 270);
-  --color-surface-raised: oklch(0.26 0.008 270);
+  --color-surface: oklch(0.24 0.008 270);
+  --color-surface-raised: oklch(0.30 0.01 270);
 }
 
 /* Grain overlay for darkroom texture */

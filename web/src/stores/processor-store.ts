@@ -37,6 +37,8 @@ interface ProcessorState {
   ) => void;
   updateParams: (partial: Partial<AutoSharpParams>) => void;
   setPreserveAspectRatio: (v: boolean) => void;
+  lockDimensions: boolean;
+  setLockDimensions: (v: boolean) => void;
   process: () => Promise<void>;
   reset: () => void;
 }
@@ -49,6 +51,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
 
   params: { ...DEFAULT_PARAMS },
   preserveAspectRatio: true,
+  lockDimensions: false,
 
   isProcessing: false,
   error: null,
@@ -63,7 +66,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     const state = get();
     const params = { ...state.params };
 
-    if (state.preserveAspectRatio) {
+    if (state.preserveAspectRatio && !state.lockDimensions) {
       const aspect = width / height;
       if (params.target_width && !params.target_height) {
         params.target_height = Math.round(params.target_width / aspect);
@@ -92,7 +95,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     const state = get();
     const newParams = { ...state.params, ...partial };
 
-    if (state.preserveAspectRatio && state.inputWidth > 0) {
+    if (state.preserveAspectRatio && !state.lockDimensions && state.inputWidth > 0) {
       const aspect = state.inputWidth / state.inputHeight;
       if ("target_width" in partial && !("target_height" in partial)) {
         newParams.target_height = Math.round(newParams.target_width / aspect);
@@ -108,13 +111,17 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     set({ preserveAspectRatio: v });
     if (v) {
       const state = get();
-      if (state.inputWidth > 0) {
+      if (state.inputWidth > 0 && !state.lockDimensions) {
         const aspect = state.inputWidth / state.inputHeight;
         const newParams = { ...state.params };
         newParams.target_height = Math.round(newParams.target_width / aspect);
         set({ params: newParams });
       }
     }
+  },
+
+  setLockDimensions: (v) => {
+    set({ lockDimensions: v });
   },
 
   process: async () => {
@@ -159,6 +166,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       inputHeight: 0,
       params: { ...DEFAULT_PARAMS },
       preserveAspectRatio: true,
+      lockDimensions: false,
       isProcessing: false,
       error: null,
       outputRgbaData: null,

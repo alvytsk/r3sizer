@@ -6,7 +6,10 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
 } from "@/components/ui/select";
 import {
@@ -14,7 +17,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ArrowLeftRight, Info } from "lucide-react";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import { useProcessorStore } from "@/stores/processor-store";
 import type {
   AutoSharpParams,
@@ -181,8 +190,22 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ValueLabel({ children }: { children: React.ReactNode }) {
-  return <Label className="text-[13px] text-muted-foreground">{children}</Label>;
+function ValueLabel({ children, tip }: { children: React.ReactNode; tip?: string }) {
+  if (!tip) return <Label className="text-[13px] text-muted-foreground">{children}</Label>;
+  return (
+    <span className="flex items-center gap-1">
+      <Label className="text-[13px] text-muted-foreground">{children}</Label>
+      <Tooltip>
+        <TooltipTrigger
+          render={<span />}
+          className="inline-flex text-muted-foreground/40 hover:text-primary transition-colors"
+        >
+          <Info className="h-3 w-3" />
+        </TooltipTrigger>
+        <TooltipContent side="right">{tip}</TooltipContent>
+      </Tooltip>
+    </span>
+  );
 }
 
 const SHARPEN_MODE: Record<string, string> = {
@@ -250,8 +273,8 @@ function AdaptiveSettings({ strategy, updateParams }: AdaptiveSettingsProps) {
 
   return (
     <Collapsible defaultOpen>
-      <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-        <ChevronDown className="h-3 w-3" />
+      <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
+        <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[open]:rotate-180" />
         Adaptive Settings
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3 pt-2">
@@ -388,7 +411,40 @@ const RESIZE_KERNEL: Record<string, string> = {
   gaussian: "Gaussian",
 };
 
+interface DimensionPreset {
+  label: string;
+  detail: string;
+  w: number;
+  h: number;
+}
 
+const DIMENSION_PRESETS: { group: string; items: DimensionPreset[] }[] = [
+  { group: "Screens", items: [
+    { label: "HD 720p", detail: "1280 × 720", w: 1280, h: 720 },
+    { label: "HD 4:3", detail: "960 × 720", w: 960, h: 720 },
+    { label: "Full HD", detail: "1920 × 1080", w: 1920, h: 1080 },
+    { label: "FHD 4:3", detail: "1440 × 1080", w: 1440, h: 1080 },
+    { label: "QHD 1440p", detail: "2560 × 1440", w: 2560, h: 1440 },
+    { label: "QHD 4:3", detail: "1920 × 1440", w: 1920, h: 1440 },
+    { label: "4K UHD", detail: "3840 × 2160", w: 3840, h: 2160 },
+    { label: "4K 4:3", detail: "2880 × 2160", w: 2880, h: 2160 },
+  ]},
+  { group: "Web", items: [
+    { label: "Small", detail: "800 × 600", w: 800, h: 600 },
+    { label: "Small 4:3", detail: "640 × 480", w: 640, h: 480 },
+    { label: "Medium", detail: "1200 × 800", w: 1200, h: 800 },
+    { label: "Medium 4:3", detail: "1024 × 768", w: 1024, h: 768 },
+    { label: "Large", detail: "1600 × 900", w: 1600, h: 900 },
+    { label: "Large 4:3", detail: "1600 × 1200", w: 1600, h: 1200 },
+  ]},
+  { group: "Social", items: [
+    { label: "Square", detail: "1080 × 1080", w: 1080, h: 1080 },
+    { label: "OG Image", detail: "1200 × 630", w: 1200, h: 630 },
+    { label: "Thumbnail", detail: "300 × 300", w: 300, h: 300 },
+  ]},
+];
+
+const ALL_PRESETS = DIMENSION_PRESETS.flatMap((g) => g.items);
 
 export function ParameterPanel() {
   const params = useProcessorStore((s) => s.params);
@@ -398,15 +454,59 @@ export function ParameterPanel() {
     (s) => s.setPreserveAspectRatio
   );
   const inputWidth = useProcessorStore((s) => s.inputWidth);
+  const lockDimensions = useProcessorStore((s) => s.lockDimensions);
+  const setLockDimensions = useProcessorStore((s) => s.setLockDimensions);
+
+  const matchingPreset = ALL_PRESETS.find(
+    (p) => p.w === params.target_width && p.h === params.target_height
+  );
+  const presetKey = matchingPreset ? `${matchingPreset.w}x${matchingPreset.h}` : "";
 
   const logRatio = Math.log10(params.target_artifact_ratio);
 
   return (
+    <TooltipProvider>
     <div className="p-3 space-y-4">
       <div className="space-y-2">
         <SectionLabel>Dimensions</SectionLabel>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
+        <div>
+          <ValueLabel>Preset</ValueLabel>
+          <Select
+            value={presetKey}
+            onValueChange={(v) => {
+              if (!v) return;
+              const [w, h] = v.split("x").map(Number);
+              if (w && h) updateParams({ target_width: w, target_height: h });
+            }}
+          >
+            <SelectTrigger className="h-7 text-xs font-mono">
+              <span className="flex flex-1 text-left truncate" data-slot="select-value">
+                {matchingPreset
+                  ? `${matchingPreset.label} — ${matchingPreset.detail}`
+                  : <span className="text-muted-foreground">Select preset…</span>
+                }
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {DIMENSION_PRESETS.map((group, gi) => (
+                <SelectGroup key={group.group}>
+                  {gi > 0 && <SelectSeparator />}
+                  <SelectLabel>{group.group}</SelectLabel>
+                  {group.items.map((p) => (
+                    <SelectItem key={`${p.w}x${p.h}`} value={`${p.w}x${p.h}`}>
+                      <span className="flex items-center justify-between gap-3 w-full">
+                        <span>{p.label}</span>
+                        <span className="text-[11px] text-muted-foreground font-mono">{p.detail}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end gap-1">
+          <div className="flex-1 min-w-0">
             <ValueLabel>Width</ValueLabel>
             <NumericInput
               id="width"
@@ -416,7 +516,20 @@ export function ParameterPanel() {
               onCommit={(v) => updateParams({ target_width: v })}
             />
           </div>
-          <div>
+          <button
+            type="button"
+            className="shrink-0 h-8 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            onClick={() =>
+              updateParams({
+                target_width: params.target_height,
+                target_height: params.target_width,
+              })
+            }
+            title="Swap width and height"
+          >
+            <ArrowLeftRight className="h-3.5 w-3.5" />
+          </button>
+          <div className="flex-1 min-w-0">
             <ValueLabel>Height</ValueLabel>
             <NumericInput
               id="height"
@@ -428,15 +541,27 @@ export function ParameterPanel() {
           </div>
         </div>
         {inputWidth > 0 && (
-          <div className="flex items-center gap-2">
-            <Switch
-              id="aspect"
-              checked={preserveAspectRatio}
-              onCheckedChange={setPreserveAspectRatio}
-            />
-            <Label htmlFor="aspect" className="text-[13px] text-muted-foreground">
-              Lock aspect ratio
-            </Label>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="aspect"
+                checked={preserveAspectRatio}
+                onCheckedChange={setPreserveAspectRatio}
+              />
+              <Label htmlFor="aspect" className="text-[13px] text-muted-foreground">
+                Lock ratio
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="pin-dims"
+                checked={lockDimensions}
+                onCheckedChange={setLockDimensions}
+              />
+              <Label htmlFor="pin-dims" className="text-[13px] text-muted-foreground">
+                Pin exact
+              </Label>
+            </div>
           </div>
         )}
       </div>
@@ -445,7 +570,7 @@ export function ParameterPanel() {
         <SectionLabel>Sharpening</SectionLabel>
         <div>
           <div className="flex items-baseline justify-between">
-            <ValueLabel>Sigma</ValueLabel>
+            <ValueLabel tip="Gaussian blur radius for the unsharp mask. Higher values sharpen coarser details but risk halos around edges. Lower values sharpen fine detail with fewer artifacts.">Sigma</ValueLabel>
             <span className="text-xs font-mono text-primary">
               {params.sharpen_sigma.toFixed(1)}
             </span>
@@ -461,7 +586,7 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel>Resize Kernel</ValueLabel>
+          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest, Gaussian is smoothest, Catmull-Rom is in between.">Resize Kernel</ValueLabel>
           <Select
             value={
               params.resize_strategy?.strategy === "uniform"
@@ -492,7 +617,7 @@ export function ParameterPanel() {
           </Select>
         </div>
         <div>
-          <ValueLabel>Mode</ValueLabel>
+          <ValueLabel tip="Lightness sharpens only luminance (less color fringing). RGB sharpens all channels independently (stronger but may shift colors).">Mode</ValueLabel>
           <Select
             value={params.sharpen_mode}
             onValueChange={(v) => {
@@ -510,7 +635,7 @@ export function ParameterPanel() {
           </Select>
         </div>
         <div>
-          <ValueLabel>Strategy</ValueLabel>
+          <ValueLabel tip="Uniform applies equal sharpening everywhere. Content Adaptive varies strength per region — less on edges (avoids halos), more on textures.">Strategy</ValueLabel>
           <Select
             value={params.sharpen_strategy.strategy}
             onValueChange={(v) => {
@@ -545,7 +670,7 @@ export function ParameterPanel() {
         <SectionLabel>Metric</SectionLabel>
         <div>
           <div className="flex items-baseline justify-between">
-            <ValueLabel>Target P(s)</ValueLabel>
+            <ValueLabel tip="Maximum allowed fraction of pixels with out-of-range values after sharpening. Lower = less artifacts but softer image. Higher = sharper but more clipping. 1e-3 (0.1%) is a good default.">Target P(s)</ValueLabel>
             <span className="text-xs font-mono text-primary">
               {params.target_artifact_ratio.toExponential(1)}
             </span>
@@ -561,7 +686,7 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel>Metric Mode</ValueLabel>
+          <ValueLabel tip="Relative subtracts the baseline artifact ratio (from resize alone) so only sharpening-induced artifacts are measured. Absolute measures total artifacts including resize.">Metric Mode</ValueLabel>
           <Select
             value={params.metric_mode}
             onValueChange={(v) => {
@@ -578,7 +703,7 @@ export function ParameterPanel() {
           </Select>
         </div>
         <div>
-          <ValueLabel>Artifact Metric</ValueLabel>
+          <ValueLabel tip="Channel Clipping counts individual R/G/B values outside [0,1]. Pixel Out-of-Gamut counts pixels where any channel is clipped. Channel is more sensitive, Pixel is more conservative.">Artifact Metric</ValueLabel>
           <Select
             value={params.artifact_metric}
             onValueChange={(v) => {
@@ -597,14 +722,14 @@ export function ParameterPanel() {
       </div>
 
       <Collapsible>
-        <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-          <ChevronDown className="h-3 w-3" />
+        <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
+          <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[open]:rotate-180" />
           Advanced
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-2 pt-2">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <ValueLabel>Fit Strategy</ValueLabel>
+              <ValueLabel tip="Cubic fits a polynomial to probe data and solves analytically for optimal strength. Direct Search picks the best probe sample directly — simpler but less precise.">Fit Strategy</ValueLabel>
               <Select
                 value={params.fit_strategy}
                 onValueChange={(v) => {
@@ -621,7 +746,7 @@ export function ParameterPanel() {
               </Select>
             </div>
             <div>
-              <ValueLabel>Clamp Policy</ValueLabel>
+              <ValueLabel tip="Clamp clips out-of-range values to [0,1]. Normalize rescales the entire image to fit — preserves relative differences but may shift overall brightness.">Clamp Policy</ValueLabel>
               <Select
                 value={params.output_clamp}
                 onValueChange={(v) => {
@@ -651,7 +776,7 @@ export function ParameterPanel() {
             </Label>
           </div>
           <div>
-            <ValueLabel>Probe strengths</ValueLabel>
+            <ValueLabel tip="Sharpening strengths to sample when building the artifact curve. More points improve fit accuracy. Default: 0.05, 0.15, 0.30, 0.50.">Probe strengths</ValueLabel>
             <Input
               className="h-8 text-sm font-mono"
               placeholder="comma-separated"
@@ -719,5 +844,6 @@ export function ParameterPanel() {
       </Collapsible>
 
     </div>
+    </TooltipProvider>
   );
 }
