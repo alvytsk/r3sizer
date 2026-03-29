@@ -17,13 +17,20 @@ const FORMAT_MIME: Record<ExportFormat, string> = {
   webp: "image/webp",
 };
 
+const QUALITY_PRESETS = [
+  { label: "Max", value: 100 },
+  { label: "High", value: 90 },
+  { label: "Std", value: 80 },
+  { label: "Low", value: 60 },
+] as const;
+
 export function DownloadButton() {
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
   const outputWidth = useProcessorStore((s) => s.outputWidth);
   const outputHeight = useProcessorStore((s) => s.outputHeight);
   const inputFile = useProcessorStore((s) => s.inputFile);
   const [format, setFormat] = useState<ExportFormat>("jpeg");
-  const [quality, setQuality] = useState(92);
+  const [quality, setQuality] = useState(90);
 
   const handleDownload = useCallback(() => {
     if (!outputRgbaData) return;
@@ -51,9 +58,11 @@ export function DownloadButton() {
       FORMAT_MIME[format],
       q
     );
-  }, [outputRgbaData, outputWidth, outputHeight, format, quality]);
+  }, [outputRgbaData, outputWidth, outputHeight, format, quality, inputFile]);
 
   if (!outputRgbaData) return null;
+
+  const isLossy = format !== "png";
 
   return (
     <div className="flex items-center gap-2">
@@ -73,26 +82,36 @@ export function DownloadButton() {
           </button>
         ))}
       </div>
-      {/* Quality slider — hidden below xl or when PNG */}
-      {format !== "png" && (
-        <div className="hidden xl:flex items-center gap-1.5">
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={quality}
-            onChange={(e) => setQuality(Number(e.target.value))}
-            className="w-20 h-1 rounded-full appearance-none bg-border cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
-          />
-          <span className="text-[11px] font-mono text-muted-foreground w-7 text-right">{quality}</span>
-        </div>
-      )}
+      {/* Quality presets (lossy) / Lossless badge (PNG) — stable layout */}
+      <div className="hidden xl:flex items-center">
+        {isLossy ? (
+          <div className="flex rounded-md border border-border/40 overflow-hidden">
+            {QUALITY_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => setQuality(preset.value)}
+                className={`px-2 py-1 text-[11px] font-mono transition-colors ${
+                  quality === preset.value
+                    ? "bg-primary/20 text-primary"
+                    : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="px-2 py-1 text-[11px] font-mono text-muted-foreground border border-border/40 rounded-md bg-card">
+            Lossless
+          </span>
+        )}
+      </div>
       <Button
         variant="outline"
         size="sm"
         onClick={handleDownload}
         className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
-        title={`Save as ${format.toUpperCase()}`}
+        title={`Save as ${format.toUpperCase()}${isLossy ? ` · Q${quality}` : " · Lossless"}`}
       >
         <Download className="h-3.5 w-3.5 mr-1" />
         {/* Below lg: show format in button since selector is hidden */}
