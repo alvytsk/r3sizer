@@ -133,7 +133,7 @@ function ComparisonSlider({
     <div ref={wrapperRef} className="flex-1 flex items-center justify-center min-h-0">
       <div
         ref={containerRef}
-        className="relative select-none cursor-ew-resize overflow-hidden rounded-sm bg-black/20"
+        className="relative select-none cursor-ew-resize overflow-hidden rounded-sm bg-black/20 touch-none"
         style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}
         onPointerDown={handlePointerDown}
       >
