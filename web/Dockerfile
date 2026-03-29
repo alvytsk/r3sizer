@@ -16,13 +16,13 @@ COPY crates/ crates/
 
 # Cache the Rust build target directory; output goes to /wasm-out (not in target)
 RUN --mount=type=cache,target=/workspace/target \
-    wasm-pack build crates/r3sizer-wasm --target web --out-dir /wasm-out
+    wasm-pack build crates/r3sizer-wasm --target web --out-dir /wasm-out -- --features experimental
 
 # Generate TypeScript type definitions from Rust types (ts-rs).
 # Output goes to web/src/types/generated.ts which is copied in stage 2.
 RUN --mount=type=cache,target=/workspace/target \
     mkdir -p web/src/types && \
-    cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
+    cargo test -p r3sizer-core --features typegen,experimental export_typescript_bindings -- --nocapture
 
 
 # ── Stage 2: Build the React/Vite app ───────────────────────────────────────

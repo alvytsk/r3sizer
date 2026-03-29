@@ -100,7 +100,27 @@ diagnostics_level: DiagnosticsLevel,
 /**
  * Strength distribution strategy. Default: `Uniform`.
  */
-sharpen_strategy: SharpenStrategy, };
+sharpen_strategy: SharpenStrategy, 
+/**
+ * Input color space declaration. Default: `None` (= Srgb).
+ */
+input_color_space?: InputColorSpace | null, 
+/**
+ * Resize kernel strategy. Default: `None` (= Lanczos3).
+ */
+resize_strategy?: ResizeStrategy | null, 
+/**
+ * Extended sharpening mode with chroma guard. Default: `None`.
+ */
+experimental_sharpen_mode?: ExperimentalSharpenMode | null, 
+/**
+ * Color space for artifact evaluation. Default: `None` (= Rgb).
+ */
+evaluation_color_space?: EvaluationColorSpace | null, 
+/**
+ * Quality evaluator configuration. Default: `None` (disabled).
+ */
+evaluator_config?: EvaluatorConfig | null, };
 
 export type CubicPolynomial = { a: number, b: number, c: number, d: number, };
 
@@ -204,7 +224,15 @@ classification_us?: number | null,
 /**
  * Adaptive validation + backoff time (None when Uniform).
  */
-adaptive_validation_us?: number | null, };
+adaptive_validation_us?: number | null, 
+/**
+ * Input color-space ingress time (None when not configured).
+ */
+ingress_us?: number | null, 
+/**
+ * Evaluator execution time (None when not configured).
+ */
+evaluator_us?: number | null, };
 
 export type StageProvenance = { color_conversion: Provenance, resize: Provenance, contrast_leveling: Provenance, sharpen_operator: Provenance, lightness_reconstruction: Provenance, artifact_metric: Provenance, polynomial_fit: Provenance, };
 
@@ -272,7 +300,132 @@ timing: StageTiming,
 /**
  * Per-stage classification of how faithful the implementation is to the papers.
  */
-provenance: StageProvenance, };
+provenance: StageProvenance, 
+/**
+ * Input color-space ingress diagnostics.
+ */
+input_ingress?: InputIngressDiagnostics | null, 
+/**
+ * Resize strategy diagnostics.
+ */
+resize_strategy_diagnostics?: ResizeStrategyDiagnostics | null, 
+/**
+ * Chroma guard diagnostics.
+ */
+chroma_guard?: ChromaGuardDiagnostics | null, 
+/**
+ * Quality evaluator result (advisory).
+ */
+evaluator_result?: QualityEvaluation | null, };
+
+export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
+
+export type ResizeKernel = "lanczos3" | "mitchell_netravali" | "catmull_rom" | "gaussian";
+
+export type KernelTable = { flat: ResizeKernel, textured: ResizeKernel, strong_edge: ResizeKernel, microtexture: ResizeKernel, risky_halo_zone: ResizeKernel, };
+
+export type ResizeStrategy = { "strategy": "uniform", kernel: ResizeKernel, } | { "strategy": "content_adaptive", classification: ClassificationParams, kernel_table: KernelTable, };
+
+export type ResizeStrategyDiagnostics = { 
+/**
+ * Which distinct kernels were actually used.
+ */
+kernels_used: Array<ResizeKernel>, 
+/**
+ * Per-kernel pixel count in the output image.
+ */
+per_kernel_pixel_count: { [key in string]: number }, };
+
+export type ExperimentalSharpenMode = { "luma_plus_chroma_guard": { 
+/**
+ * Maximum allowed chroma shift as a fraction of original chroma magnitude.
+ * Values above this trigger soft clamping. Default: 0.10 (10%).
+ */
+max_chroma_shift: number, } };
+
+export type EvaluationColorSpace = "rgb" | "luma_only" | "lab_approx";
+
+export type ChromaGuardDiagnostics = { 
+/**
+ * Fraction of pixels where chroma soft-clamping was applied.
+ */
+pixels_clamped_fraction: number, 
+/**
+ * Mean chroma shift magnitude across all pixels.
+ */
+mean_chroma_shift: number, 
+/**
+ * Maximum chroma shift magnitude.
+ */
+max_chroma_shift: number, };
+
+export type EvaluatorConfig = "heuristic";
+
+export type ImageFeatures = { 
+/**
+ * Fraction of pixels classified as edges (Sobel magnitude > threshold).
+ */
+edge_density: number, 
+/**
+ * Mean Sobel gradient magnitude across all pixels.
+ */
+mean_gradient_magnitude: number, 
+/**
+ * Variance of gradient magnitudes.
+ */
+gradient_variance: number, 
+/**
+ * Mean local variance (5×5 window) across all pixels.
+ */
+mean_local_variance: number, 
+/**
+ * Variance of local variances (texture heterogeneity).
+ */
+local_variance_variance: number, 
+/**
+ * Variance of the Laplacian response (frequency content proxy).
+ */
+laplacian_variance: number, 
+/**
+ * Shannon entropy of the 64-bin luminance histogram.
+ */
+luminance_histogram_entropy: number, };
+
+export type QualityEvaluation = { 
+/**
+ * Predicted overall quality score in [0, 1] (higher = better).
+ */
+predicted_quality_score: number, 
+/**
+ * Optional suggested sharpening strength (advisory, not enforced).
+ */
+suggested_strength?: number | null, 
+/**
+ * Confidence in the prediction, in [0, 1].
+ */
+confidence: number, 
+/**
+ * Raw feature vector used for the prediction.
+ */
+features: ImageFeatures, };
+
+export type InputIngressDiagnostics = { 
+/**
+ * Which color space was declared by the caller.
+ */
+declared_color_space: InputColorSpace, 
+/**
+ * (min, max) of raw channel values. Present for `RawLinear`.
+ */
+raw_value_min?: number | null, raw_value_max?: number | null, 
+/**
+ * Scale factor applied to bring values into [0, 1]. Present for `RawLinear`.
+ */
+normalization_scale?: number | null, 
+/**
+ * Fraction of values > 1.0. Present for `LinearRgb` validation.
+ */
+out_of_range_fraction?: number | null, };
 
 // ── Default constants (generated from Rust Default impls) ──
 
@@ -336,4 +489,12 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "sharpen_strategy": {
     "strategy": "uniform"
   }
+};
+
+export const DEFAULT_KERNEL_TABLE: KernelTable = {
+  "flat": "gaussian",
+  "textured": "lanczos3",
+  "strong_edge": "lanczos3",
+  "microtexture": "catmull_rom",
+  "risky_halo_zone": "mitchell_netravali"
 };

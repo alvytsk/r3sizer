@@ -19,6 +19,13 @@ use r3sizer_core::{
     StageProvenance,
 };
 
+#[cfg(feature = "experimental")]
+use r3sizer_core::{
+    ChromaGuardDiagnostics, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
+    ImageFeatures, InputColorSpace, InputIngressDiagnostics, KernelTable, QualityEvaluation,
+    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
+};
+
 #[test]
 fn export_typescript_bindings() {
     // u64 timing fields should be `number`, not `bigint` (JS numbers are fine for microseconds).
@@ -81,6 +88,27 @@ fn export_typescript_bindings() {
         AutoSharpDiagnostics::decl(&cfg),
     ];
 
+    // Experimental types — only generated when the experimental feature is active.
+    #[cfg(feature = "experimental")]
+    let declarations = {
+        let mut d = declarations;
+        d.extend(vec![
+            InputColorSpace::decl(&cfg),
+            ResizeKernel::decl(&cfg),
+            KernelTable::decl(&cfg),
+            ResizeStrategy::decl(&cfg),
+            ResizeStrategyDiagnostics::decl(&cfg),
+            ExperimentalSharpenMode::decl(&cfg),
+            EvaluationColorSpace::decl(&cfg),
+            ChromaGuardDiagnostics::decl(&cfg),
+            EvaluatorConfig::decl(&cfg),
+            ImageFeatures::decl(&cfg),
+            QualityEvaluation::decl(&cfg),
+            InputIngressDiagnostics::decl(&cfg),
+        ]);
+        d
+    };
+
     let mut output = String::with_capacity(8192);
     output.push_str(header);
     output.push('\n');
@@ -124,9 +152,19 @@ fn export_typescript_bindings() {
 
     let default_params = serde_json::to_string_pretty(&AutoSharpParams::default()).unwrap();
     output.push_str(&format!(
-        "export const DEFAULT_PARAMS: AutoSharpParams = {};\n",
+        "export const DEFAULT_PARAMS: AutoSharpParams = {};\n\n",
         default_params
     ));
+
+    #[cfg(feature = "experimental")]
+    {
+        let default_kernel_table =
+            serde_json::to_string_pretty(&KernelTable::default()).unwrap();
+        output.push_str(&format!(
+            "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n",
+            default_kernel_table
+        ));
+    }
 
     // Write to web directory
     let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

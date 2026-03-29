@@ -62,9 +62,33 @@ pub fn process_auto_sharp_downscale(
     let target = ImageSize { width: params.target_width, height: params.target_height };
 
     // -------------------------------------------------------------------
+    // 1.5 (experimental) Input color-space ingress
+    // -------------------------------------------------------------------
+    #[cfg(feature = "experimental")]
+    let (input, _input_ingress_diag, _ingress_us) = {
+        if let Some(cs) = params.input_color_space {
+            let t0 = Instant::now();
+            let (prepared, diag) = crate::color_space::prepare_input(input, cs)?;
+            let us = t0.elapsed().as_micros() as u64;
+            (std::borrow::Cow::Owned(prepared), Some(diag), Some(us))
+        } else {
+            (std::borrow::Cow::Borrowed(input), None, None)
+        }
+    };
+    // -------------------------------------------------------------------
     // 2. Downscale in linear space
     // -------------------------------------------------------------------
     let t0 = Instant::now();
+    #[cfg(feature = "experimental")]
+    let (downscaled, _resize_strategy_diag) = {
+        if let Some(ref strategy) = params.resize_strategy {
+            let (img, diag) = crate::resize_strategy::downscale_with_strategy(&input, target, strategy)?;
+            (img, Some(diag))
+        } else {
+            (downscale(&input, target)?, None)
+        }
+    };
+    #[cfg(not(feature = "experimental"))]
     let downscaled = downscale(input, target)?;
     let resize_us = t0.elapsed().as_micros() as u64;
 
@@ -98,6 +122,10 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     let t0 = Instant::now();
     let measure = |img: &LinearRgbImage| -> f32 {
+        #[cfg(feature = "experimental")]
+        if let Some(cs) = params.evaluation_color_space {
+            return crate::chroma_guard::evaluate_in_color_space(img, cs);
+        }
         match params.artifact_metric {
             ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
             ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
@@ -122,6 +150,19 @@ pub fn process_auto_sharp_downscale(
         None
     };
 
+    // Build metric override for experimental evaluation color space.
+    #[cfg(feature = "experimental")]
+    let eval_cs_fn = params.evaluation_color_space.map(|cs| {
+        move |img: &LinearRgbImage| -> f32 {
+            crate::chroma_guard::evaluate_in_color_space(img, cs)
+        }
+    });
+    #[cfg(feature = "experimental")]
+    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
+        eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
+    #[cfg(not(feature = "experimental"))]
+    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> = None;
+
     let probe_samples = probe_strengths(
         &strengths,
         &base,
@@ -133,6 +174,7 @@ pub fn process_auto_sharp_downscale(
         baseline_artifact_ratio,
         &kernel,
         &params.metric_weights,
+        metric_override,
     )?;
     let probing_us = t0.elapsed().as_micros() as u64;
 
@@ -256,6 +298,10 @@ pub fn process_auto_sharp_downscale(
     let t0 = Instant::now();
     let selected_strength = solve_result.selected_strength;
 
+    // Experimental: chroma guard sharpening overrides the standard path.
+    #[cfg(feature = "experimental")]
+    let _chroma_guard_diag;
+
     let (mut final_image, adaptive_validation, adaptive_validation_us) =
         match (&params.sharpen_strategy, &gain_map) {
             (SharpenStrategy::Uniform, _) | (_, None) => {
@@ -290,6 +336,19 @@ pub fn process_auto_sharp_downscale(
                 )?
             }
         };
+    // Experimental: if chroma guard is configured, apply it as an override.
+    #[cfg(feature = "experimental")]
+    {
+        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard { max_chroma_shift }) = params.experimental_sharpen_mode {
+            let (guarded, cg_diag) = crate::chroma_guard::sharpen_with_chroma_guard(
+                &base, selected_strength, params.sharpen_sigma, max_chroma_shift,
+            )?;
+            final_image = guarded;
+            _chroma_guard_diag = Some(cg_diag);
+        } else {
+            _chroma_guard_diag = None;
+        }
+    }
     let final_sharpen_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
@@ -308,12 +367,35 @@ pub fn process_auto_sharp_downscale(
         params.artifact_metric,
         &params.metric_weights,
     );
-    let measured_artifact_ratio = final_breakdown.selection_score;
+    let measured_artifact_ratio = match metric_override {
+        Some(f) => f(&final_image),
+        None => final_breakdown.selection_score,
+    };
     let measured_metric_value = compute_metric_value(
         measured_artifact_ratio,
         baseline_artifact_ratio,
         params.metric_mode,
     );
+
+    // -------------------------------------------------------------------
+    // 9.5 (experimental) Run quality evaluator
+    // -------------------------------------------------------------------
+    #[cfg(feature = "experimental")]
+    let (_evaluator_result, _evaluator_us) = {
+        if let Some(ref eval_config) = params.evaluator_config {
+            let t0 = Instant::now();
+            let result = match eval_config {
+                crate::types::EvaluatorConfig::Heuristic => {
+                    let eval = crate::evaluator::HeuristicEvaluator;
+                    crate::evaluator::QualityEvaluator::evaluate(&eval, &base, &final_image, selected_strength)
+                }
+            };
+            let us = t0.elapsed().as_micros() as u64;
+            (Some(result), Some(us))
+        } else {
+            (None, None)
+        }
+    };
 
     // -------------------------------------------------------------------
     // 10. Apply clamp policy
@@ -400,6 +482,10 @@ pub fn process_auto_sharp_downscale(
             total_us,
             classification_us,
             adaptive_validation_us,
+            #[cfg(feature = "experimental")]
+            ingress_us: _ingress_us,
+            #[cfg(feature = "experimental")]
+            evaluator_us: _evaluator_us,
         },
         provenance: StageProvenance {
             color_conversion: Provenance::PaperConfirmed,
@@ -420,6 +506,14 @@ pub fn process_auto_sharp_downscale(
             artifact_metric: Provenance::EngineeringProxy,
             polynomial_fit: Provenance::PaperConfirmed,
         },
+        #[cfg(feature = "experimental")]
+        input_ingress: _input_ingress_diag,
+        #[cfg(feature = "experimental")]
+        resize_strategy_diagnostics: _resize_strategy_diag,
+        #[cfg(feature = "experimental")]
+        chroma_guard: _chroma_guard_diag,
+        #[cfg(feature = "experimental")]
+        evaluator_result: _evaluator_result,
     };
 
     Ok(ProcessOutput { image: final_image, diagnostics })
@@ -484,6 +578,7 @@ fn probe_strengths(
     baseline_artifact_ratio: f32,
     kernel: &[f32],
     weights: &MetricWeights,
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     // Base luminance for metric evaluation (needed even in RGB mode for v0.2 metrics).
     let base_luma_for_metrics: Vec<f32> = match base_luminance {
@@ -501,7 +596,10 @@ fn probe_strengths(
             artifact_metric,
             weights,
         );
-        let p_total = breakdown.selection_score;
+        let p_total = match metric_override {
+            Some(f) => f(&result.image),
+            None => breakdown.selection_score,
+        };
         let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
         Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: Some(breakdown) })
     };

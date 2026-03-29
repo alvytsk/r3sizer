@@ -8,7 +8,8 @@ description = "Pure image processing core: linear color, downscale, sharpen, art
 [features]
 default = ["parallel"]
 parallel = ["rayon", "image/rayon"]
-typegen  = ["ts-rs"]
+typegen      = ["ts-rs"]
+experimental = []
 
 [dependencies]
 thiserror = { workspace = true }

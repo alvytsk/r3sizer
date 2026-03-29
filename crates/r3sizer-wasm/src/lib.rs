@@ -46,7 +46,8 @@ pub fn process_image(
     js_sys::Reflect::set(&result, &"outputWidth".into(), &JsValue::from(out_width))?;
     js_sys::Reflect::set(&result, &"outputHeight".into(), &JsValue::from(out_height))?;
 
-    let diagnostics = serde_wasm_bindgen::to_value(&output.diagnostics)
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    let diagnostics = serde::Serialize::serialize(&output.diagnostics, &serializer)
         .map_err(|e| JsValue::from_str(&format!("diagnostics serialization failed: {e}")))?;
     js_sys::Reflect::set(&result, &"diagnostics".into(), &diagnostics)?;
 
