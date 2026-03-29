@@ -143,6 +143,31 @@ pub enum ArtifactMetric {
     PixelOutOfGamutRatio,
 }
 
+/// How the solver ranks candidate sharpening strengths.
+///
+/// Orthogonal to [`FitStrategy`] (which controls polynomial vs direct search)
+/// and to [`ArtifactMetric`] (which selects the gamut measurement function).
+/// `SelectionPolicy` controls how fallback candidates are ranked when the
+/// polynomial root is unavailable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionPolicy {
+    /// Current behavior: gamut excursion drives both fitting and fallback ranking.
+    /// Fallback picks the largest strength within budget, or the least-bad by
+    /// gamut metric when budget is unreachable.
+    #[default]
+    GamutOnly,
+    /// Gamut excursion remains the hard safety constraint and fitting target.
+    /// Fallback ranking uses composite score: among budget-qualifying samples,
+    /// prefer the one with the lowest composite penalty; among all samples when
+    /// budget is unreachable, prefer the lowest composite penalty.
+    Hybrid,
+    /// Experimental: composite score drives both fitting and fallback ranking.
+    /// Currently treated as Hybrid (polynomial fitting still uses gamut).
+    CompositeOnly,
+}
+
 // ---------------------------------------------------------------------------
 // Solver / diagnostics status enums
 // ---------------------------------------------------------------------------
@@ -286,6 +311,9 @@ pub struct AutoSharpParams {
     pub artifact_metric: ArtifactMetric,
     /// Weights for the composite diagnostic metric. Default: [1.0, 0.3, 0.3, 0.1].
     pub metric_weights: MetricWeights,
+    /// How the solver ranks fallback candidates. Default: `GamutOnly`.
+    #[serde(default)]
+    pub selection_policy: SelectionPolicy,
     /// Verbosity level for serialized diagnostics.
     pub diagnostics_level: DiagnosticsLevel,
     /// Strength distribution strategy. Default: `Uniform`.
@@ -332,6 +360,7 @@ impl Default for AutoSharpParams {
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
             metric_weights: MetricWeights::default(),
+            selection_policy: SelectionPolicy::default(),
             diagnostics_level: DiagnosticsLevel::default(),
             sharpen_strategy: SharpenStrategy::default(),
             input_color_space: None,
@@ -902,6 +931,9 @@ pub struct AutoSharpDiagnostics {
     pub sharpen_mode: SharpenMode,
     pub metric_mode: MetricMode,
     pub artifact_metric: ArtifactMetric,
+    /// Which selection policy was used for fallback ranking.
+    #[serde(default)]
+    pub selection_policy: SelectionPolicy,
     pub target_artifact_ratio: f32,
 
     // --- Baseline (resize-stage artifact contribution) ---
