@@ -272,9 +272,9 @@ function AdaptiveSettings({ strategy, updateParams }: AdaptiveSettingsProps) {
   }
 
   return (
-    <Collapsible defaultOpen>
+    <Collapsible>
       <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-        <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[open]:rotate-180" />
+        <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[panel-open]:rotate-180" />
         Adaptive Settings
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3 pt-2">
@@ -723,7 +723,7 @@ export function ParameterPanel() {
 
       <Collapsible>
         <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-          <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[open]:rotate-180" />
+          <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[panel-open]:rotate-180" />
           Advanced
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-2 pt-2">
@@ -774,6 +774,29 @@ export function ParameterPanel() {
             <Label htmlFor="contrast" className="text-[13px] text-muted-foreground">
               Contrast leveling
             </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="evaluator"
+              checked={params.evaluator_config != null}
+              onCheckedChange={(v) =>
+                updateParams({ evaluator_config: v ? "heuristic" : null })
+              }
+            />
+            <span className="flex items-center gap-1">
+              <Label htmlFor="evaluator" className="text-[13px] text-muted-foreground">
+                Quality evaluator
+              </Label>
+              <Tooltip>
+                <TooltipTrigger
+                  render={<span />}
+                  className="inline-flex text-muted-foreground/40 hover:text-primary transition-colors"
+                >
+                  <Info className="h-3 w-3" />
+                </TooltipTrigger>
+                <TooltipContent side="right">Enables the heuristic quality evaluator. When off, recommendations based on image features are unavailable.</TooltipContent>
+              </Tooltip>
+            </span>
           </div>
           <div>
             <ValueLabel tip="Sharpening strengths to sample when building the artifact curve. More points improve fit accuracy. Default: 0.05, 0.15, 0.30, 0.50.">Probe strengths</ValueLabel>

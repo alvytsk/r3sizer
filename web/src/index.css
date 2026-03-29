@@ -216,15 +216,15 @@
   scrollbar-color: oklch(0.35 0.01 270) transparent;
 }
 .dark ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 .dark ::-webkit-scrollbar-track {
   background: transparent;
 }
 .dark ::-webkit-scrollbar-thumb {
   background-color: oklch(0.35 0.01 270);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 .dark ::-webkit-scrollbar-thumb:hover {
   background-color: oklch(0.45 0.02 75);

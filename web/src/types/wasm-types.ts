@@ -62,6 +62,11 @@ export type {
   ImageFeatures,
   QualityEvaluation,
   InputIngressDiagnostics,
+  // Recommendations (v0.5)
+  RecommendationKind,
+  Severity,
+  ParamPatch,
+  Recommendation,
 } from "./generated";
 
 export {

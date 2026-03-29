@@ -27,6 +27,7 @@ pub mod color_space;
 pub mod resize_strategy;
 pub mod chroma_guard;
 pub mod evaluator;
+pub mod recommendations;
 
 // Re-export the complete public surface.
 pub use pipeline::process_auto_sharp_downscale;
@@ -38,6 +39,7 @@ pub use types::{
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
     MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample, ProbeConfig,
     ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
+    Recommendation, RecommendationKind, Severity, ParamPatch,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
     SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,

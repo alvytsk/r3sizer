@@ -298,7 +298,11 @@ chroma_guard?: ChromaGuardDiagnostics | null,
 /**
  * Quality evaluator result (advisory).
  */
-evaluator_result?: QualityEvaluation | null, };
+evaluator_result?: QualityEvaluation | null, 
+/**
+ * Actionable recommendations derived from pipeline diagnostics.
+ */
+recommendations?: Array<Recommendation>, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 
@@ -408,6 +412,26 @@ normalization_scale?: number | null,
  * Fraction of values > 1.0. Present for `LinearRgb` validation.
  */
 out_of_range_fraction?: number | null, };
+
+export type RecommendationKind = "switch_to_content_adaptive" | "lower_strong_edge_gain" | "raise_artifact_budget" | "switch_to_lightness" | "widen_probe_range" | "lower_sigma";
+
+export type Severity = "info" | "suggestion" | "warning";
+
+export type ParamPatch = { sharpen_strategy?: SharpenStrategy | null, target_artifact_ratio?: number | null, sharpen_mode?: SharpenMode | null, probe_strengths?: ProbeConfig | null, sharpen_sigma?: number | null, };
+
+export type Recommendation = { kind: RecommendationKind, severity: Severity, 
+/**
+ * Confidence in \[0, 1\].  Display-only — does not affect patch content.
+ */
+confidence: number, 
+/**
+ * Human-readable explanation of why this recommendation was generated.
+ */
+reason: string, 
+/**
+ * Self-contained param patch.  Apply via `updateParams(patch)`.
+ */
+patch: ParamPatch, };
 
 // ── Default constants (generated from Rust Default impls) ──
 

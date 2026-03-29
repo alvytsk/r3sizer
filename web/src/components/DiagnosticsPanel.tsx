@@ -8,6 +8,9 @@ import type {
   RobustnessFlags,
   RegionCoverage,
   AdaptiveValidationOutcome,
+  Recommendation,
+  RecommendationKind,
+  Severity as RecSeverity,
 } from "@/types/wasm-types";
 
 const COMPONENT_LABELS: Record<string, string> = {
@@ -558,6 +561,11 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   const target = d.target_artifact_ratio;
   const strength = d.selected_strength;
 
+  // Recommendation kinds present — used to suppress overlapping generic advice.
+  const recKinds = new Set<RecommendationKind>(
+    (d.recommendations ?? []).map((r) => r.kind)
+  );
+
   // Overall result quality
   if (d.selection_mode === "polynomial_root" && ratio <= target * 1.1) {
     advice.push({
@@ -617,8 +625,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
     });
   }
 
-  // Sigma advice
-  if (d.sharpen_mode === "rgb") {
+  // Sigma advice (suppressed when recommendation covers this)
+  if (d.sharpen_mode === "rgb" && !recKinds.has("switch_to_lightness")) {
     advice.push({
       icon: "\u2192",
       title: "Consider Lightness mode",
@@ -627,8 +635,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
     });
   }
 
-  // Fit quality
-  if (d.fit_quality && d.fit_quality.r_squared < 0.85) {
+  // Fit quality (suppressed when recommendation covers this)
+  if (d.fit_quality && d.fit_quality.r_squared < 0.85 && !recKinds.has("widen_probe_range")) {
     advice.push({
       icon: "\u223C",
       title: "Poor polynomial fit",
@@ -647,10 +655,12 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
     });
   }
 
-  // Region-based advice
+  // Region-based advice (halo-risk suppressed when recommendation covers this)
   if (d.region_coverage) {
     const rc = d.region_coverage;
-    if (rc.risky_halo_zone_fraction > 0.15) {
+    if (rc.risky_halo_zone_fraction > 0.15
+      && !recKinds.has("switch_to_content_adaptive")
+      && !recKinds.has("lower_strong_edge_gain")) {
       advice.push({
         icon: "\u25CB",
         title: "High halo-risk content",
@@ -668,20 +678,7 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
     }
   }
 
-  // Evaluator suggestion
-  if (d.evaluator_result && d.evaluator_result.suggested_strength != null) {
-    const diff = Math.abs(d.evaluator_result.suggested_strength - strength);
-    if (diff > 0.05) {
-      advice.push({
-        icon: "\u2606",
-        title: "Quality evaluator suggests different strength",
-        body: `The evaluator recommends s\u2009=\u2009${d.evaluator_result.suggested_strength.toFixed(3)} (confidence: ${(d.evaluator_result.confidence * 100).toFixed(0)}%). Current: ${strength.toFixed(3)}. The evaluator uses image features to predict perceptual quality.`,
-        kind: "tip",
-      });
-    }
-  }
-
-  if (advice.length === 0) {
+  if (advice.length === 0 && (!d.recommendations || d.recommendations.length === 0)) {
     advice.push({
       icon: "\u2713",
       title: "Looking good",
@@ -692,6 +689,33 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
 
   return advice;
 }
+
+const REC_SEVERITY_STYLES: Record<RecSeverity, { border: string; bg: string; title: string }> = {
+  warning: {
+    border: "border-primary/25",
+    bg: "bg-primary/5",
+    title: "text-primary",
+  },
+  suggestion: {
+    border: "border-chart-2/25",
+    bg: "bg-chart-2/5",
+    title: "text-chart-2",
+  },
+  info: {
+    border: "border-muted-foreground/15",
+    bg: "bg-muted/5",
+    title: "text-muted-foreground",
+  },
+};
+
+const REC_KIND_LABELS: Record<RecommendationKind, string> = {
+  switch_to_content_adaptive: "Content-adaptive sharpening recommended",
+  lower_strong_edge_gain: "Reduce strong-edge gain",
+  raise_artifact_budget: "Raise artifact budget",
+  switch_to_lightness: "Switch to lightness mode",
+  widen_probe_range: "Widen probe range",
+  lower_sigma: "Lower blur sigma",
+};
 
 const ADVICE_STYLES: Record<Advice["kind"], { border: string; bg: string; icon: string; title: string }> = {
   success: {
@@ -713,6 +737,71 @@ const ADVICE_STYLES: Record<Advice["kind"], { border: string; bg: string; icon: 
     title: "text-primary",
   },
 };
+
+function RecommendationCards({ recommendations }: { recommendations: Recommendation[] }) {
+  const updateParams = useProcessorStore((s) => s.updateParams);
+
+  if (recommendations.length === 0) return null;
+
+  const applyPatch = (rec: Recommendation) => {
+    // Build a clean Partial<AutoSharpParams> from non-null patch fields.
+    const p = rec.patch;
+    updateParams({
+      ...(p.sharpen_strategy != null && { sharpen_strategy: p.sharpen_strategy }),
+      ...(p.target_artifact_ratio != null && { target_artifact_ratio: p.target_artifact_ratio }),
+      ...(p.sharpen_mode != null && { sharpen_mode: p.sharpen_mode }),
+      ...(p.probe_strengths != null && { probe_strengths: p.probe_strengths }),
+      ...(p.sharpen_sigma != null && { sharpen_sigma: p.sharpen_sigma }),
+    });
+  };
+
+  const applyAll = () => {
+    for (const rec of recommendations) {
+      applyPatch(rec);
+    }
+  };
+
+  return (
+    <>
+      {recommendations.map((rec, i) => {
+        const s = REC_SEVERITY_STYLES[rec.severity];
+        return (
+          <div key={i} className={`rounded-sm border ${s.border} ${s.bg} px-3 py-2.5`}>
+            <div className="flex items-start gap-2">
+              <span className={`text-[14px] font-mono leading-none mt-0.5 shrink-0 ${s.title}`}>
+                {"\u2606"}
+              </span>
+              <div className="space-y-1 min-w-0 flex-1">
+                <div className={`text-[12px] font-mono font-medium ${s.title}`}>
+                  {REC_KIND_LABELS[rec.kind] ?? rec.kind}
+                </div>
+                <p className="text-[12px] text-muted-foreground leading-relaxed">
+                  {rec.reason}
+                </p>
+                <button
+                  type="button"
+                  className="text-[11px] font-mono font-medium text-primary hover:text-primary/80 transition-colors mt-0.5"
+                  onClick={() => applyPatch(rec)}
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {recommendations.length > 1 && (
+        <button
+          type="button"
+          className="w-full text-[11px] font-mono text-muted-foreground hover:text-primary transition-colors text-center py-1"
+          onClick={applyAll}
+        >
+          Apply all recommendations
+        </button>
+      )}
+    </>
+  );
+}
 
 export function DiagnosticsPanel() {
   const diagnostics = useProcessorStore((s) => s.diagnostics);
@@ -892,6 +981,7 @@ export function DiagnosticsPanel() {
               </div>
             );
           })}
+          <RecommendationCards recommendations={diagnostics.recommendations ?? []} />
         </TabsContent>
 
         {/* ── Fit ── */}

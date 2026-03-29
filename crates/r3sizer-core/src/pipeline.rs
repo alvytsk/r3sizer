@@ -431,7 +431,7 @@ pub fn process_auto_sharp_downscale(
         }
     }
 
-    let diagnostics = AutoSharpDiagnostics {
+    let mut diagnostics = AutoSharpDiagnostics {
         input_size,
         output_size: target,
         sharpen_mode: params.sharpen_mode,
@@ -474,7 +474,11 @@ pub fn process_auto_sharp_downscale(
         resize_strategy_diagnostics: _resize_strategy_diag,
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
+        recommendations: Vec::new(),
     };
+
+    diagnostics.recommendations =
+        crate::recommendations::generate_recommendations(&diagnostics, params);
 
     Ok(ProcessOutput { image: final_image, diagnostics })
 }
