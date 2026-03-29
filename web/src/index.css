@@ -213,19 +213,20 @@
 /* Styled scrollbar for dark theme */
 .dark {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.35 0.01 270) transparent;
+  scrollbar-color: oklch(0.30 0.01 270) transparent;
+  scrollbar-gutter: stable;
 }
 .dark ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 3px;
+  height: 3px;
 }
 .dark ::-webkit-scrollbar-track {
   background: transparent;
 }
 .dark ::-webkit-scrollbar-thumb {
-  background-color: oklch(0.35 0.01 270);
-  border-radius: 3px;
+  background-color: oklch(0.30 0.01 270 / 0.6);
+  border-radius: 1.5px;
 }
 .dark ::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.45 0.02 75);
+  background-color: oklch(0.45 0.02 75 / 0.8);
 }

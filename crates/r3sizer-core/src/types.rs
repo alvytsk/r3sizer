@@ -641,7 +641,9 @@ pub struct GainTable {
 }
 
 impl GainTable {
-    const MIN_GAIN: f32 = 0.25;
+    /// Minimum allowed gain value per region class.
+    pub const MIN_GAIN_VALUE: f32 = 0.25;
+    const MIN_GAIN: f32 = Self::MIN_GAIN_VALUE;
     const MAX_GAIN: f32 = 4.0;
 
     /// Construct with validation: all values must be in `[0.25, 4.0]`.
@@ -974,6 +976,10 @@ pub struct AutoSharpDiagnostics {
     /// Quality evaluator result (advisory).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_result: Option<QualityEvaluation>,
+
+    /// Actionable recommendations derived from pipeline diagnostics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommendations: Vec<Recommendation>,
 }
 
 /// Return type of the top-level pipeline function.
@@ -1203,6 +1209,75 @@ pub struct QualityEvaluation {
     pub confidence: f32,
     /// Raw feature vector used for the prediction.
     pub features: ImageFeatures,
+}
+
+// ---------------------------------------------------------------------------
+// Recommendations (v0.5)
+// ---------------------------------------------------------------------------
+
+/// What kind of change the recommendation suggests.
+///
+/// Used for UI labeling and advice deduplication.  The real action is in
+/// [`Recommendation::patch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendationKind {
+    SwitchToContentAdaptive,
+    LowerStrongEdgeGain,
+    RaiseArtifactBudget,
+    SwitchToLightness,
+    WidenProbeRange,
+    LowerSigma,
+}
+
+/// Display severity for a recommendation.  Affects UI styling only — does not
+/// change which patch gets applied or how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Info,
+    Suggestion,
+    Warning,
+}
+
+/// Self-contained partial update to [`AutoSharpParams`].
+///
+/// Every present field is a full replacement value — no deep-merge logic
+/// required.  For nested types like [`SharpenStrategy::ContentAdaptive`], the
+/// patch carries the entire variant, not a nested diff.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ParamPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_strategy: Option<SharpenStrategy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_artifact_ratio: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_mode: Option<SharpenMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_strengths: Option<ProbeConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_sigma: Option<f32>,
+}
+
+/// An actionable recommendation derived from pipeline diagnostics.
+///
+/// Each recommendation maps a diagnostic observation to a concrete
+/// [`ParamPatch`].  "Apply" in the UI means: merge the patch into
+/// `AutoSharpParams`, rerun the solver.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct Recommendation {
+    pub kind: RecommendationKind,
+    pub severity: Severity,
+    /// Confidence in \[0, 1\].  Display-only — does not affect patch content.
+    pub confidence: f32,
+    /// Human-readable explanation of why this recommendation was generated.
+    pub reason: String,
+    /// Self-contained param patch.  Apply via `updateParams(patch)`.
+    pub patch: ParamPatch,
 }
 
 // ---------------------------------------------------------------------------

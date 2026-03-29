@@ -16,9 +16,10 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ProbeConfig, ProbeSample, QualityEvaluation,
-    RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
+    MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbeSample, QualityEvaluation,
+    Recommendation, RecommendationKind, RegionClass, RegionCoverage, ResizeKernel,
+    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, Severity,
+    SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -96,6 +97,11 @@ fn export_typescript_bindings() {
             ImageFeatures::decl(&cfg),
             QualityEvaluation::decl(&cfg),
             InputIngressDiagnostics::decl(&cfg),
+            // ── Recommendations (v0.5) ─────────────────────────────────────
+            RecommendationKind::decl(&cfg),
+            Severity::decl(&cfg),
+            ParamPatch::decl(&cfg),
+            Recommendation::decl(&cfg),
         ]);
         d
     };

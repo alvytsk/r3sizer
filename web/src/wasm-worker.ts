@@ -1,9 +1,9 @@
-import { initSync, process_image } from "./wasm-pkg/r3sizer_wasm";
+import { initSync, process_image, prepare_image, clear_cache } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 
 export interface WorkerRequest {
-  type: "init" | "process";
+  type: "init" | "process" | "prepare";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -13,8 +13,9 @@ export interface WorkerRequest {
 }
 
 export interface WorkerResponse {
-  type: "ready" | "result";
+  type: "ready" | "result" | "prepared" | "progress";
   id?: number;
+  stage?: string;
   result?: {
     imageData: Uint8Array;
     outputWidth: number;
@@ -31,6 +32,19 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     initSync(msg.module!);
     ready = true;
     (self as unknown as Worker).postMessage({ type: "ready" } as WorkerResponse);
+    return;
+  }
+
+  if (msg.type === "prepare") {
+    if (!ready) return;
+    const { rgbaData, width, height } = msg;
+    try {
+      prepare_image(rgbaData!, width!, height!);
+    } catch {
+      // Silently ignore — process_image will convert fresh if cache misses.
+      clear_cache();
+    }
+    (self as unknown as Worker).postMessage({ type: "prepared" } as WorkerResponse);
     return;
   }
 

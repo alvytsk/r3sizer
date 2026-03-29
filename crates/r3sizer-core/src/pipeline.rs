@@ -52,9 +52,23 @@ pub fn process_auto_sharp_downscale(
     input: &LinearRgbImage,
     params: &AutoSharpParams,
 ) -> Result<ProcessOutput, CoreError> {
+    process_auto_sharp_downscale_with_progress(input, params, &|_| {})
+}
+
+/// Run the full pipeline with a progress callback invoked at each stage boundary.
+///
+/// The callback receives a short lowercase stage name such as `"resizing"`,
+/// `"probing"`, or `"sharpening"`.  WASM callers use this to post progress
+/// messages back to the main thread.
+pub fn process_auto_sharp_downscale_with_progress(
+    input: &LinearRgbImage,
+    params: &AutoSharpParams,
+    on_stage: &dyn Fn(&str),
+) -> Result<ProcessOutput, CoreError> {
     // -------------------------------------------------------------------
     // 1. Validate
     // -------------------------------------------------------------------
+    on_stage("validating");
     params.validate()?;
 
     let pipeline_start = Instant::now();
@@ -77,6 +91,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 2. Downscale in linear space
     // -------------------------------------------------------------------
+    on_stage("resizing");
     let t0 = Instant::now();
     let (downscaled, _resize_strategy_diag) = {
         if let Some(ref strategy) = params.resize_strategy {
@@ -116,6 +131,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 4. Measure baseline artifact ratio (before any sharpening)
     // -------------------------------------------------------------------
+    on_stage("baseline");
     let t0 = Instant::now();
     let measure = |img: &LinearRgbImage| -> f32 {
         if let Some(cs) = params.evaluation_color_space {
@@ -132,6 +148,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 5. Probe sharpening strengths
     // -------------------------------------------------------------------
+    on_stage("probing");
     let t0 = Instant::now();
     let strengths = params.probe_strengths.resolve()?;
 
@@ -174,6 +191,8 @@ pub fn process_auto_sharp_downscale(
     let s_min = strengths.first().copied().unwrap_or(0.05) as f64;
     let s_max = strengths.last().copied().unwrap_or(3.0) as f64;
     let p0 = params.target_artifact_ratio as f64;
+
+    on_stage("fitting");
 
     // Build fit data: (strength, metric_value) pairs.
     // In RelativeToBase mode, prepend the known anchor (0.0, 0.0).
@@ -222,6 +241,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // LOO stability check
     // -------------------------------------------------------------------
+    on_stage("robustness");
     let t0 = Instant::now();
     let loo_stable;
     let max_loo_root_change;
@@ -285,6 +305,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 8. Final sharpening (strategy-dependent)
     // -------------------------------------------------------------------
+    on_stage("sharpening");
     let t0 = Instant::now();
     let selected_strength = solve_result.selected_strength;
 
@@ -387,6 +408,7 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 10. Apply clamp policy
     // -------------------------------------------------------------------
+    on_stage("finalizing");
     let t0 = Instant::now();
     match params.output_clamp {
         ClampPolicy::Clamp => {
@@ -431,7 +453,7 @@ pub fn process_auto_sharp_downscale(
         }
     }
 
-    let diagnostics = AutoSharpDiagnostics {
+    let mut diagnostics = AutoSharpDiagnostics {
         input_size,
         output_size: target,
         sharpen_mode: params.sharpen_mode,
@@ -474,7 +496,11 @@ pub fn process_auto_sharp_downscale(
         resize_strategy_diagnostics: _resize_strategy_diag,
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
+        recommendations: Vec::new(),
     };
+
+    diagnostics.recommendations =
+        crate::recommendations::generate_recommendations(&diagnostics, params);
 
     Ok(ProcessOutput { image: final_image, diagnostics })
 }
