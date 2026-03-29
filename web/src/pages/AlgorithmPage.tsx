@@ -8,21 +8,21 @@ import "katex/dist/katex.min.css";
 
 const PIPELINE_STAGES = [
   { name: "linearize", desc: "sRGB \u2192 linear" },
-  { name: "downscale", desc: "Lanczos3" },
-  { name: "contrast", desc: "optional" },
+  { name: "downscale", desc: "adaptive kernel" },
+  { name: "classify", desc: "region map" },
   { name: "baseline", desc: "measure P(0)" },
   { name: "probe", desc: "N strengths" },
   { name: "fit", desc: "cubic P\u0302(s)" },
   { name: "solve", desc: "Cardano" },
-  { name: "sharpen", desc: "apply s*" },
-  { name: "clamp", desc: "[0, 1]" },
+  { name: "sharpen", desc: "adaptive + guard" },
+  { name: "evaluate", desc: "advisory" },
   { name: "encode", desc: "linear \u2192 sRGB" },
 ] as const;
 
 const DESIGN_DECISIONS = [
   {
-    title: "f32 pixels, f64 fitting",
-    text: "Image data uses f32 for memory efficiency. Polynomial fitting uses f64 because the Vandermonde normal equations have terms up to s\u2076 \u2014 f32 causes catastrophic cancellation in the 4\u00d74 system.",
+    title: "Single-precision pixels, double-precision fitting",
+    text: "Image data uses single-precision floats for memory efficiency. Polynomial fitting uses double precision because the Vandermonde normal equations have terms up to s\u2076 \u2014 single precision causes catastrophic cancellation in the 4\u00d74 system.",
   },
   {
     title: "No clamping during sharpening",
@@ -34,29 +34,49 @@ const DESIGN_DECISIONS = [
   },
   {
     title: "Baseline subtraction",
-    text: "RelativeToBase mode subtracts pre-sharpen artifacts from each measurement. This isolates sharpening-induced artifacts from those inherent in the downscale, producing a cleaner fit.",
+    text: "Relative-to-base mode subtracts pre-sharpen artifacts from each measurement. This isolates sharpening-induced artifacts from those inherent in the downscale, producing a cleaner fit.",
   },
   {
     title: "Fallback is not an error",
-    text: "When the cubic solve finds no root in range, the pipeline falls back to the best probe sample. It always produces a result. The selection outcome is reported via typed enums for full transparency.",
+    text: "When the cubic solve finds no root in range, the pipeline falls back to the best probe sample. It always produces a result. The selection outcome is always reported transparently.",
   },
   {
     title: "Immutable base image",
     text: "The downscaled image is never mutated during probing. Each probe produces a fresh allocation, ensuring the final sharpening pass uses the exact same base as the probes.",
   },
+  {
+    title: "Content-adaptive gain map",
+    text: "The classifier labels each pixel as Flat, Textured, StrongEdge, Microtexture, or RiskyHaloZone. A per-class gain table translates this into a per-pixel strength multiplier. Misclassification degrades gracefully \u2014 gain values are bounded to [0.25, 4.0].",
+  },
+  {
+    title: "Chroma guard is non-destructive",
+    text: "The chroma guard monitors per-pixel chroma shift after lightness sharpening and applies soft clamping only where the shift exceeds the threshold (default 10%). It cannot increase saturation, only reduce it back toward the original.",
+  },
+  {
+    title: "Evaluator is advisory only",
+    text: "The quality evaluator runs after final sharpening and predicts a quality score from hand-crafted image features. It does not alter s* selection. Its output is purely diagnostic \u2014 a sanity check, not a control signal.",
+  },
 ] as const;
 
 const DIAGNOSTICS_FIELDS = [
   ["Input/Output sizes", "Original and target dimensions"],
-  ["Probe samples", "All (strength, metric) pairs measured"],
+  ["Probe samples", "All (strength, metric, breakdown) tuples"],
   ["Fit coefficients", "The cubic polynomial a, b, c, d"],
   ["Fit quality", "R\u00b2, residuals, condition number"],
   ["Robustness flags", "Monotonicity, LOO stability"],
   ["Selection mode", "How s* was chosen"],
   ["Fallback reason", "Why polynomial root was bypassed"],
-  ["Per-stage timing", "Microsecond wall-clock per stage"],
-  ["Metric breakdown", "Component scores per probe"],
   ["Crossing status", "Where \u0050\u0302(s) intersects P\u2080"],
+  ["Metric breakdown", "All four component scores (final output)"],
+  ["Metric weights", "Per-component composite score weights"],
+  ["Region coverage", "Per-class pixel counts (adaptive mode)"],
+  ["Adaptive validation", "Backoff outcome and final scale"],
+  ["Per-stage timing", "Microsecond wall-clock per stage"],
+  ["Input ingress", "Color-space normalization diagnostics"],
+  ["Resize strategy", "Which kernels were used per region"],
+  ["Chroma guard", "Fraction clamped, mean/max chroma shift"],
+  ["Evaluator result", "Predicted quality score and features"],
+  ["Recommendations", "Actionable parameter patches"],
 ] as const;
 
 const TOC_SECTIONS = [
@@ -204,9 +224,6 @@ function Tag({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Mono({ children }: { children: React.ReactNode }) {
-  return <code className="text-primary/90 bg-surface px-1.5 py-0.5 rounded text-[13px]">{children}</code>;
-}
 
 type ChecklistEntry = string | [tex: string, suffix: string];
 
@@ -249,12 +266,10 @@ function SectionHeading({ id, children }: { id: string; children: React.ReactNod
 function PipelineStep({
   n,
   title,
-  module,
   children,
 }: {
   n: number;
   title: string;
-  module: string;
   children: React.ReactNode;
 }) {
   return (
@@ -268,7 +283,6 @@ function PipelineStep({
       <div className="pb-8 min-w-0">
         <div className="flex items-baseline gap-2 mb-1.5">
           <h3 className="text-base font-heading font-semibold text-foreground">{title}</h3>
-          <span className="text-[11px] font-mono text-muted-foreground/50">{module}</span>
         </div>
         <div className="text-sm text-muted-foreground leading-relaxed">{children}</div>
       </div>
@@ -315,7 +329,7 @@ export default function AlgorithmPage() {
 
           <div className="relative z-10 py-16 sm:py-20 max-w-xl">
             <div className="flex items-center gap-3 mb-5 animate-fade-up">
-              <Tag>v0.1</Tag>
+              <Tag>v0.5</Tag>
               <Tag>auto-sharpness</Tag>
             </div>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold text-foreground tracking-tight mb-5 animate-fade-up delay-100">
@@ -380,8 +394,8 @@ export default function AlgorithmPage() {
           {/* Pipeline overview */}
           <SectionHeading id="pipeline">Pipeline Overview</SectionHeading>
           <p className="text-sm text-muted-foreground mb-6">
-            Every image passes through a fixed sequence of stages in linear
-            RGB (f32). sRGB encoding is only applied at output.
+            Every image passes through a fixed sequence of stages in linear RGB.
+            sRGB encoding is only applied at output.
           </p>
 
           {/* Pipeline: stepped vertical grid */}
@@ -408,10 +422,10 @@ export default function AlgorithmPage() {
           <SectionHeading id="stages">Stage Details</SectionHeading>
 
           <div className="mt-6">
-            <PipelineStep n={1} title="Input Decoding & Linearization" module="color.rs">
+            <PipelineStep n={1} title="Input Decoding & Linearization">
               <p>
-                The input image is decoded via the <Mono>image</Mono> crate and
-                normalized to f32 in <InlineMath tex="[0,\,1]" />. The IEC 61966-2-1 (sRGB)
+                The input image is decoded and normalized to
+                {" "}<InlineMath tex="[0,\,1]" />. The IEC 61966-2-1 (sRGB)
                 transfer function is applied immediately to convert to linear
                 light:
               </p>
@@ -422,34 +436,66 @@ export default function AlgorithmPage() {
               </p>
             </PipelineStep>
 
-            <PipelineStep n={2} title="Downscale" module="resize.rs">
+            <PipelineStep n={2} title="Downscale">
               <p>
-                Lanczos3 resampling reduces the image to the target dimensions.
-                The kernel is applied in linear light — no gamma curve distortion.
-                Output remains unclamped f32 so the full dynamic range is
-                preserved.
+                Lanczos3 resampling reduces the image to the target dimensions
+                (default). The kernel is applied in linear light — no gamma
+                curve distortion. Values are not clamped at this stage.
+              </p>
+              <p className="mt-2">
+                In content-adaptive resize mode, the source image is classified
+                first and a different kernel is applied per region: Gaussian for
+                flat areas, Lanczos3 for detail, Mitchell-Netravali for
+                halo-prone zones. Results from each kernel are blended by
+                per-pixel class assignment.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={3} title="Contrast Leveling" module="contrast.rs">
+            <PipelineStep n={3} title="Region Classification">
+              <p>
+                Active only in content-adaptive sharpening mode. A four-pass
+                algorithm labels every pixel by its local content:
+              </p>
+              <ul className="mt-2 space-y-1 text-sm list-none">
+                {[
+                  ["Flat", "low gradient, low variance"],
+                  ["Textured", "moderate gradient or variance"],
+                  ["Strong edge", "high gradient"],
+                  ["Microtexture", "high variance, low gradient"],
+                  ["Risky halo zone", "high gradient AND high variance"],
+                ].map(([cls, desc]) => (
+                  <li key={cls} className="flex gap-2">
+                    <span className="text-primary/60 mt-0.5">&#9654;</span>
+                    <span><strong>{cls}</strong> — {desc}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2">
+                A per-class gain table then converts the region map into a
+                per-pixel strength multiplier consumed at the final sharpening
+                stage.
+              </p>
+            </PipelineStep>
+
+            <PipelineStep n={4} title="Contrast Leveling">
               <p className="italic text-muted-foreground/60">
                 Optional stage (disabled by default). Applies per-channel 1st–99th
-                percentile stretch. This is a documented placeholder — the exact
-                formula from the paper is not yet known.
+                percentile stretch. Documented placeholder — the exact formula
+                from the paper is not yet known.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={4} title="Baseline Measurement" module="metrics.rs">
+            <PipelineStep n={5} title="Baseline Measurement">
               <p>
                 Before any sharpening, the artifact ratio of the downscaled base
-                image is measured. In <Mono>RelativeToBase</Mono> mode (default),
-                this baseline is subtracted from each probe measurement so the
+                image is measured. In relative-to-base mode (default), this
+                baseline is subtracted from each probe measurement so the
                 fitted polynomial only reflects <em>sharpening-induced</em>{" "}
                 artifacts, not resize artifacts.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={5} title="Probe Sharpening" module="sharpen.rs + color.rs">
+            <PipelineStep n={6} title="Probe Sharpening">
               <p>
                 The core exploration phase. For each strength in the probe set
                 (default: 7 non-uniform samples denser near zero), sharpening is
@@ -472,38 +518,54 @@ export default function AlgorithmPage() {
               <p className="mt-2 font-medium text-foreground/80">Unsharp mask formula</p>
               <MathBlock tex={String.raw`\text{out}(x) = \text{in}(x) + \alpha \cdot \bigl[\text{in}(x) - G_\sigma * \text{in}(x)\bigr]`} />
               <p>
-                The blur <InlineMath tex="G_\sigma" /> is a hand-rolled separable Gaussian.
+                The blur <InlineMath tex="G_\sigma" /> is a separable Gaussian.
                 Critically, <strong>no clamping is applied</strong> — out-of-range
                 values are the artifact signal that the metric measures.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={6} title="Artifact Metric" module="metrics.rs">
-              <p>Two metrics are implemented, selectable via <Mono>ArtifactMetric</Mono>:</p>
+            <PipelineStep n={7} title="Artifact Metric">
+              <p>Two gamut metrics are available:</p>
               <ul className="mt-2 space-y-1.5 list-none">
                 <li className="flex gap-2">
                   <span className="text-primary/60 mt-0.5">&#9654;</span>
                   <span>
-                    <Mono>ChannelClippingRatio</Mono> (default) — fraction of
+                    <strong>Channel clipping ratio</strong> (default) — fraction of
                     individual channel values outside <InlineMath tex="[0,\,1]" />
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-primary/60 mt-0.5">&#9654;</span>
                   <span>
-                    <Mono>PixelOutOfGamutRatio</Mono> — fraction of pixels where{" "}
+                    <strong>Pixel out-of-gamut ratio</strong> — fraction of pixels where{" "}
                     <em>any</em> channel exceeds <InlineMath tex="[0,\,1]" />
                   </span>
                 </li>
               </ul>
               <p className="mt-3">
-                Each probe also produces a <Mono>MetricBreakdown</Mono> with
-                component-wise scores (GamutExcursion active in v0.1; HaloRinging,
-                EdgeOvershoot, TextureFlattening are scaffolded for v0.2).
+                Each probe also produces a per-component breakdown with four
+                active scores:
+              </p>
+              <ul className="mt-2 space-y-1.5 list-none">
+                {[
+                  ["Gamut excursion", "drives s* selection"],
+                  ["Halo ringing", "sign-change count in cross-edge profiles"],
+                  ["Edge overshoot", "peak sharpening vs. gradient magnitude"],
+                  ["Texture flattening", "log variance ratio in textured regions"],
+                ].map(([name, desc]) => (
+                  <li key={name} className="flex gap-2">
+                    <span className="text-primary/60 mt-0.5">&#9654;</span>
+                    <span><strong>{name}</strong> — {desc}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-muted-foreground/60 text-xs">
+                A weighted composite score is computed per probe for diagnostics
+                but does not drive solver selection.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={7} title="Cubic Polynomial Fit" module="fit.rs">
+            <PipelineStep n={8} title="Cubic Polynomial Fit">
               <p>
                 The probe samples <InlineMath tex="\{(s_i,\, P_i)\}" /> are fitted to a
                 cubic polynomial via <InlineMath tex="4 \times 4" /> Vandermonde normal
@@ -511,23 +573,24 @@ export default function AlgorithmPage() {
               </p>
               <MathBlock tex={String.raw`\hat{P}(s) = a\,s^3 + b\,s^2 + c\,s + d`} />
               <p>
-                All arithmetic is in <strong>f64</strong> — the Vandermonde matrix
-                has terms up to <InlineMath tex="s^6" />, and f32 causes catastrophic
-                cancellation. In <Mono>RelativeToBase</Mono> mode, a synthetic
+                All arithmetic uses double precision — the Vandermonde matrix
+                has terms up to <InlineMath tex="s^6" />, and single precision causes
+                catastrophic cancellation. In relative-to-base mode, a synthetic
                 anchor point <InlineMath tex="(0,\,0)" /> is prepended to
                 enforce <InlineMath tex="\hat{P}(0) \approx 0" />.
               </p>
               <p className="mt-2">
-                Fit quality is reported as <Mono>FitQuality</Mono>: <InlineMath tex="R^2" />{" "}
+                Fit quality is measured by <InlineMath tex="R^2" />{" "}
                 (coefficient of determination), sum of squared residuals, maximum
-                absolute residual, and minimum pivot magnitude (condition proxy).
+                absolute residual, and minimum pivot magnitude as a condition
+                proxy.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={8} title="Robustness Checks" module="pipeline.rs">
+            <PipelineStep n={9} title="Robustness Checks">
               <p>
                 Before trusting the polynomial root, multiple checks are
-                performed and recorded in <Mono>RobustnessFlags</Mono>:
+                performed:
               </p>
               <ul className="mt-2 space-y-1.5 list-none">
                 <li className="flex gap-2">
@@ -545,17 +608,17 @@ export default function AlgorithmPage() {
                 <li className="flex gap-2">
                   <span className="text-primary/60 mt-0.5">&#9654;</span>
                   <span>
-                    <strong>Leave-one-out (LOO) stability</strong> — <InlineMath tex="\max_i \left|\frac{s^*_{\text{full}} - s^*_{\text{drop}\,i}}{s^*_{\text{full}}}\right| < 0.5" />
+                    <strong>Leave-one-out (LOO) stability</strong> — <InlineMath tex="\max_i \left|\frac{s^*_{\text{full}} - s^*_{\text{drop}\,i}}{s^*_{\text{full}}}\right| < 0.25" />
                   </span>
                 </li>
               </ul>
               <p className="mt-3">
                 If any check fails, the pipeline falls back to direct search and
-                records a typed <Mono>FallbackReason</Mono>.
+                records why.
               </p>
             </PipelineStep>
 
-            <PipelineStep n={9} title="Root Solving" module="solve.rs">
+            <PipelineStep n={10} title="Root Solving">
               <p>
                 The depressed cubic <InlineMath tex="\hat{P}(s) = P_0" /> is solved
                 analytically via <strong>Cardano&apos;s formula</strong>. The
@@ -568,29 +631,61 @@ export default function AlgorithmPage() {
               <ul className="mt-2 space-y-1.5 list-none">
                 <li className="flex gap-2">
                   <span className="text-emerald-400/70 mt-0.5">&#9679;</span>
-                  <span><Mono>PolynomialRoot</Mono> — ideal: <InlineMath tex="s^*" /> from cubic solution</span>
+                  <span><strong>Polynomial root</strong> — ideal: <InlineMath tex="s^*" /> from cubic solution</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-amber-400/70 mt-0.5">&#9679;</span>
-                  <span><Mono>BestSampleWithinBudget</Mono> — largest probe within <InlineMath tex="P_0" /></span>
+                  <span><strong>Best sample within budget</strong> — largest probe within <InlineMath tex="P_0" /></span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-orange-400/70 mt-0.5">&#9679;</span>
-                  <span><Mono>LeastBadSample</Mono> — all probes exceed budget; pick minimum metric</span>
+                  <span><strong>Least bad sample</strong> — all probes exceed budget; pick minimum metric</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-red-400/70 mt-0.5">&#9679;</span>
-                  <span><Mono>BudgetUnreachable</Mono> — no valid solution exists</span>
+                  <span><strong>Budget unreachable</strong> — no valid solution exists</span>
                 </li>
               </ul>
             </PipelineStep>
 
-            <PipelineStep n={10} title="Final Sharpening & Output" module="pipeline.rs + color.rs">
+            <PipelineStep n={11} title="Final Sharpening">
               <p>
-                The selected strength <InlineMath tex="s^*" /> is applied once to produce
-                the final sharpened image. Values are clamped to <InlineMath tex="[0,\,1]" />{" "}
-                (or optionally normalized), then the inverse sRGB transfer function
-                encodes back to gamma-corrected u8 output.
+                The selected strength <InlineMath tex="s^*" /> is applied once.
+                In uniform mode this is identical to a probe step. In
+                content-adaptive mode, the gain map scales strength per pixel:{" "}
+                <InlineMath tex="s_{\text{eff}}(x,y) = s^* \cdot g(x,y)" />.
+              </p>
+              <p className="mt-2">
+                <strong>Backoff loop</strong> — if the adaptive result exceeds{" "}
+                <InlineMath tex="P_0" />, the global scale is multiplied by 0.8
+                (configurable) for up to 4 iterations until the budget is met.
+              </p>
+              <p className="mt-2">
+                <strong>Chroma guard</strong> (on by default) — after lightness
+                sharpening, per-pixel chroma shift is measured in Cb/Cr space.
+                Where the shift exceeds 10%, soft clamping blends back toward the
+                original chroma.
+              </p>
+            </PipelineStep>
+
+            <PipelineStep n={12} title="Quality Evaluation & Output">
+              <p>
+                A heuristic evaluator extracts seven image features — edge
+                density, gradient variance, local variance, Laplacian variance,
+                luminance entropy — and maps them to a predicted quality score
+                in [0, 1]. This is <strong>advisory only</strong> and does not
+                alter <InlineMath tex="s^*" />.
+              </p>
+              <p className="mt-2">
+                The pipeline then inspects the full diagnostics and emits
+                actionable recommendations, each carrying a human-readable
+                reason and a concrete parameter patch the UI can apply and
+                re-run directly.
+              </p>
+              <p className="mt-2">
+                Finally, values are clamped to <InlineMath tex="[0,\,1]" /> and the
+                inverse sRGB transfer function encodes back to gamma-corrected
+                8-bit output.
               </p>
             </PipelineStep>
           </div>
@@ -623,7 +718,7 @@ export default function AlgorithmPage() {
           <MathBlock tex={String.raw`\mathbf{A} = \begin{bmatrix} 1 & s_1 & s_1^2 & s_1^3 \\ 1 & s_2 & s_2^2 & s_2^3 \\ \vdots & \vdots & \vdots & \vdots \\ 1 & s_N & s_N^2 & s_N^3 \end{bmatrix}, \qquad \mathbf{A}^\top\!\mathbf{A}\,\mathbf{x} = \mathbf{A}^\top\!\mathbf{b}`} />
           <p className="text-sm text-muted-foreground leading-relaxed mt-3">
             <InlineMath tex="\mathbf{A}^\top\!\mathbf{A}" /> is <InlineMath tex="4 \times 4" /> with
-            entries up to <InlineMath tex="\textstyle\sum s_i^6" />, requiring f64 to avoid
+            entries up to <InlineMath tex="\textstyle\sum s_i^6" />, requiring double precision to avoid
             catastrophic cancellation.
           </p>
 
@@ -663,9 +758,8 @@ export default function AlgorithmPage() {
           {/* Diagnostics */}
           <SectionHeading id="diagnostics">Diagnostics Output</SectionHeading>
           <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-            Every run produces a complete <Mono>AutoSharpDiagnostics</Mono>{" "}
-            record — a JSON-serializable snapshot of the entire pipeline
-            execution:
+            Every run produces a complete diagnostics record — a
+            JSON-serializable snapshot of the entire pipeline execution:
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border/20 rounded-lg overflow-hidden border border-border/30">
             {DIAGNOSTICS_FIELDS.map(([label, desc]) => (
@@ -711,7 +805,7 @@ export default function AlgorithmPage() {
               ["\\sigma = 1.0", " Gaussian default (reasonable starting value)"],
               "Percentile-stretch contrast leveling (placeholder)",
               "Probe strengths chosen empirically, not from paper",
-              ["R^2 > 0.85", ", LOO < 50% thresholds (engineering choices)"],
+              ["R^2 > 0.85", ", LOO < 25% thresholds (engineering choices)"],
             ]}
           />
 

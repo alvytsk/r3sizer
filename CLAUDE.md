@@ -63,6 +63,10 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 
 All serializable types in `r3sizer-core/src/types.rs` have `#[cfg_attr(feature = "typegen", derive(TS))]`. Running `cargo test -p r3sizer-core --features typegen export_typescript_bindings` writes `web/src/types/generated.ts` containing all type definitions and serialized `Default` constants. The web app imports from `web/src/types/wasm-types.ts` which re-exports everything from `generated.ts` and adds WASM-specific types (`ProcessResult`) and web overrides (e.g. `diagnostics_level: "full"`). When changing types in Rust, regenerate and commit `generated.ts`.
 
+## Deployment
+
+The web UI is deployed to GitHub Pages at https://alvytsk.github.io/r3sizer/ via `.github/workflows/deploy.yml`. The workflow triggers on every push to `main` and runs: install Rust + wasm target → `wasm-pack` → `npm ci` → `npm run build` → upload + deploy to Pages. The build runs entirely in CI (no local artifacts needed).
+
 ## Key design decisions to preserve
 
 - **f32 for pixels, f64 for polynomial fitting** — the Vandermonde matrix has terms up to `s^6`; f32 causes catastrophic cancellation.

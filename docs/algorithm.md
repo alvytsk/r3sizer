@@ -7,17 +7,25 @@ This document describes the pipeline implemented in `r3sizer-core`.
 ## Stage overview
 
 ```
-1.  Input decoding              (r3sizer-io / load.rs)
-2.  sRGB -> linear RGB          (color.rs)
-3.  Downscale                   (resize.rs)
-4.  Contrast leveling           (contrast.rs)       -- optional
-5.  Baseline measurement        (metrics.rs)
-6.  Probe sharpening            (sharpen.rs + color.rs + metrics.rs)
-7.  Cubic fit                   (fit.rs)
-8.  Root solving                (solve.rs)
-9.  Final sharpening            (sharpen.rs + color.rs)
-10. Clamp + output              (pipeline.rs + color.rs)
-11. Save                        (r3sizer-io / save.rs)
+1.   Input decoding              (r3sizer-io / load.rs)
+1.5. Input color-space ingress   (color_space.rs)        -- experimental, optional
+2.   sRGB -> linear RGB          (color.rs)
+2a.  Resize (with optional strategy)  (resize.rs / resize_strategy.rs)
+2.5. Region classification       (classifier.rs)         -- ContentAdaptive only
+3.   Contrast leveling           (contrast.rs)           -- optional
+4.   Baseline measurement        (metrics/)
+5.   Probe sharpening            (sharpen.rs + color.rs + metrics/)
+6.   Cubic fit                   (fit.rs)
+7.   Root solving                (solve.rs)
+7b.  LOO stability check         (pipeline.rs)
+7c.  Robustness flags + fallback reason  (pipeline.rs)
+8.   Final sharpening            (sharpen.rs + color.rs)
+8.1  Chroma guard override       (chroma_guard.rs)       -- optional
+9.   Measure final artifact ratio  (metrics/)
+9.5. Quality evaluator           (evaluator.rs)          -- experimental, optional
+10.  Clamp + output              (pipeline.rs + color.rs)
+11.  Recommendations             (recommendations.rs)
+12.  Save                        (r3sizer-io / save.rs)
 ```
 
 ---
@@ -28,6 +36,21 @@ This document describes the pipeline implemented in `r3sizer-core`.
 converts to `Rgb8`, normalises bytes to f32 [0, 1], and immediately applies
 the sRGB -> linear transform.  The returned `LinearRgbImage` is already in
 linear light.
+
+---
+
+## Stage 1.5: Input color-space ingress (experimental v0.4)
+
+When `params.input_color_space` is set, `color_space::prepare_input` intercepts
+the pixel data before any processing:
+
+| `InputColorSpace` | Behaviour |
+|---|---|
+| `Srgb` (default / `None`) | No-op — IO layer already linearised. |
+| `LinearRgb` | Validates range; records `out_of_range_fraction` if values exceed [0, 1]. |
+| `RawLinear` | Normalises to [0, 1] by dividing by the per-image maximum; records `normalization_scale`. |
+
+Diagnostics are stored in `AutoSharpDiagnostics::input_ingress` (`InputIngressDiagnostics`).
 
 ---
 
@@ -46,19 +69,66 @@ filtering are physically correct.
 
 ---
 
-## Stage 3: Downscale in linear space
+## Stage 2a: Downscale in linear space
 
 `resize::downscale` wraps the linear f32 buffer as `image::ImageBuffer<Rgb<f32>>`
-and calls `imageops::resize` with `FilterType::Lanczos3`.
+and calls `imageops::resize` with `FilterType::Lanczos3` (default path).
 
 No clamping is applied.  The output remains in linear f32.
 
-**Note:** The specific resampling kernel used in the original papers is not
+**Note:** The specific resampling kernel used in the original paper is not
 confirmed.  Lanczos3 is used as a high-quality standard choice.
+
+### Optional: content-adaptive resize strategy (v0.4)
+
+When `params.resize_strategy` is set, `resize_strategy::downscale_with_strategy`
+is called instead.  Two variants are available:
+
+- **`ResizeStrategy::Uniform { kernel }`** — single kernel applied to the entire image.
+  Kernels: `Lanczos3`, `MitchellNetravali`, `CatmullRom`, `Gaussian`.
+- **`ResizeStrategy::ContentAdaptive { classification, kernel_table }`** — classifies the
+  source image, assigns a kernel per region class, produces one downsample per kernel,
+  then blends pixels according to the per-pixel class assignment.
+
+Diagnostics are stored in `AutoSharpDiagnostics::resize_strategy_diagnostics`
+(`ResizeStrategyDiagnostics`): which kernels were used and the pixel-count per kernel.
 
 ---
 
-## Stage 4: Contrast leveling (optional)
+## Stage 2.5: Region classification (ContentAdaptive sharpening only)
+
+When `params.sharpen_strategy == ContentAdaptive`, `classifier::classify` runs a
+four-pass algorithm on the downscaled image to assign each pixel a `RegionClass`:
+
+| Pass | What it computes |
+|---|---|
+| 1 | CIE Y luminance extraction |
+| 2 | Unnormalized 3×3 Sobel gradient magnitude (max ≈ 5.66 for luma in [0,1]) |
+| 3 | Local variance in a configurable square window (default 5×5) |
+| 4 | Per-pixel classification via priority rules (see below) |
+
+### Classification priority rules
+
+```
+g >= gradient_high && v >= variance_high  →  RiskyHaloZone
+g >= gradient_high                         →  StrongEdge
+v >= variance_high && g < gradient_low    →  Microtexture
+v >= variance_low  || g >= gradient_low   →  Textured
+else                                       →  Flat
+```
+
+Default `ClassificationParams`: `gradient_low=0.05`, `gradient_high=0.40`,
+`variance_low=0.001`, `variance_high=0.010`, `variance_window=5`.
+
+`gain_map_from_region_map` converts the `RegionMap` to a `GainMap` (per-pixel f32
+multipliers) using the `GainTable`.  The gain map is consumed in Stage 8.
+
+Per-class pixel counts are stored in `AutoSharpDiagnostics::region_coverage`
+(`RegionCoverage`).
+
+---
+
+## Stage 3: Contrast leveling (optional)
 
 `contrast::apply_contrast_leveling` is applied to the downscaled image when
 `enable_contrast_leveling = true`.
@@ -69,7 +139,7 @@ confirmed.  Lanczos3 is used as a high-quality standard choice.
 
 ---
 
-## Stage 5: Baseline measurement
+## Stage 4: Baseline measurement
 
 Before any sharpening, the artifact ratio of the downscaled base image is
 measured using the configured `ArtifactMetric`:
@@ -84,9 +154,12 @@ Lanczos ringing) independently of sharpening.
 The baseline is used by `MetricMode::RelativeToBase` to isolate
 sharpening-induced artifacts from resize-induced artifacts.
 
+When `params.evaluation_color_space` is set, the measurement uses
+`chroma_guard::evaluate_in_color_space` instead of the standard metric.
+
 ---
 
-## Stage 6: Probe sharpening strengths
+## Stage 5: Probe sharpening strengths
 
 For each strength `s_i` in the probe set, sharpening is applied and artifacts
 are measured.  Two sharpening modes are supported:
@@ -101,25 +174,13 @@ are measured.  Two sharpening modes are supported:
 **`SharpenMode::Lightness`** (default):
 
 1. `color::extract_luminance(base)` -- CIE Y luminance: `L = 0.2126R + 0.7152G + 0.0722B`.
-2. Sharpen luminance only (dispatched by `SharpenModel`, see below).
+2. Sharpen luminance only via unsharp mask.
 3. `color::reconstruct_rgb_from_lightness(base, sharpened_L)` -- multiplicative reconstruction:
    `k = L'/L; R' = k*R, G' = k*G, B' = k*B` (with epsilon guard for L near 0).
 4. Measure artifact ratio on the reconstructed RGB image.
 
 The luminance is extracted once before the probe loop and reused across all
 probes for efficiency.
-
-### Sharpening models (`SharpenModel`)
-
-Orthogonal to `SharpenMode` (which selects *channels*), `SharpenModel` selects
-the *operator*:
-
-- **`PracticalUsm`** (default): Gaussian unsharp mask. Engineering choice -- the
-  paper's exact sharpening operator is unknown. Works with both RGB and Lightness
-  modes.
-- **`PaperLightnessApprox`**: Scaffold for the paper-style lightness sharpening
-  operator. Currently delegates to USM internally. Requires
-  `SharpenMode::Lightness`.
 
 ### Metric modes
 
@@ -174,25 +235,32 @@ via `ProbeConfig::Explicit` or `ProbeConfig::Range`.
 
 ---
 
-## Stage 6b: Metric breakdown (composite scaffold)
+## Stage 5b: Metric breakdown (composite — v0.2, all components active)
 
-Each probe now produces a `MetricBreakdown` via `metrics::compute_metric_breakdown`,
-which returns per-component scores:
+Each probe produces a `MetricBreakdown` via `metrics::compute_metric_breakdown`.
+All four components are computed from real signal (none are stubs):
 
-| Component | v0.1 status |
-|-----------|-------------|
-| `GamutExcursion` | Active — delegates to the configured `ArtifactMetric` |
-| `HaloRinging` | Stub — returns 0.0 |
-| `EdgeOvershoot` | Stub — returns 0.0 |
-| `TextureFlattening` | Stub — returns 0.0 |
+| Component | Method | What it measures |
+|---|---|---|
+| `GamutExcursion` | Dispatches on `ArtifactMetric` | Fraction of channel values outside [0, 1] |
+| `HaloRinging` | Cross-edge profiles (Sobel + bilinear sampling) | Fraction of edge profiles with ≥2 sign changes in the diff |
+| `EdgeOvershoot` | Same profiles | Mean of `max(0, peak_excursion / gradient_magnitude - 1)` |
+| `TextureFlattening` | Local 5×5 variance comparison | Mean `|log2(var_sharpened / var_original)|` over textured pixels |
 
-The `aggregate` field of `MetricBreakdown` equals the scalar metric value used for
-fitting, preserving backward compatibility. Each `ProbeSample` stores its
-`breakdown: Option<MetricBreakdown>` for downstream analysis.
+The `selection_score` field equals `GamutExcursion` and is what the solver fits.
+`composite_score` is a weighted sum (`MetricWeights`) available for diagnostics
+but does **not** drive s* selection in v0.2.
+
+`aggregate` is a deprecated alias for `selection_score` kept for JSON backward
+compatibility.
+
+Each `ProbeSample` stores its `breakdown: Option<MetricBreakdown>`.  In
+`DiagnosticsLevel::Summary` mode (default) per-probe breakdowns are stripped
+from the serialized output to reduce JSON size.
 
 ---
 
-## Stage 7: Cubic polynomial fit
+## Stage 6: Cubic polynomial fit
 
 `fit::fit_cubic_with_quality` fits a cubic via Vandermonde normal equations in f64 and
 returns both the polynomial and a `FitQuality` record:
@@ -217,7 +285,7 @@ numerically singular (pivot < 1e-14).
 After a successful fit, the following quality metrics are computed:
 
 | Field | Description |
-|-------|-------------|
+|---|---|
 | `r_squared` | Coefficient of determination; 1.0 = perfect fit |
 | `residual_sum_of_squares` | Sum of squared residuals between predicted and actual values |
 | `max_residual` | Largest absolute residual across all data points |
@@ -227,68 +295,7 @@ These are stored in `diagnostics.fit_quality` (None when fit is skipped or fails
 
 ---
 
-## Stage 7b: Robustness checks
-
-After fitting and before solving, several robustness checks are performed.  Results
-are stored in `diagnostics.robustness` as `RobustnessFlags`:
-
-### Monotonicity check
-
-`fit::check_monotonicity` scans the sorted probe samples and counts inversions
-(cases where `metric_value[i+1] < metric_value[i]`).
-
-| Flag | Meaning |
-|------|---------|
-| `monotonic` | Zero inversions — P(s) is non-decreasing |
-| `quasi_monotonic` | At most one inversion |
-
-### Leave-one-out (LOO) stability
-
-The pipeline refits the cubic N times, each time dropping one probe sample,
-re-solves for the root, and measures the maximum relative change in s*:
-
-```
-max_loo_root_change = max_i |s*_full - s*_drop_i| / s*_full
-```
-
-`loo_stable = true` when `max_loo_root_change < 0.5` (50% relative shift).
-N=7 refits of a 4x4 system is negligible cost.
-
-### Derived flags
-
-| Flag | Threshold |
-|------|-----------|
-| `r_squared_ok` | R² > 0.85 |
-| `well_conditioned` | min_pivot > 1e-8 |
-
-### Impact on solver
-
-If robustness checks indicate unreliable fitting (non-monotonic data or LOO
-instability), the pipeline falls back to direct search and records the appropriate
-`FallbackReason` (see below).
-
----
-
-## Stage 7c: Fallback reason determination
-
-When the pipeline does not use the polynomial root (i.e. `selection_mode != PolynomialRoot`),
-a typed `FallbackReason` is recorded in `diagnostics.fallback_reason`:
-
-| Reason | Trigger |
-|--------|---------|
-| `BudgetTooStrictForContent` | Budget structurally unreachable (baseline > P0) |
-| `DirectSearchConfigured` | `FitStrategy::DirectSearch` selected by caller |
-| `FitFailed` | Polynomial fit returned an error |
-| `MetricNonMonotonic` | Probe data is not monotonically increasing |
-| `FitUnstable` | LOO cross-validation shows unstable root |
-| `RootOutOfRange` | Fit succeeded but no root in [s_min, s_max] |
-
-Priority order: first matching reason wins (listed in evaluation order above).
-When `selection_mode == PolynomialRoot`, `fallback_reason` is `None`.
-
----
-
-## Stage 8: Solve for s*
+## Stage 7: Solve for s*
 
 `solve::find_sharpness` solves `P_hat(s*) = P0` via Cardano's formula
 (depressed cubic via substitution `s = t - b/(3a)`):
@@ -313,7 +320,7 @@ unreachable before the solver even runs.
 The solver reports how the strength was chosen via `SelectionMode`:
 
 | Mode | Meaning |
-|------|---------|
+|---|---|
 | `PolynomialRoot` | s* found from the cubic polynomial root |
 | `BestSampleWithinBudget` | No polynomial root; largest sample within P0 |
 | `LeastBadSample` | All samples exceed P0; picked minimum metric value |
@@ -321,13 +328,153 @@ The solver reports how the strength was chosen via `SelectionMode`:
 
 ---
 
-## Stage 9: Final sharpening
+## Stage 7b: Robustness checks
+
+After fitting and before solving, several robustness checks are performed.  Results
+are stored in `diagnostics.robustness` as `RobustnessFlags`:
+
+### Monotonicity check
+
+`fit::check_monotonicity` scans the sorted probe samples and counts inversions
+(cases where `metric_value[i+1] < metric_value[i]`).
+
+| Flag | Meaning |
+|---|---|
+| `monotonic` | Zero inversions — P(s) is non-decreasing |
+| `quasi_monotonic` | At most one inversion |
+
+### Leave-one-out (LOO) stability
+
+The pipeline refits the cubic N times, each time dropping one probe sample,
+re-solves for the root, and measures the maximum relative change in s*:
+
+```
+max_loo_root_change = max_i |s*_full - s*_drop_i| / s*_full
+```
+
+`loo_stable = true` when `max_loo_root_change < 0.25` (25% relative shift).
+N=7 refits of a 4x4 system is negligible cost.
+
+### Derived flags
+
+| Flag | Threshold |
+|---|---|
+| `r_squared_ok` | R² > 0.85 |
+| `well_conditioned` | min_pivot > 1e-8 |
+
+### Impact on solver
+
+If robustness checks indicate unreliable fitting (non-monotonic data or LOO
+instability), the pipeline falls back to direct search and records the appropriate
+`FallbackReason` (see below).
+
+---
+
+## Stage 7c: Fallback reason determination
+
+When the pipeline does not use the polynomial root (i.e. `selection_mode != PolynomialRoot`),
+a typed `FallbackReason` is recorded in `diagnostics.fallback_reason`:
+
+| Reason | Trigger |
+|---|---|
+| `BudgetTooStrictForContent` | Budget structurally unreachable (baseline > P0) |
+| `DirectSearchConfigured` | `FitStrategy::DirectSearch` selected by caller |
+| `FitFailed` | Polynomial fit returned an error |
+| `MetricNonMonotonic` | Probe data is not monotonically increasing |
+| `FitUnstable` | LOO cross-validation shows unstable root |
+| `RootOutOfRange` | Fit succeeded but no root in [s_min, s_max] |
+
+Priority order: first matching reason wins (listed in evaluation order above).
+When `selection_mode == PolynomialRoot`, `fallback_reason` is `None`.
+
+---
+
+## Stage 8: Final sharpening
 
 The selected strength `s*` is applied once more using the same sharpening mode
 (RGB or lightness) as the probe stage.
 
-The artifact ratio on this result is measured and recorded as
-`measured_artifact_ratio` (raw) and `measured_metric_value` (mode-adjusted).
+### Uniform path (`SharpenStrategy::Uniform`)
+
+Standard unsharp mask at `s*` — same as a single probe step.
+
+### Content-adaptive path (`SharpenStrategy::ContentAdaptive`)
+
+The gain map computed in Stage 2.5 modulates the effective strength per pixel:
+`effective_strength(x, y) = s* * gain_map(x, y)`.  In lightness mode, the
+detail signal (`luma - gaussian_blur(luma)`) is computed once and applied via
+`sharpen::apply_adaptive_lightness_from_detail`.
+
+**Backoff loop:** if the adaptive result exceeds the artifact budget P0, the
+pipeline iteratively scales down the global strength by `backoff_scale_factor`
+(default 0.8) for up to `max_backoff_iterations` (default 4) attempts.  The
+outcome is reported via `AdaptiveValidationOutcome`:
+
+| Outcome | Meaning |
+|---|---|
+| `PassedDirect` | Budget met on first try |
+| `PassedAfterBackoff` | Budget met after N backoff iterations |
+| `FailedBudgetExceeded` | Best result after all iterations still exceeds budget |
+
+Stored in `AutoSharpDiagnostics::adaptive_validation`.
+
+---
+
+## Stage 8.1: Chroma guard override (experimental v0.4)
+
+When `params.experimental_sharpen_mode = Some(LumaPlusChromaGuard { max_chroma_shift })`
+(the default since v0.5), `chroma_guard::sharpen_with_chroma_guard` replaces the
+output from Stage 8.
+
+The chroma guard sharpens luminance, then monitors the per-pixel chroma shift
+(in Cb/Cr space).  Where the shift exceeds `max_chroma_shift` (default 10%), a
+soft clamp brings chroma back toward the original value.
+
+Diagnostics are stored in `AutoSharpDiagnostics::chroma_guard` (`ChromaGuardDiagnostics`):
+
+| Field | Description |
+|---|---|
+| `pixels_clamped_fraction` | Fraction of pixels where chroma clamping was applied |
+| `mean_chroma_shift` | Mean chroma shift magnitude across all pixels |
+| `max_chroma_shift` | Maximum chroma shift magnitude |
+
+**Note:** This stage is **on by default** since v0.5.  To disable, set
+`experimental_sharpen_mode: None` explicitly.
+
+---
+
+## Stage 9: Measure final artifact ratio
+
+The artifact ratio on the final sharpened image (pre-clamp) is measured and recorded:
+- `measured_artifact_ratio` — P_total(s*) raw.
+- `measured_metric_value` — mode-adjusted (relative or absolute).
+- `metric_components` — full `MetricBreakdown` of the final output.
+
+---
+
+## Stage 9.5: Quality evaluator (experimental v0.4)
+
+When `params.evaluator_config = Some(Heuristic)` (the default since v0.5),
+`evaluator::HeuristicEvaluator` runs after final sharpening and produces an
+advisory quality prediction.  It does **not** change the selected s*.
+
+The evaluator extracts `ImageFeatures` from the sharpened image:
+
+| Feature | Description |
+|---|---|
+| `edge_density` | Fraction of pixels with Sobel magnitude > threshold |
+| `mean_gradient_magnitude` | Mean Sobel magnitude across all pixels |
+| `gradient_variance` | Variance of gradient magnitudes |
+| `mean_local_variance` | Mean 5×5 local variance |
+| `local_variance_variance` | Variance of local variances (texture heterogeneity) |
+| `laplacian_variance` | Variance of the Laplacian response (frequency content proxy) |
+| `luminance_histogram_entropy` | Shannon entropy of 64-bin luminance histogram |
+
+Output is stored in `AutoSharpDiagnostics::evaluator_result` (`QualityEvaluation`):
+`predicted_quality_score`, `confidence`, optional `suggested_strength`, and the raw
+`features`.  All values are advisory.
+
+**Note:** On by default since v0.5.  To disable, set `evaluator_config: None`.
 
 ---
 
@@ -341,24 +488,46 @@ The result is scaled to [0, 255] u8 and written to disk.
 
 ---
 
+## Stage 11: Recommendations
+
+`recommendations::generate_recommendations` inspects the completed
+`AutoSharpDiagnostics` and emits a list of `Recommendation` objects.
+Each recommendation contains:
+
+- `kind` (`RecommendationKind`): what type of change is suggested
+  (e.g. `SwitchToContentAdaptive`, `LowerStrongEdgeGain`, `RaiseArtifactBudget`,
+  `SwitchToLightness`, `WidenProbeRange`, `LowerSigma`).
+- `severity` (`Severity`): `Info`, `Suggestion`, or `Warning`.
+- `confidence`: float in [0, 1].
+- `reason`: human-readable explanation.
+- `patch` (`ParamPatch`): self-contained partial parameter update the UI can
+  apply and re-run.
+
+Stored in `AutoSharpDiagnostics::recommendations`.
+
+---
+
 ## Per-stage timing
 
 Every pipeline invocation records wall-clock microsecond timing via `StageTiming`:
 
 | Field | What it measures |
-|-------|------------------|
-| `resize_us` | Lanczos3 downscale |
+|---|---|
+| `resize_us` | Lanczos3 or strategy-based downscale |
 | `contrast_us` | Contrast leveling (0 when disabled) |
 | `baseline_us` | Baseline artifact measurement |
 | `probing_us` | Entire probe loop (all strengths) |
-| `fit_us` | Cubic polynomial fitting |
+| `fit_us` | Cubic polynomial fitting + solve |
 | `robustness_us` | Monotonicity + LOO stability checks |
-| `final_sharpen_us` | Final sharpening at selected s* |
+| `final_sharpen_us` | Final sharpening at selected s* (including chroma guard) |
 | `clamp_us` | Clamping + final measurement |
 | `total_us` | End-to-end pipeline time |
+| `classification_us` | Region classification (None when Uniform) |
+| `adaptive_validation_us` | Adaptive backoff (None when Uniform) |
+| `ingress_us` | Input color-space ingress (None when not configured) |
+| `evaluator_us` | Quality evaluator (None when not configured) |
 
-Timing is always collected (no feature flag needed).  Overhead is negligible —
-`Instant::now()` calls between stages.
+Timing is always collected (no feature flag needed).
 
 ---
 
@@ -367,10 +536,9 @@ Timing is always collected (no feature flag needed).  Overhead is negligible —
 `AutoSharpDiagnostics` (serialisable to JSON) contains:
 
 | Field | Description |
-|-------|-------------|
+|---|---|
 | `input_size` / `output_size` | Image dimensions |
 | `sharpen_mode` | `Rgb` or `Lightness` |
-| `sharpen_model` | `PracticalUsm` or `PaperLightnessApprox` |
 | `metric_mode` | `AbsoluteTotal` or `RelativeToBase` |
 | `artifact_metric` | `ChannelClippingRatio` or `PixelOutOfGamutRatio` |
 | `target_artifact_ratio` | P0 |
@@ -380,13 +548,47 @@ Timing is always collected (no feature flag needed).  Overhead is negligible —
 | `fit_coefficients` | Cubic [a, b, c, d] if fit succeeded |
 | `fit_quality` | `FitQuality` (R², RSS, max residual, min pivot) or None |
 | `crossing_status` | `Found`, `NotFoundInRange`, or `NotAttempted` |
+| `robustness` | `RobustnessFlags` (monotonicity, LOO, condition) or None |
 | `selected_strength` | s* applied |
 | `selection_mode` | How s* was chosen (see Selection modes above) |
 | `fallback_reason` | `FallbackReason` enum or None (see Stage 7c) |
-| `robustness` | `RobustnessFlags` (monotonicity, LOO, condition) or None |
 | `budget_reachable` | Whether the target P0 is achievable |
 | `measured_artifact_ratio` | P_total(s*) after final sharpen |
 | `measured_metric_value` | Mode-adjusted metric of the final output |
-| `metric_components` | `MetricBreakdown` of the final output (component-wise scores) |
+| `metric_components` | `MetricBreakdown` of the final output (all four components) |
+| `metric_weights` | `MetricWeights` used for composite score computation |
+| `region_coverage` | Per-class pixel counts (None when Uniform) |
+| `adaptive_validation` | `AdaptiveValidationOutcome` (None when Uniform) |
 | `timing` | `StageTiming` — per-stage microsecond wall-clock times |
-| `provenance` | Per-stage faithfulness classification (see `StageProvenance`) |
+| `input_ingress` | `InputIngressDiagnostics` (None when not configured) |
+| `resize_strategy_diagnostics` | Kernels used (None when default Lanczos3) |
+| `chroma_guard` | `ChromaGuardDiagnostics` (None when not configured) |
+| `evaluator_result` | `QualityEvaluation` advisory result (None when not configured) |
+| `recommendations` | List of `Recommendation` objects (empty when none triggered) |
+
+---
+
+## Default parameter values
+
+`AutoSharpParams::default()` is the canonical starting point.  Notable defaults:
+
+| Parameter | Default |
+|---|---|
+| `probe_strengths` | `[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]` |
+| `target_artifact_ratio` | `0.001` (0.1%) |
+| `sharpen_sigma` | `1.0` |
+| `sharpen_mode` | `Lightness` |
+| `metric_mode` | `RelativeToBase` |
+| `artifact_metric` | `ChannelClippingRatio` |
+| `fit_strategy` | `Cubic` |
+| `output_clamp` | `Clamp` |
+| `sharpen_strategy` | `Uniform` |
+| `diagnostics_level` | `Summary` |
+| `experimental_sharpen_mode` | `Some(LumaPlusChromaGuard { max_chroma_shift: 0.10 })` (**on by default**) |
+| `evaluator_config` | `Some(Heuristic)` (**on by default**) |
+| `input_color_space` | `None` (Srgb) |
+| `resize_strategy` | `None` (Lanczos3) |
+| `evaluation_color_space` | `None` (Rgb) |
+
+The last two rows (chroma guard and evaluator) changed in v0.5 — callers that need
+the minimal baseline should set both to `None` explicitly.
