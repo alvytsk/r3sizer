@@ -276,10 +276,10 @@ fn select_best_qualifying<'a>(
 }
 
 /// Among all samples (budget exceeded), select the least bad per policy.
-fn select_least_bad<'a>(
-    samples: &'a [ProbeSample],
+fn select_least_bad(
+    samples: &[ProbeSample],
     policy: SelectionPolicy,
-) -> &'a ProbeSample {
+) -> &ProbeSample {
     match policy {
         SelectionPolicy::GamutOnly => {
             // Minimize gamut metric_value (current behavior).
