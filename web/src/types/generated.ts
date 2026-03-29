@@ -488,7 +488,13 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "diagnostics_level": "summary",
   "sharpen_strategy": {
     "strategy": "uniform"
-  }
+  },
+  "experimental_sharpen_mode": {
+    "luma_plus_chroma_guard": {
+      "max_chroma_shift": 0.1
+    }
+  },
+  "evaluator_config": "heuristic"
 };
 
 export const DEFAULT_KERNEL_TABLE: KernelTable = {

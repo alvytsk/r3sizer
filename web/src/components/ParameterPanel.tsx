@@ -22,17 +22,12 @@ import type {
   GainTable,
   ClassificationParams,
   ContentAdaptiveStrategy,
-  ContentAdaptiveResizeStrategy,
-  KernelTable,
-  ResizeStrategy,
 } from "@/types/wasm-types";
 import {
   DEFAULT_METRIC_WEIGHTS,
   DEFAULT_GAIN_TABLE,
   DEFAULT_CLASSIFICATION_PARAMS,
   DEFAULT_CONTENT_ADAPTIVE_STRATEGY,
-  DEFAULT_KERNEL_TABLE,
-  DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY,
 } from "@/types/wasm-types";
 
 function sliderValue(v: number | readonly number[]): number {
@@ -392,309 +387,13 @@ function AdaptiveSettings({ strategy, updateParams }: AdaptiveSettingsProps) {
   );
 }
 
-// ── Experimental label maps ─────────────────────────────────────────────
-
-const INPUT_COLOR_SPACE: Record<string, string> = {
-  "": "Default (sRGB)",
-  srgb: "sRGB",
-  linear_rgb: "Linear RGB",
-  raw_linear: "RAW Linear",
-};
-
-const RESIZE_STRATEGY_TYPE: Record<string, string> = {
-  "": "Default (Lanczos3)",
-  uniform: "Uniform",
-  content_adaptive: "Content Adaptive",
-};
-
 const RESIZE_KERNEL: Record<string, string> = {
   lanczos3: "Lanczos3",
-  mitchell_netravali: "Mitchell-Netravali",
   catmull_rom: "Catmull-Rom",
   gaussian: "Gaussian",
 };
 
-const EXPERIMENTAL_SHARPEN_MODE: Record<string, string> = {
-  "": "Default (Standard)",
-  luma_plus_chroma_guard: "Luma + Chroma Guard",
-};
 
-const EVALUATION_COLOR_SPACE: Record<string, string> = {
-  "": "Default (RGB)",
-  rgb: "RGB",
-  luma_only: "Luma Only",
-  lab_approx: "Lab Approx",
-};
-
-const EVALUATOR_CONFIG: Record<string, string> = {
-  "": "Off",
-  heuristic: "Heuristic",
-};
-
-const KERNEL_TABLE_ENTRIES: [keyof KernelTable, string][] = [
-  ["flat", "Flat"],
-  ["textured", "Textured"],
-  ["strong_edge", "Strong Edge"],
-  ["microtexture", "Microtexture"],
-  ["risky_halo_zone", "Risky Halo"],
-];
-
-interface ExperimentalSettingsProps {
-  params: AutoSharpParams;
-  updateParams: (partial: Partial<AutoSharpParams>) => void;
-}
-
-function ExperimentalSettings({ params, updateParams }: ExperimentalSettingsProps) {
-  const resizeStrategyType = params.resize_strategy?.strategy ?? "";
-  const experimentalSharpenMode = params.experimental_sharpen_mode
-    ? "luma_plus_chroma_guard"
-    : "";
-  const chromaShift =
-    params.experimental_sharpen_mode &&
-    "luma_plus_chroma_guard" in params.experimental_sharpen_mode
-      ? params.experimental_sharpen_mode.luma_plus_chroma_guard.max_chroma_shift
-      : 0.1;
-
-  return (
-    <Collapsible>
-      <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-        <ChevronDown className="h-3 w-3" />
-        Experimental
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-2 pt-2">
-        {/* Input Color Space */}
-        <div>
-          <ValueLabel>Input Color Space</ValueLabel>
-          <Select
-            value={params.input_color_space ?? ""}
-            onValueChange={(v) =>
-              updateParams({
-                input_color_space: v === "" ? undefined : (v as "srgb" | "linear_rgb" | "raw_linear"),
-              })
-            }
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={INPUT_COLOR_SPACE} value={params.input_color_space ?? ""} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Default (sRGB)</SelectItem>
-              <SelectItem value="srgb">sRGB</SelectItem>
-              <SelectItem value="linear_rgb">Linear RGB</SelectItem>
-              <SelectItem value="raw_linear">RAW Linear</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Resize Strategy */}
-        <div>
-          <ValueLabel>Resize Strategy</ValueLabel>
-          <Select
-            value={resizeStrategyType}
-            onValueChange={(v) => {
-              if (v === "") {
-                updateParams({ resize_strategy: undefined });
-              } else if (v === "uniform") {
-                updateParams({
-                  resize_strategy: { strategy: "uniform", kernel: "lanczos3" },
-                });
-              } else {
-                updateParams({
-                  resize_strategy: { ...DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY },
-                });
-              }
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={RESIZE_STRATEGY_TYPE} value={resizeStrategyType} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Default (Lanczos3)</SelectItem>
-              <SelectItem value="uniform">Uniform</SelectItem>
-              <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Uniform kernel selector */}
-        {params.resize_strategy?.strategy === "uniform" && (
-          <div className="pl-2 border-l-2 border-border/40">
-            <ValueLabel>Kernel</ValueLabel>
-            <Select
-              value={(params.resize_strategy as Extract<ResizeStrategy, { strategy: "uniform" }>).kernel}
-              onValueChange={(v) =>
-                updateParams({
-                  resize_strategy: { strategy: "uniform", kernel: v as "lanczos3" | "mitchell_netravali" | "catmull_rom" | "gaussian" },
-                })
-              }
-            >
-              <SelectTrigger className="h-8 text-sm font-mono">
-                <SelectedLabel labels={RESIZE_KERNEL} value={(params.resize_strategy as Extract<ResizeStrategy, { strategy: "uniform" }>).kernel} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lanczos3">Lanczos3</SelectItem>
-                <SelectItem value="mitchell_netravali">Mitchell-Netravali</SelectItem>
-                <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
-                <SelectItem value="gaussian">Gaussian</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
-        {/* Content-adaptive resize kernel table */}
-        {params.resize_strategy?.strategy === "content_adaptive" && (
-          <div className="pl-2 border-l-2 border-border/40 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <ValueLabel>Kernel Table</ValueLabel>
-              <button
-                type="button"
-                className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
-                onClick={() => {
-                  const rs = params.resize_strategy as ContentAdaptiveResizeStrategy;
-                  updateParams({
-                    resize_strategy: { ...rs, kernel_table: { ...DEFAULT_KERNEL_TABLE } },
-                  });
-                }}
-              >
-                reset
-              </button>
-            </div>
-            {KERNEL_TABLE_ENTRIES.map(([key, label]) => {
-              const rs = params.resize_strategy as ContentAdaptiveResizeStrategy;
-              return (
-                <div key={key}>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-[11px] text-muted-foreground/70">{label}</span>
-                    <span className="text-[10px] font-mono text-primary">
-                      {RESIZE_KERNEL[rs.kernel_table[key]] ?? rs.kernel_table[key]}
-                    </span>
-                  </div>
-                  <Select
-                    value={rs.kernel_table[key]}
-                    onValueChange={(v) =>
-                      updateParams({
-                        resize_strategy: {
-                          ...rs,
-                          kernel_table: { ...rs.kernel_table, [key]: v },
-                        },
-                      })
-                    }
-                  >
-                    <SelectTrigger className="h-7 text-xs font-mono">
-                      <SelectedLabel labels={RESIZE_KERNEL} value={rs.kernel_table[key]} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lanczos3">Lanczos3</SelectItem>
-                      <SelectItem value="mitchell_netravali">Mitchell-Netravali</SelectItem>
-                      <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
-                      <SelectItem value="gaussian">Gaussian</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Experimental Sharpen Mode */}
-        <div>
-          <ValueLabel>Sharpen Mode</ValueLabel>
-          <Select
-            value={experimentalSharpenMode}
-            onValueChange={(v) => {
-              if (v === "") {
-                updateParams({ experimental_sharpen_mode: undefined });
-              } else {
-                updateParams({
-                  experimental_sharpen_mode: {
-                    luma_plus_chroma_guard: { max_chroma_shift: chromaShift },
-                  },
-                });
-              }
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={EXPERIMENTAL_SHARPEN_MODE} value={experimentalSharpenMode} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Default (Standard)</SelectItem>
-              <SelectItem value="luma_plus_chroma_guard">Luma + Chroma Guard</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Chroma shift slider */}
-        {experimentalSharpenMode === "luma_plus_chroma_guard" && (
-          <div className="pl-2 border-l-2 border-border/40">
-            <div className="flex items-baseline justify-between">
-              <ValueLabel>Max Chroma Shift</ValueLabel>
-              <span className="text-[10px] font-mono text-primary">{chromaShift.toFixed(2)}</span>
-            </div>
-            <Slider
-              min={0.01}
-              max={0.5}
-              step={0.01}
-              value={[chromaShift]}
-              onValueChange={(v) =>
-                updateParams({
-                  experimental_sharpen_mode: {
-                    luma_plus_chroma_guard: { max_chroma_shift: sliderValue(v) },
-                  },
-                })
-              }
-            />
-          </div>
-        )}
-
-        {/* Evaluation Color Space */}
-        <div>
-          <ValueLabel>Evaluation Color Space</ValueLabel>
-          <Select
-            value={params.evaluation_color_space ?? ""}
-            onValueChange={(v) =>
-              updateParams({
-                evaluation_color_space: v === "" ? undefined : (v as "rgb" | "luma_only" | "lab_approx"),
-              })
-            }
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={EVALUATION_COLOR_SPACE} value={params.evaluation_color_space ?? ""} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Default (RGB)</SelectItem>
-              <SelectItem value="rgb">RGB</SelectItem>
-              <SelectItem value="luma_only">Luma Only</SelectItem>
-              <SelectItem value="lab_approx">Lab Approx</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Quality Evaluator */}
-        <div>
-          <ValueLabel>Quality Evaluator</ValueLabel>
-          <Select
-            value={params.evaluator_config ?? ""}
-            onValueChange={(v) =>
-              updateParams({
-                evaluator_config: v === "" ? undefined : (v as "heuristic"),
-              })
-            }
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={EVALUATOR_CONFIG} value={params.evaluator_config ?? ""} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Off</SelectItem>
-              <SelectItem value="heuristic">Heuristic</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-[10px] text-muted-foreground/40 italic mt-1">
-            Advisory only — does not affect strength selection
-          </p>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
 
 export function ParameterPanel() {
   const params = useProcessorStore((s) => s.params);
@@ -765,6 +464,37 @@ export function ParameterPanel() {
               updateParams({ sharpen_sigma: sliderValue(v) })
             }
           />
+        </div>
+        <div>
+          <ValueLabel>Resize Kernel</ValueLabel>
+          <Select
+            value={
+              params.resize_strategy?.strategy === "uniform"
+                ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                : "lanczos3"
+            }
+            onValueChange={(v) =>
+              updateParams({
+                resize_strategy: v === "lanczos3" ? undefined : { strategy: "uniform", kernel: v as "catmull_rom" | "gaussian" },
+              })
+            }
+          >
+            <SelectTrigger className="h-8 text-sm font-mono">
+              <SelectedLabel
+                labels={RESIZE_KERNEL}
+                value={
+                  params.resize_strategy?.strategy === "uniform"
+                    ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                    : "lanczos3"
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lanczos3">Lanczos3</SelectItem>
+              <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
+              <SelectItem value="gaussian">Gaussian</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -1021,7 +751,6 @@ export function ParameterPanel() {
         </CollapsibleContent>
       </Collapsible>
 
-      <ExperimentalSettings params={params} updateParams={updateParams} />
     </div>
   );
 }

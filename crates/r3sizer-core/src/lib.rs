@@ -24,32 +24,24 @@ pub mod sharpen;
 pub mod solve;
 pub mod types;
 
-#[cfg(feature = "experimental")]
 pub mod color_space;
-#[cfg(feature = "experimental")]
 pub mod resize_strategy;
-#[cfg(feature = "experimental")]
 pub mod chroma_guard;
-#[cfg(feature = "experimental")]
 pub mod evaluator;
 
 // Re-export the complete public surface.
 pub use pipeline::process_auto_sharp_downscale;
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial, DiagnosticsLevel,
-    FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageSize,
-    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample,
-    ProbeConfig, ProcessOutput, Provenance, RegionClass, RegionCoverage, RegionMap,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy, StageTiming,
-    StageProvenance, REGION_CLASS_COUNT,
-};
-
-#[cfg(feature = "experimental")]
-pub use types::{
-    ChromaGuardDiagnostics, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
-    ImageFeatures, InputColorSpace, InputIngressDiagnostics, KernelTable, QualityEvaluation,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
+    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
+    FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
+    ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
+    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample, ProbeConfig,
+    ProcessOutput, Provenance, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
+    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
+    SharpenMode, SharpenModel, SharpenStrategy, StageTiming, StageProvenance,
+    REGION_CLASS_COUNT,
 };
 
 // ---------------------------------------------------------------------------

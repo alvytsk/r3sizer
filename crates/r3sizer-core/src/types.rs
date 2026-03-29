@@ -350,27 +350,22 @@ pub struct AutoSharpParams {
     // --- Experimental (v0.4) ---
 
     /// Input color space declaration. Default: `None` (= Srgb).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_color_space: Option<InputColorSpace>,
 
     /// Resize kernel strategy. Default: `None` (= Lanczos3).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resize_strategy: Option<ResizeStrategy>,
 
     /// Extended sharpening mode with chroma guard. Default: `None`.
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experimental_sharpen_mode: Option<ExperimentalSharpenMode>,
 
     /// Color space for artifact evaluation. Default: `None` (= Rgb).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_color_space: Option<EvaluationColorSpace>,
 
     /// Quality evaluator configuration. Default: `None` (disabled).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_config: Option<EvaluatorConfig>,
 }
@@ -395,16 +390,16 @@ impl Default for AutoSharpParams {
             metric_weights: MetricWeights::default(),
             diagnostics_level: DiagnosticsLevel::default(),
             sharpen_strategy: SharpenStrategy::default(),
-            #[cfg(feature = "experimental")]
             input_color_space: None,
-            #[cfg(feature = "experimental")]
             resize_strategy: None,
-            #[cfg(feature = "experimental")]
-            experimental_sharpen_mode: None,
-            #[cfg(feature = "experimental")]
+            // BREAKING (v0.5): chroma guard and evaluator are now on by default.
+            // Previously these were None (off). Callers that need the minimal
+            // baseline can set both to None explicitly.
+            experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                max_chroma_shift: 0.10,
+            }),
             evaluation_color_space: None,
-            #[cfg(feature = "experimental")]
-            evaluator_config: None,
+            evaluator_config: Some(EvaluatorConfig::Heuristic),
         }
     }
 }
@@ -518,11 +513,9 @@ pub struct StageTiming {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adaptive_validation_us: Option<u64>,
     /// Input color-space ingress time (None when not configured).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ingress_us: Option<u64>,
     /// Evaluator execution time (None when not configured).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_us: Option<u64>,
 }
@@ -1046,22 +1039,18 @@ pub struct AutoSharpDiagnostics {
     // --- Experimental (v0.4) ---
 
     /// Input color-space ingress diagnostics.
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_ingress: Option<InputIngressDiagnostics>,
 
     /// Resize strategy diagnostics.
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resize_strategy_diagnostics: Option<ResizeStrategyDiagnostics>,
 
     /// Chroma guard diagnostics.
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chroma_guard: Option<ChromaGuardDiagnostics>,
 
     /// Quality evaluator result (advisory).
-    #[cfg(feature = "experimental")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_result: Option<QualityEvaluation>,
 }
@@ -1086,7 +1075,6 @@ pub struct ProcessOutput {
 /// linearized by the IO layer (`InputColorSpace::Srgb` semantics).
 ///
 /// Provenance: `EngineeringChoice`.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1104,7 +1092,6 @@ pub enum InputColorSpace {
 }
 
 /// Diagnostics from the input color-space ingress stage.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct InputIngressDiagnostics {
@@ -1129,7 +1116,6 @@ pub struct InputIngressDiagnostics {
 ///
 /// Maps to `image::imageops::FilterType` variants.
 /// Provenance: `EngineeringChoice` — the paper's exact kernel is not confirmed.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1141,7 +1127,6 @@ pub enum ResizeKernel {
 }
 
 /// Per-class kernel assignment for content-adaptive resizing.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct KernelTable {
@@ -1152,7 +1137,6 @@ pub struct KernelTable {
     pub risky_halo_zone: ResizeKernel,
 }
 
-#[cfg(feature = "experimental")]
 impl Default for KernelTable {
     fn default() -> Self {
         Self {
@@ -1165,7 +1149,6 @@ impl Default for KernelTable {
     }
 }
 
-#[cfg(feature = "experimental")]
 impl KernelTable {
     /// Look up the kernel for a given region class.
     #[inline]
@@ -1184,7 +1167,6 @@ impl KernelTable {
 ///
 /// Orthogonal to [`SharpenStrategy`] — controls the resize stage, not sharpening.
 /// When the pipeline receives `None`, it falls back to the existing Lanczos3 path.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "strategy")]
@@ -1199,7 +1181,6 @@ pub enum ResizeStrategy {
 }
 
 /// Diagnostics from the resize strategy stage.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ResizeStrategyDiagnostics {
@@ -1217,7 +1198,6 @@ pub struct ResizeStrategyDiagnostics {
 /// uses the extended sharpening path instead of the standard one.
 ///
 /// Provenance: `EngineeringChoice`.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1237,7 +1217,6 @@ pub enum ExperimentalSharpenMode {
 /// the metric operates on, not _which_ metric function is called.
 ///
 /// Provenance: `EngineeringChoice`.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1252,7 +1231,6 @@ pub enum EvaluationColorSpace {
 }
 
 /// Diagnostics from the chroma guard sharpening path.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ChromaGuardDiagnostics {
@@ -1272,7 +1250,6 @@ pub struct ChromaGuardDiagnostics {
 /// It does **not** alter the pipeline's s* selection.
 ///
 /// Provenance: `EngineeringChoice`.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1282,7 +1259,6 @@ pub enum EvaluatorConfig {
 }
 
 /// Features extracted from an image for quality prediction.
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ImageFeatures {
@@ -1303,7 +1279,6 @@ pub struct ImageFeatures {
 }
 
 /// Quality evaluation result from a [`QualityEvaluator`](crate::evaluator::QualityEvaluator).
-#[cfg(feature = "experimental")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct QualityEvaluation {

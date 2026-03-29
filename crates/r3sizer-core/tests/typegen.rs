@@ -11,19 +11,15 @@ use ts_rs::{Config, TS};
 
 #[allow(deprecated)] // MetricBreakdown.aggregate
 use r3sizer_core::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
-    ClassificationParams, CrossingStatus, CubicPolynomial, DiagnosticsLevel, FallbackReason,
-    FitQuality, FitStatus, FitStrategy, GainTable, ImageSize, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ProbeConfig, ProbeSample, Provenance, RegionClass, RegionCoverage,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
+    FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
+    InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
+    MetricMode, MetricWeights, ProbeConfig, ProbeSample, Provenance, QualityEvaluation,
+    RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
     RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy, StageTiming,
     StageProvenance,
-};
-
-#[cfg(feature = "experimental")]
-use r3sizer_core::{
-    ChromaGuardDiagnostics, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
-    ImageFeatures, InputColorSpace, InputIngressDiagnostics, KernelTable, QualityEvaluation,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
 };
 
 #[test]
@@ -88,8 +84,7 @@ fn export_typescript_bindings() {
         AutoSharpDiagnostics::decl(&cfg),
     ];
 
-    // Experimental types — only generated when the experimental feature is active.
-    #[cfg(feature = "experimental")]
+    // Extended types (promoted from experimental in v0.5).
     let declarations = {
         let mut d = declarations;
         d.extend(vec![
@@ -156,15 +151,12 @@ fn export_typescript_bindings() {
         default_params
     ));
 
-    #[cfg(feature = "experimental")]
-    {
-        let default_kernel_table =
-            serde_json::to_string_pretty(&KernelTable::default()).unwrap();
-        output.push_str(&format!(
-            "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n",
-            default_kernel_table
-        ));
-    }
+    let default_kernel_table =
+        serde_json::to_string_pretty(&KernelTable::default()).unwrap();
+    output.push_str(&format!(
+        "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n",
+        default_kernel_table
+    ));
 
     // Write to web directory
     let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -21,6 +21,7 @@ export function DownloadButton() {
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
   const outputWidth = useProcessorStore((s) => s.outputWidth);
   const outputHeight = useProcessorStore((s) => s.outputHeight);
+  const inputFile = useProcessorStore((s) => s.inputFile);
   const [format, setFormat] = useState<ExportFormat>("jpeg");
   const [quality, setQuality] = useState(92);
 
@@ -42,7 +43,8 @@ export function DownloadButton() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `r3sizer-${outputWidth}x${outputHeight}.${FORMAT_EXT[format]}`;
+        const stem = inputFile?.name.replace(/\.[^.]+$/, "") ?? "r3sizer";
+        a.download = `${stem}-${outputWidth}x${outputHeight}.${FORMAT_EXT[format]}`;
         a.click();
         URL.revokeObjectURL(url);
       },

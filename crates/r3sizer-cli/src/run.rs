@@ -65,6 +65,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
         sharpen_strategy: SharpenStrategy::default(),
+        ..Default::default()
     }
 }
 

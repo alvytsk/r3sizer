@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg",
-    "build:wasm:experimental": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg -- --features experimental",
-    "typegen": "cargo test -p r3sizer-core --features typegen,experimental export_typescript_bindings -- --nocapture",
+    "typegen": "cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture",
     "dev": "vite",
     "build": "npm run build:wasm && tsc -b && vite build",
     "lint": "eslint .",

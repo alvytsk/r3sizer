@@ -2,7 +2,7 @@
 // Only manually-defined types and constants belong in this file.
 //
 // To regenerate generated.ts:
-//   cargo test -p r3sizer-core --features typegen,experimental export_typescript_bindings -- --nocapture
+//   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 
 import type {
   AutoSharpParams,

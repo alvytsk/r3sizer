@@ -64,7 +64,6 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 1.5 (experimental) Input color-space ingress
     // -------------------------------------------------------------------
-    #[cfg(feature = "experimental")]
     let (input, _input_ingress_diag, _ingress_us) = {
         if let Some(cs) = params.input_color_space {
             let t0 = Instant::now();
@@ -79,7 +78,6 @@ pub fn process_auto_sharp_downscale(
     // 2. Downscale in linear space
     // -------------------------------------------------------------------
     let t0 = Instant::now();
-    #[cfg(feature = "experimental")]
     let (downscaled, _resize_strategy_diag) = {
         if let Some(ref strategy) = params.resize_strategy {
             let (img, diag) = crate::resize_strategy::downscale_with_strategy(&input, target, strategy)?;
@@ -88,8 +86,6 @@ pub fn process_auto_sharp_downscale(
             (downscale(&input, target)?, None)
         }
     };
-    #[cfg(not(feature = "experimental"))]
-    let downscaled = downscale(input, target)?;
     let resize_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
@@ -122,7 +118,6 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     let t0 = Instant::now();
     let measure = |img: &LinearRgbImage| -> f32 {
-        #[cfg(feature = "experimental")]
         if let Some(cs) = params.evaluation_color_space {
             return crate::chroma_guard::evaluate_in_color_space(img, cs);
         }
@@ -151,17 +146,13 @@ pub fn process_auto_sharp_downscale(
     };
 
     // Build metric override for experimental evaluation color space.
-    #[cfg(feature = "experimental")]
     let eval_cs_fn = params.evaluation_color_space.map(|cs| {
         move |img: &LinearRgbImage| -> f32 {
             crate::chroma_guard::evaluate_in_color_space(img, cs)
         }
     });
-    #[cfg(feature = "experimental")]
     let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
         eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
-    #[cfg(not(feature = "experimental"))]
-    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> = None;
 
     let probe_samples = probe_strengths(
         &strengths,
@@ -299,7 +290,6 @@ pub fn process_auto_sharp_downscale(
     let selected_strength = solve_result.selected_strength;
 
     // Experimental: chroma guard sharpening overrides the standard path.
-    #[cfg(feature = "experimental")]
     let _chroma_guard_diag;
 
     let (mut final_image, adaptive_validation, adaptive_validation_us) =
@@ -337,7 +327,6 @@ pub fn process_auto_sharp_downscale(
             }
         };
     // Experimental: if chroma guard is configured, apply it as an override.
-    #[cfg(feature = "experimental")]
     {
         if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard { max_chroma_shift }) = params.experimental_sharpen_mode {
             let (guarded, cg_diag) = crate::chroma_guard::sharpen_with_chroma_guard(
@@ -380,7 +369,6 @@ pub fn process_auto_sharp_downscale(
     // -------------------------------------------------------------------
     // 9.5 (experimental) Run quality evaluator
     // -------------------------------------------------------------------
-    #[cfg(feature = "experimental")]
     let (_evaluator_result, _evaluator_us) = {
         if let Some(ref eval_config) = params.evaluator_config {
             let t0 = Instant::now();
@@ -482,9 +470,7 @@ pub fn process_auto_sharp_downscale(
             total_us,
             classification_us,
             adaptive_validation_us,
-            #[cfg(feature = "experimental")]
             ingress_us: _ingress_us,
-            #[cfg(feature = "experimental")]
             evaluator_us: _evaluator_us,
         },
         provenance: StageProvenance {
@@ -506,13 +492,9 @@ pub fn process_auto_sharp_downscale(
             artifact_metric: Provenance::EngineeringProxy,
             polynomial_fit: Provenance::PaperConfirmed,
         },
-        #[cfg(feature = "experimental")]
         input_ingress: _input_ingress_diag,
-        #[cfg(feature = "experimental")]
         resize_strategy_diagnostics: _resize_strategy_diag,
-        #[cfg(feature = "experimental")]
         chroma_guard: _chroma_guard_diag,
-        #[cfg(feature = "experimental")]
         evaluator_result: _evaluator_result,
     };
 

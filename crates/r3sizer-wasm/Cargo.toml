@@ -15,6 +15,3 @@ serde              = { workspace = true }
 serde_json         = { workspace = true }
 serde-wasm-bindgen = "0.6"
 r3sizer-core      = { path = "../r3sizer-core", default-features = false }
-
-[features]
-experimental = ["r3sizer-core/experimental"]

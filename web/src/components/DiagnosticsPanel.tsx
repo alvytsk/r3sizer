@@ -639,13 +639,10 @@ export function DiagnosticsPanel() {
           </div>
           <ProbeChart diagnostics={diagnostics} />
 
-          {/* ── Experimental diagnostics ── */}
+          {/* ── Extended diagnostics ── */}
           {(diagnostics.input_ingress || diagnostics.resize_strategy_diagnostics ||
             diagnostics.chroma_guard || diagnostics.evaluator_result) && (
             <div className="space-y-2 border-t border-border/30 pt-2">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50">
-                Experimental
-              </div>
 
               {diagnostics.input_ingress && (
                 <div className="space-y-0.5 bg-muted/20 rounded-md p-2">

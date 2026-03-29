@@ -1,5 +1,3 @@
-#![cfg(feature = "experimental")]
-
 use r3sizer_core::{
     AutoSharpParams, DiagnosticsLevel, LinearRgbImage,
     process_auto_sharp_downscale,
@@ -213,10 +211,13 @@ fn chroma_guard_produces_valid_output() {
 }
 
 #[test]
-fn chroma_guard_none_is_default() {
+fn chroma_guard_on_by_default() {
     let src = gradient_image(16, 16);
     let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
-    assert!(out.diagnostics.chroma_guard.is_none());
+    let cg = out.diagnostics.chroma_guard.expect("chroma guard should be on by default");
+    assert!(cg.pixels_clamped_fraction.is_finite());
+    assert!(cg.mean_chroma_shift.is_finite());
+    assert!(cg.max_chroma_shift.is_finite());
 }
 
 #[test]
@@ -298,10 +299,12 @@ fn evaluator_diagnostics_populated_when_configured() {
 }
 
 #[test]
-fn evaluator_absent_when_not_configured() {
+fn evaluator_on_by_default() {
     let src = gradient_image(16, 16);
     let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
-    assert!(out.diagnostics.evaluator_result.is_none());
+    let ev = out.diagnostics.evaluator_result.expect("evaluator should be on by default");
+    assert!((0.0..=1.0).contains(&ev.predicted_quality_score));
+    assert!((0.0..=1.0).contains(&ev.confidence));
 }
 
 #[test]
@@ -363,13 +366,14 @@ fn all_experimental_features_together() {
 }
 
 #[test]
-fn experimental_defaults_are_none() {
+fn defaults_reflect_promoted_features() {
     let params = AutoSharpParams::default();
     assert!(params.input_color_space.is_none());
     assert!(params.resize_strategy.is_none());
-    assert!(params.experimental_sharpen_mode.is_none());
     assert!(params.evaluation_color_space.is_none());
-    assert!(params.evaluator_config.is_none());
+    // Chroma guard and evaluator are now on by default (v0.5 breaking change).
+    assert!(params.experimental_sharpen_mode.is_some());
+    assert_eq!(params.evaluator_config, Some(EvaluatorConfig::Heuristic));
 }
 
 #[test]
@@ -420,8 +424,7 @@ fn evaluator_features_vary_across_image_types() {
 }
 
 #[test]
-fn existing_integration_tests_unaffected_by_experimental() {
-    // Run a standard pipeline call to ensure experimental fields don't interfere
+fn default_pipeline_produces_valid_output_with_promoted_features() {
     let src = gradient_image(16, 16);
     let params = default_params(4, 4);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
@@ -430,9 +433,10 @@ fn existing_integration_tests_unaffected_by_experimental() {
     assert!(out.diagnostics.selected_strength >= 0.0);
     assert!(out.diagnostics.selected_strength.is_finite());
     assert!(out.diagnostics.measured_artifact_ratio.is_finite());
-    // All experimental diagnostics should be None
+    // Not configured → absent
     assert!(out.diagnostics.input_ingress.is_none());
     assert!(out.diagnostics.resize_strategy_diagnostics.is_none());
-    assert!(out.diagnostics.chroma_guard.is_none());
-    assert!(out.diagnostics.evaluator_result.is_none());
+    // On by default → present
+    assert!(out.diagnostics.chroma_guard.is_some());
+    assert!(out.diagnostics.evaluator_result.is_some());
 }
