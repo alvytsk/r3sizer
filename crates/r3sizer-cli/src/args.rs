@@ -65,10 +65,6 @@ pub struct Cli {
     #[arg(long, default_value = "relative")]
     pub metric_mode: MetricModeArg,
 
-    /// Sharpening algorithm: "practical-usm" (default) or "paper-lightness-approx".
-    #[arg(long, default_value = "practical-usm")]
-    pub sharpen_model: SharpenModelArg,
-
     /// Artifact metric: "channel-clipping" (default) or "pixel-out-of-gamut".
     #[arg(long, default_value = "channel-clipping")]
     pub artifact_metric: ArtifactMetricArg,
@@ -127,21 +123,6 @@ impl From<MetricModeArg> for r3sizer_core::MetricMode {
         match val {
             MetricModeArg::Absolute => r3sizer_core::MetricMode::AbsoluteTotal,
             MetricModeArg::Relative => r3sizer_core::MetricMode::RelativeToBase,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum SharpenModelArg {
-    PracticalUsm,
-    PaperLightnessApprox,
-}
-
-impl From<SharpenModelArg> for r3sizer_core::SharpenModel {
-    fn from(val: SharpenModelArg) -> Self {
-        match val {
-            SharpenModelArg::PracticalUsm => r3sizer_core::SharpenModel::PracticalUsm,
-            SharpenModelArg::PaperLightnessApprox => r3sizer_core::SharpenModel::PaperLightnessApprox,
         }
     }
 }

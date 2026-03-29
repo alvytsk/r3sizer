@@ -4,7 +4,7 @@ use r3sizer_core::{
     metrics::channel_clipping_ratio,
     sharpen::unsharp_mask,
     ArtifactMetric, AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode,
-    ProbeConfig, SharpenMode, SharpenModel, process_auto_sharp_downscale,
+    ProbeConfig, SharpenMode, process_auto_sharp_downscale,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -32,7 +32,6 @@ fn bench_full_pipeline(c: &mut Criterion) {
         fit_strategy: FitStrategy::Cubic,
         output_clamp: ClampPolicy::Clamp,
         sharpen_mode: SharpenMode::Lightness,
-        sharpen_model: SharpenModel::PracticalUsm,
         metric_mode: MetricMode::RelativeToBase,
         artifact_metric: ArtifactMetric::ChannelClippingRatio,
         ..Default::default()

@@ -1,7 +1,7 @@
 /// Formatted stdout output.
 use r3sizer_core::{
     ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus,
-    MetricComponent, MetricMode, Provenance, SelectionMode, SharpenMode, SharpenModel,
+    MetricComponent, MetricMode, SelectionMode, SharpenMode,
 };
 
 /// Print a human-readable summary of the pipeline diagnostics to stdout.
@@ -13,10 +13,6 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
     println!(
         "Sharpen mode                : {}",
         sharpen_mode_label(diag.sharpen_mode)
-    );
-    println!(
-        "Sharpen model               : {}",
-        sharpen_model_label(diag.sharpen_model)
     );
     println!(
         "Metric mode                 : {}",
@@ -91,12 +87,11 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
             mc.composite_score
         );
         println!(
-            "  weights                   : [{:.1}, {:.1}, {:.1}, {:.1}]  ({})",
+            "  weights                   : [{:.1}, {:.1}, {:.1}, {:.1}]",
             diag.metric_weights.gamut_excursion,
             diag.metric_weights.halo_ringing,
             diag.metric_weights.edge_overshoot,
             diag.metric_weights.texture_flattening,
-            provenance_label(diag.metric_weights_provenance),
         );
     }
 
@@ -138,15 +133,6 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         println!("  Total                     : {}", t.total_us);
     }
 
-    println!();
-    println!("Stage provenance:");
-    println!("  Color conversion          : {}", provenance_label(diag.provenance.color_conversion));
-    println!("  Resize                    : {}", provenance_label(diag.provenance.resize));
-    println!("  Contrast leveling         : {}", provenance_label(diag.provenance.contrast_leveling));
-    println!("  Sharpen operator          : {}", provenance_label(diag.provenance.sharpen_operator));
-    println!("  Lightness reconstruction  : {}", provenance_label(diag.provenance.lightness_reconstruction));
-    println!("  Artifact metric           : {}", provenance_label(diag.provenance.artifact_metric));
-    println!("  Polynomial fit            : {}", provenance_label(diag.provenance.polynomial_fit));
 }
 
 fn sharpen_mode_label(m: SharpenMode) -> &'static str {
@@ -188,13 +174,6 @@ fn selection_mode_label(s: &SelectionMode) -> &'static str {
     }
 }
 
-fn sharpen_model_label(m: SharpenModel) -> &'static str {
-    match m {
-        SharpenModel::PracticalUsm => "practical USM",
-        SharpenModel::PaperLightnessApprox => "paper lightness approx",
-    }
-}
-
 fn artifact_metric_label(m: ArtifactMetric) -> &'static str {
     match m {
         ArtifactMetric::ChannelClippingRatio => "channel clipping ratio",
@@ -222,12 +201,3 @@ fn metric_component_label(c: MetricComponent) -> &'static str {
     }
 }
 
-fn provenance_label(p: Provenance) -> &'static str {
-    match p {
-        Provenance::PaperConfirmed => "paper confirmed",
-        Provenance::PaperSupported => "paper supported",
-        Provenance::EngineeringChoice => "engineering choice",
-        Provenance::EngineeringProxy => "engineering proxy",
-        Provenance::Placeholder => "placeholder",
-    }
-}

@@ -22,13 +22,11 @@ import {
 
 export type {
   SharpenMode,
-  SharpenModel,
   MetricMode,
   ArtifactMetric,
   FitStrategy,
   ClampPolicy,
   DiagnosticsLevel,
-  Provenance,
   CrossingStatus,
   SelectionMode,
   FallbackReason,
@@ -48,7 +46,6 @@ export type {
   MetricBreakdown,
   ProbeSample,
   StageTiming,
-  StageProvenance,
   RegionCoverage,
   AdaptiveValidationOutcome,
   AutoSharpDiagnostics,

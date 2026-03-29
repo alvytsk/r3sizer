@@ -190,11 +190,6 @@ const SHARPEN_MODE: Record<string, string> = {
   rgb: "RGB",
 };
 
-const SHARPEN_MODEL: Record<string, string> = {
-  practical_usm: "Practical USM",
-  paper_lightness_approx: "Paper Lightness",
-};
-
 const METRIC_MODE: Record<string, string> = {
   relative_to_base: "Relative to Baseline",
   absolute_total: "Absolute Total",
@@ -496,51 +491,23 @@ export function ParameterPanel() {
             </SelectContent>
           </Select>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <ValueLabel>Mode</ValueLabel>
-            <Select
-              value={params.sharpen_mode}
-              onValueChange={(v) => {
-                if (!v) return;
-                const update: Partial<typeof params> = { sharpen_mode: v as typeof params.sharpen_mode };
-                if (v === "rgb" && params.sharpen_model === "paper_lightness_approx") {
-                  update.sharpen_model = "practical_usm";
-                }
-                updateParams(update);
-              }}
-            >
-              <SelectTrigger className="h-8 text-sm font-mono">
-                <SelectedLabel labels={SHARPEN_MODE} value={params.sharpen_mode} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="lightness">Lightness</SelectItem>
-                <SelectItem value="rgb">RGB</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <ValueLabel>Model</ValueLabel>
-            <Select
-              value={params.sharpen_model}
-              onValueChange={(v) => {
-                if (!v) return;
-                const update: Partial<typeof params> = { sharpen_model: v as typeof params.sharpen_model };
-                if (v === "paper_lightness_approx" && params.sharpen_mode !== "lightness") {
-                  update.sharpen_mode = "lightness";
-                }
-                updateParams(update);
-              }}
-            >
-              <SelectTrigger className="h-8 text-sm font-mono">
-                <SelectedLabel labels={SHARPEN_MODEL} value={params.sharpen_model} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="practical_usm">Practical USM</SelectItem>
-                <SelectItem value="paper_lightness_approx">Paper Lightness</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div>
+          <ValueLabel>Mode</ValueLabel>
+          <Select
+            value={params.sharpen_mode}
+            onValueChange={(v) => {
+              if (!v) return;
+              updateParams({ sharpen_mode: v as typeof params.sharpen_mode });
+            }}
+          >
+            <SelectTrigger className="h-8 text-sm font-mono">
+              <SelectedLabel labels={SHARPEN_MODE} value={params.sharpen_mode} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lightness">Lightness</SelectItem>
+              <SelectItem value="rgb">RGB</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <ValueLabel>Strategy</ValueLabel>

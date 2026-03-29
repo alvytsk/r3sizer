@@ -114,22 +114,6 @@ pub enum SharpenMode {
     Lightness,
 }
 
-/// Which sharpening algorithm to use.
-///
-/// Orthogonal to [`SharpenMode`] (which selects *channels*).
-/// `SharpenModel` selects the *operator*.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typegen", derive(TS))]
-#[serde(rename_all = "snake_case")]
-pub enum SharpenModel {
-    /// Gaussian unsharp mask — engineering choice, not paper-confirmed.
-    /// Works with both `SharpenMode::Rgb` and `SharpenMode::Lightness`.
-    PracticalUsm,
-    /// Paper-style lightness sharpening (scaffold — delegates to USM for now).
-    /// Requires `SharpenMode::Lightness`.
-    PaperLightnessApprox,
-}
-
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
@@ -202,43 +186,6 @@ pub enum SelectionMode {
     LeastBadSample,
     /// Budget is structurally unreachable (e.g. baseline already exceeds target in absolute mode).
     BudgetUnreachable,
-}
-
-// ---------------------------------------------------------------------------
-// Provenance
-// ---------------------------------------------------------------------------
-
-/// How faithful this stage's implementation is to the original papers.
-///
-/// Used in diagnostics to give callers (GUI, CLI, JSON consumers) a
-/// machine-readable honesty signal per pipeline stage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typegen", derive(TS))]
-#[serde(rename_all = "snake_case")]
-pub enum Provenance {
-    /// Matches a formula explicitly stated in the papers.
-    PaperConfirmed,
-    /// Strong inference from paper; all evidence supports this, confirmation pending.
-    PaperSupported,
-    /// Well-motivated engineering choice; paper's exact method is unknown.
-    EngineeringChoice,
-    /// Operational proxy; paper measures something similar but exact definition may differ.
-    EngineeringProxy,
-    /// Stub or placeholder; paper's method is completely unknown.
-    Placeholder,
-}
-
-/// Per-stage provenance tags filled in by the pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typegen", derive(TS))]
-pub struct StageProvenance {
-    pub color_conversion: Provenance,
-    pub resize: Provenance,
-    pub contrast_leveling: Provenance,
-    pub sharpen_operator: Provenance,
-    pub lightness_reconstruction: Provenance,
-    pub artifact_metric: Provenance,
-    pub polynomial_fit: Provenance,
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +280,6 @@ pub struct AutoSharpParams {
     pub output_clamp: ClampPolicy,
     /// Whether to sharpen RGB directly or through lightness channel.
     pub sharpen_mode: SharpenMode,
-    /// Which sharpening algorithm to use. Default: `PracticalUsm`.
-    pub sharpen_model: SharpenModel,
     /// How the artifact metric is computed for strength selection.
     pub metric_mode: MetricMode,
     /// Which artifact metric function to use. Default: `ChannelClippingRatio`.
@@ -384,7 +329,6 @@ impl Default for AutoSharpParams {
             fit_strategy: FitStrategy::Cubic,
             output_clamp: ClampPolicy::Clamp,
             sharpen_mode: SharpenMode::Lightness,
-            sharpen_model: SharpenModel::PracticalUsm,
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
             metric_weights: MetricWeights::default(),
@@ -417,13 +361,6 @@ impl AutoSharpParams {
         }
         if self.sharpen_sigma <= 0.0 {
             return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
-        }
-        if matches!(self.sharpen_model, SharpenModel::PaperLightnessApprox)
-            && matches!(self.sharpen_mode, SharpenMode::Rgb)
-        {
-            return Err(CoreError::InvalidParams(
-                "PaperLightnessApprox requires SharpenMode::Lightness".into(),
-            ));
         }
         if let SharpenStrategy::ContentAdaptive { backoff_scale_factor, .. } = &self.sharpen_strategy {
             if *backoff_scale_factor <= 0.0 || *backoff_scale_factor >= 1.0 {
@@ -560,9 +497,6 @@ pub struct MetricBreakdown {
 }
 
 /// Weights for the composite artifact metric.
-///
-/// Provenance: `EngineeringProxy` — these are starting-point defaults,
-/// not paper-confirmed. Must be validated against the evaluation harness.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct MetricWeights {
@@ -606,8 +540,6 @@ pub const REGION_CLASS_COUNT: usize = 5;
 ///
 /// Stable `as usize` ordering is part of the public contract:
 /// Flat=0, Textured=1, StrongEdge=2, Microtexture=3, RiskyHaloZone=4.
-///
-/// Provenance: `EngineeringChoice` — taxonomy is not paper-confirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -698,8 +630,6 @@ impl GainMap {
 /// **Recommended operating range:** `[0.5, 1.5]`.
 ///
 /// **Design criterion:** misclassification should degrade gently, not dramatically.
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct GainTable {
@@ -766,8 +696,6 @@ impl GainTable {
 /// - Variance thresholds: **squared-luminance units** (max 0.25 for bounded data).
 ///
 /// Changing the Sobel normalization or variance formula invalidates these defaults.
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ClassificationParams {
@@ -831,7 +759,7 @@ impl Default for ClassificationParams {
 
 /// Orchestration axis for sharpening strength distribution.
 ///
-/// Orthogonal to [`SharpenMode`] (Rgb/Lightness) and [`SharpenModel`] (operator).
+/// Orthogonal to [`SharpenMode`] (Rgb/Lightness).
 /// `SharpenStrategy` controls whether strength is applied uniformly or modulated
 /// per-pixel by a region-based gain map.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -970,7 +898,6 @@ pub struct AutoSharpDiagnostics {
 
     // --- Configuration ---
     pub sharpen_mode: SharpenMode,
-    pub sharpen_model: SharpenModel,
     pub metric_mode: MetricMode,
     pub artifact_metric: ArtifactMetric,
     pub target_artifact_ratio: f32,
@@ -1016,8 +943,6 @@ pub struct AutoSharpDiagnostics {
 
     /// Weights used for composite score computation.
     pub metric_weights: MetricWeights,
-    /// Provenance of the metric weights.
-    pub metric_weights_provenance: Provenance,
 
     // --- Content-adaptive (v0.3) ---
     /// Per-class region coverage. None when `SharpenStrategy::Uniform`.
@@ -1031,10 +956,6 @@ pub struct AutoSharpDiagnostics {
     /// Per-stage wall-clock timing.
     #[serde(default)]
     pub timing: StageTiming,
-
-    // --- Provenance ---
-    /// Per-stage classification of how faithful the implementation is to the papers.
-    pub provenance: StageProvenance,
 
     // --- Experimental (v0.4) ---
 
@@ -1073,8 +994,6 @@ pub struct ProcessOutput {
 /// Tells the pipeline how to interpret the pixel data it receives.
 /// When `None` (the default), the pipeline assumes data has already been
 /// linearized by the IO layer (`InputColorSpace::Srgb` semantics).
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1115,7 +1034,6 @@ pub struct InputIngressDiagnostics {
 /// Available resize kernels for downscaling.
 ///
 /// Maps to `image::imageops::FilterType` variants.
-/// Provenance: `EngineeringChoice` — the paper's exact kernel is not confirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1196,8 +1114,6 @@ pub struct ResizeStrategyDiagnostics {
 ///
 /// Supplements the existing [`SharpenMode`] axis. When set, the pipeline
 /// uses the extended sharpening path instead of the standard one.
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1215,8 +1131,6 @@ pub enum ExperimentalSharpenMode {
 ///
 /// Orthogonal to [`ArtifactMetric`] — controls _which_ color representation
 /// the metric operates on, not _which_ metric function is called.
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1248,8 +1162,6 @@ pub struct ChromaGuardDiagnostics {
 ///
 /// The evaluator runs after final sharpening and produces advisory diagnostics.
 /// It does **not** alter the pipeline's s* selection.
-///
-/// Provenance: `EngineeringChoice`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]

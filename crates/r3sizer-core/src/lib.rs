@@ -17,7 +17,6 @@ pub mod color;
 pub mod contrast;
 pub mod fit;
 pub mod metrics;
-pub mod paper_sharpen;
 pub mod pipeline;
 pub mod resize;
 pub mod sharpen;
@@ -38,9 +37,9 @@ pub use types::{
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
     MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample, ProbeConfig,
-    ProcessOutput, Provenance, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
+    ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SharpenMode, SharpenModel, SharpenStrategy, StageTiming, StageProvenance,
+    SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };
 

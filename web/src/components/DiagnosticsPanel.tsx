@@ -525,14 +525,6 @@ function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
   );
 }
 
-const PROVENANCE_STYLES: Record<string, { dot: string; text: string; label: string }> = {
-  paper_confirmed:   { dot: "bg-chart-3",     text: "text-chart-3",          label: "Confirmed"   },
-  paper_supported:   { dot: "bg-chart-2",     text: "text-chart-2",          label: "Supported"   },
-  engineering_choice:{ dot: "bg-primary",     text: "text-primary",          label: "Eng. Choice" },
-  engineering_proxy: { dot: "bg-chart-5",     text: "text-chart-5",          label: "Eng. Proxy"  },
-  placeholder:       { dot: "bg-destructive", text: "text-destructive",      label: "Placeholder" },
-};
-
 const FIT_STATUS_VARIANTS: Record<string, ChipVariant> = {
   success: "ok",
   failed: "error",
@@ -560,7 +552,7 @@ export function DiagnosticsPanel() {
   return (
     <div className="p-3">
       <Tabs defaultValue="summary" className="w-full">
-        <TabsList variant="line" className="grid grid-cols-5 w-full h-8">
+        <TabsList variant="line" className="grid grid-cols-4 w-full h-8">
           <TabsTrigger value="summary" className="text-[13px] font-mono">
             Summary
           </TabsTrigger>
@@ -569,9 +561,6 @@ export function DiagnosticsPanel() {
           </TabsTrigger>
           <TabsTrigger value="timing" className="text-[13px] font-mono">
             Timing
-          </TabsTrigger>
-          <TabsTrigger value="provenance" className="text-[13px] font-mono">
-            Prov.
           </TabsTrigger>
           <TabsTrigger value="json" className="text-[13px] font-mono">
             JSON
@@ -785,32 +774,6 @@ export function DiagnosticsPanel() {
         {/* ── Timing ── */}
         <TabsContent value="timing" className="mt-3">
           <TimingBar timing={diagnostics.timing} />
-        </TabsContent>
-
-        {/* ── Provenance ── */}
-        <TabsContent value="provenance" className="mt-3">
-          <div className="space-y-1">
-            {Object.entries(diagnostics.provenance).map(([stage, level]) => {
-              const prov = PROVENANCE_STYLES[level as string];
-              return (
-                <div key={stage} className="flex items-center justify-between py-0.5">
-                  <span className="text-[13px] text-muted-foreground capitalize">
-                    {stage.replace(/_/g, " ")}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <div
-                      className={`w-1.5 h-1.5 rounded-full ${prov?.dot ?? "bg-muted-foreground"}`}
-                    />
-                    <span
-                      className={`text-xs font-mono ${prov?.text ?? "text-muted-foreground"}`}
-                    >
-                      {prov?.label ?? level}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </TabsContent>
 
         {/* ── JSON ── */}
