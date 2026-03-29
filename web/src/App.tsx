@@ -163,18 +163,18 @@ export default function App() {
         {inputFile && (
           <aside
             className={[
-              "bg-card border-r border-border/40",
+              "bg-background border-r border-border/40",
               /* Mobile: fixed overlay, slides from left */
-              "fixed top-0 bottom-0 left-0 z-40 w-[min(340px,85vw)] shadow-2xl",
+              "fixed top-0 bottom-0 left-0 z-40 w-[min(300px,85vw)] shadow-2xl",
               "transition-[transform,width] duration-200 ease-in-out",
               sidebarOpen ? "translate-x-0" : "-translate-x-full",
               /* Desktop: inline sidebar, width transitions */
               "lg:static lg:z-auto lg:shadow-none lg:translate-x-0",
               "lg:flex-shrink-0 lg:overflow-hidden",
-              sidebarOpen ? "lg:w-[340px]" : "lg:w-11",
+              sidebarOpen ? "lg:w-[300px]" : "lg:w-11",
             ].join(" ")}
           >
-            <div className="w-full lg:w-[340px] h-full flex flex-col">
+            <div className="w-full lg:w-[300px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -317,16 +317,16 @@ export default function App() {
             className={[
               "bg-card border-l border-border/40",
               /* Mobile: fixed overlay, slides from right */
-              "fixed top-0 bottom-0 right-0 z-40 w-[min(380px,85vw)] shadow-2xl",
+              "fixed top-0 bottom-0 right-0 z-40 w-[min(420px,85vw)] shadow-2xl",
               "transition-[transform,width] duration-200 ease-in-out",
               diagOpen ? "translate-x-0" : "translate-x-full",
               /* Desktop: inline sidebar, width transitions */
               "lg:static lg:z-auto lg:shadow-none lg:translate-x-0",
               "lg:flex-shrink-0 lg:overflow-hidden",
-              diagOpen ? "lg:w-[380px]" : "lg:w-11",
+              diagOpen ? "lg:w-[420px]" : "lg:w-10",
             ].join(" ")}
           >
-            <div className="w-full lg:w-[380px] h-full flex flex-col">
+            <div className="w-full lg:w-[420px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
                   onClick={() => setDiagOpen(!diagOpen)}
