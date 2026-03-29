@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { Loader2, FolderOpen, ChevronLeft, ChevronRight, BarChart3, SlidersHorizontal } from "lucide-react";
+import { Loader2, FolderOpen, ChevronLeft, ChevronRight, BarChart3, SlidersHorizontal, Lock, BookOpen } from "lucide-react";
 import { DownloadButton } from "@/components/DownloadButton";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePreview } from "@/components/ImagePreview";
@@ -94,9 +94,8 @@ export default function App() {
         onChange={handleOpenFile}
       />
 
-      {/* Top bar — instrument panel zones */}
+      {/* Top bar */}
       <header className="border-b border-border/60 px-4 py-2.5 flex items-center gap-3 backdrop-blur-sm bg-background/80 sticky top-0 z-20">
-        {/* Zone 1: Brand — doubles as home button */}
         <button
           onClick={inputFile ? reset : undefined}
           className={`flex items-center gap-2 flex-shrink-0 ${inputFile ? "cursor-pointer group" : "cursor-default"}`}
@@ -108,47 +107,15 @@ export default function App() {
           </span>
         </button>
 
-        <div className="h-4 w-px bg-border/40 flex-shrink-0 hidden sm:block" />
+        <div className="h-4 w-px bg-border/40 flex-shrink-0" />
 
-        {/* Zone 2: Context — filename or tagline */}
-        {inputFile ? (
-          <span className="text-xs font-mono text-muted-foreground truncate min-w-0 hidden md:block">
-            {inputFile.name}
-          </span>
-        ) : (
-          <span className="text-xs font-mono text-muted-foreground/50 hidden sm:block">
-            precision downscaling
-          </span>
-        )}
-
-        <div className="h-4 w-px bg-border/40 flex-shrink-0 hidden sm:block" />
         <Link
           to="/algorithm"
-          className="text-xs font-mono text-muted-foreground/60 hover:text-primary transition-colors hidden sm:block"
+          className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground/60 hover:text-primary transition-colors"
         >
-          algorithm
+          <BookOpen className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Algorithm</span>
         </Link>
-
-        <div className="flex-1" />
-
-        {/* Zone 3: Export controls */}
-        {outputRgbaData && <DownloadButton />}
-
-        {/* Zone 4: File actions */}
-        {inputFile && (
-          <>
-            <div className="h-4 w-px bg-border/40 flex-shrink-0" />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-muted-foreground hover:text-foreground flex-shrink-0"
-              title="Open another image"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-            </Button>
-          </>
-        )}
       </header>
 
       {/* Body: params sidebar | center | diagnostics sidebar */}
@@ -244,13 +211,23 @@ export default function App() {
                     ? "parameters changed"
                     : "auto-sharpness downscale"}
               </span>
-              {/* Mobile panel toggles — hidden on desktop where inline strips exist */}
-              <div className="flex items-center gap-1 ml-auto lg:hidden">
+              <div className="flex items-center gap-1 ml-auto">
+                {outputRgbaData && <DownloadButton />}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-muted-foreground hover:text-foreground"
+                  title="Open another image"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                </Button>
+                <div className="w-px h-4 bg-border/30 lg:hidden" />
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setSidebarOpen(true)}
-                  className="text-muted-foreground hover:text-primary"
+                  className="text-muted-foreground hover:text-primary lg:hidden"
                   title="Parameters"
                 >
                   <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -259,7 +236,7 @@ export default function App() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setDiagOpen(true)}
-                  className="text-muted-foreground hover:text-primary"
+                  className="text-muted-foreground hover:text-primary lg:hidden"
                   title="Diagnostics"
                 >
                   <BarChart3 className="h-3.5 w-3.5" />
@@ -285,14 +262,17 @@ export default function App() {
                     <div className="animate-fade-up glow-amber rounded-2xl p-2">
                       <LogoMark className="h-16 w-16 text-primary" />
                     </div>
-                    <div className="flex flex-col items-center gap-1 animate-fade-up delay-100">
+                    <div className="flex flex-col items-center gap-2.5 animate-fade-up delay-100">
                       <h2 className="font-mono text-3xl font-bold tracking-tight text-primary glow-amber-text">
                         r3sizer
                       </h2>
                       <p className="text-sm text-muted-foreground max-w-xs">
                         Precision downscaling with automatic sharpness optimization.
-                        Runs entirely in your browser.
                       </p>
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/25 bg-primary/[0.06] text-xs font-mono text-primary/80 tracking-wide">
+                        <Lock className="h-3 w-3" />
+                        Runs entirely in your browser
+                      </span>
                     </div>
                   </div>
                   {/* Upload zone with crop marks */}
