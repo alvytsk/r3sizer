@@ -387,6 +387,14 @@ function AdaptiveSettings({ strategy, updateParams }: AdaptiveSettingsProps) {
   );
 }
 
+const RESIZE_KERNEL: Record<string, string> = {
+  lanczos3: "Lanczos3",
+  catmull_rom: "Catmull-Rom",
+  gaussian: "Gaussian",
+};
+
+
+
 export function ParameterPanel() {
   const params = useProcessorStore((s) => s.params);
   const updateParams = useProcessorStore((s) => s.updateParams);
@@ -456,6 +464,37 @@ export function ParameterPanel() {
               updateParams({ sharpen_sigma: sliderValue(v) })
             }
           />
+        </div>
+        <div>
+          <ValueLabel>Resize Kernel</ValueLabel>
+          <Select
+            value={
+              params.resize_strategy?.strategy === "uniform"
+                ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                : "lanczos3"
+            }
+            onValueChange={(v) =>
+              updateParams({
+                resize_strategy: v === "lanczos3" ? undefined : { strategy: "uniform", kernel: v as "catmull_rom" | "gaussian" },
+              })
+            }
+          >
+            <SelectTrigger className="h-8 text-sm font-mono">
+              <SelectedLabel
+                labels={RESIZE_KERNEL}
+                value={
+                  params.resize_strategy?.strategy === "uniform"
+                    ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                    : "lanczos3"
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lanczos3">Lanczos3</SelectItem>
+              <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
+              <SelectItem value="gaussian">Gaussian</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -711,6 +750,7 @@ export function ParameterPanel() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+
     </div>
   );
 }

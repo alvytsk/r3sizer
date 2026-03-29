@@ -11,10 +11,13 @@ use ts_rs::{Config, TS};
 
 #[allow(deprecated)] // MetricBreakdown.aggregate
 use r3sizer_core::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
-    ClassificationParams, CrossingStatus, CubicPolynomial, DiagnosticsLevel, FallbackReason,
-    FitQuality, FitStatus, FitStrategy, GainTable, ImageSize, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ProbeConfig, ProbeSample, Provenance, RegionClass, RegionCoverage,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
+    FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
+    InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
+    MetricMode, MetricWeights, ProbeConfig, ProbeSample, Provenance, QualityEvaluation,
+    RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
     RobustnessFlags, SelectionMode, SharpenMode, SharpenModel, SharpenStrategy, StageTiming,
     StageProvenance,
 };
@@ -81,6 +84,26 @@ fn export_typescript_bindings() {
         AutoSharpDiagnostics::decl(&cfg),
     ];
 
+    // Extended types (promoted from experimental in v0.5).
+    let declarations = {
+        let mut d = declarations;
+        d.extend(vec![
+            InputColorSpace::decl(&cfg),
+            ResizeKernel::decl(&cfg),
+            KernelTable::decl(&cfg),
+            ResizeStrategy::decl(&cfg),
+            ResizeStrategyDiagnostics::decl(&cfg),
+            ExperimentalSharpenMode::decl(&cfg),
+            EvaluationColorSpace::decl(&cfg),
+            ChromaGuardDiagnostics::decl(&cfg),
+            EvaluatorConfig::decl(&cfg),
+            ImageFeatures::decl(&cfg),
+            QualityEvaluation::decl(&cfg),
+            InputIngressDiagnostics::decl(&cfg),
+        ]);
+        d
+    };
+
     let mut output = String::with_capacity(8192);
     output.push_str(header);
     output.push('\n');
@@ -124,8 +147,15 @@ fn export_typescript_bindings() {
 
     let default_params = serde_json::to_string_pretty(&AutoSharpParams::default()).unwrap();
     output.push_str(&format!(
-        "export const DEFAULT_PARAMS: AutoSharpParams = {};\n",
+        "export const DEFAULT_PARAMS: AutoSharpParams = {};\n\n",
         default_params
+    ));
+
+    let default_kernel_table =
+        serde_json::to_string_pretty(&KernelTable::default()).unwrap();
+    output.push_str(&format!(
+        "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n",
+        default_kernel_table
     ));
 
     // Write to web directory

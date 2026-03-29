@@ -8,12 +8,14 @@ import type {
   AutoSharpParams,
   AutoSharpDiagnostics,
   SharpenStrategy,
+  ResizeStrategy,
 } from "./generated";
 
 import {
   DEFAULT_PARAMS as _GENERATED_DEFAULT_PARAMS,
   DEFAULT_CLASSIFICATION_PARAMS,
   DEFAULT_GAIN_TABLE,
+  DEFAULT_KERNEL_TABLE,
 } from "./generated";
 
 // ── Re-export all generated types ───────────────────────────────────────
@@ -50,6 +52,19 @@ export type {
   RegionCoverage,
   AdaptiveValidationOutcome,
   AutoSharpDiagnostics,
+  // Experimental types
+  InputColorSpace,
+  ResizeKernel,
+  KernelTable,
+  ResizeStrategy,
+  ResizeStrategyDiagnostics,
+  ExperimentalSharpenMode,
+  EvaluationColorSpace,
+  ChromaGuardDiagnostics,
+  EvaluatorConfig,
+  ImageFeatures,
+  QualityEvaluation,
+  InputIngressDiagnostics,
 } from "./generated";
 
 export {
@@ -57,6 +72,7 @@ export {
   DEFAULT_GAIN_TABLE,
   DEFAULT_CLASSIFICATION_PARAMS,
   DEFAULT_SHARPEN_STRATEGY,
+  DEFAULT_KERNEL_TABLE,
 } from "./generated";
 
 // ── Web-specific defaults ───────────────────────────────────────────────
@@ -76,6 +92,12 @@ export type ContentAdaptiveStrategy = Extract<
   { strategy: "content_adaptive" }
 >;
 
+/** Extract the content-adaptive variant from the ResizeStrategy union. */
+export type ContentAdaptiveResizeStrategy = Extract<
+  ResizeStrategy,
+  { strategy: "content_adaptive" }
+>;
+
 /** Return type from the WASM process_image() call via the Web Worker. */
 export interface ProcessResult {
   imageData: Uint8Array;
@@ -90,4 +112,10 @@ export const DEFAULT_CONTENT_ADAPTIVE_STRATEGY: ContentAdaptiveStrategy = {
   gain_table: { ...DEFAULT_GAIN_TABLE },
   max_backoff_iterations: 4,
   backoff_scale_factor: 0.8,
+};
+
+export const DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY: ContentAdaptiveResizeStrategy = {
+  strategy: "content_adaptive",
+  classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
+  kernel_table: { ...DEFAULT_KERNEL_TABLE },
 };

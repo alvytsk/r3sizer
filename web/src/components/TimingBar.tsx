@@ -8,6 +8,7 @@ interface StageEntry {
 }
 
 const STAGES: StageEntry[] = [
+  { key: "ingress_us", label: "Ingress", color: "bg-chart-4/80", hint: "Input color-space conversion" },
   { key: "resize_us", label: "Resize", color: "bg-chart-2", hint: "Lanczos3 downscale" },
   { key: "contrast_us", label: "Contrast", color: "bg-chart-4", hint: "Percentile stretch (stub)" },
   { key: "classification_us", label: "Classify", color: "bg-chart-5/80", hint: "Region classification (adaptive)" },
@@ -17,6 +18,7 @@ const STAGES: StageEntry[] = [
   { key: "robustness_us", label: "Robustness", color: "bg-chart-5", hint: "Monotonicity + LOO checks" },
   { key: "final_sharpen_us", label: "Sharpen", color: "bg-primary", hint: "Final sharpening at s*" },
   { key: "adaptive_validation_us", label: "Validate", color: "bg-chart-2/70", hint: "Adaptive validation + backoff" },
+  { key: "evaluator_us", label: "Evaluator", color: "bg-chart-3/70", hint: "Quality evaluation (advisory)" },
   { key: "clamp_us", label: "Clamp", color: "bg-border", hint: "Output clamping to [0,1]" },
 ];
 

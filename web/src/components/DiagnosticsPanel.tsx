@@ -638,6 +638,75 @@ export function DiagnosticsPanel() {
             />
           </div>
           <ProbeChart diagnostics={diagnostics} />
+
+          {/* ── Extended diagnostics ── */}
+          {(diagnostics.input_ingress || diagnostics.resize_strategy_diagnostics ||
+            diagnostics.chroma_guard || diagnostics.evaluator_result) && (
+            <div className="space-y-2 border-t border-border/30 pt-2">
+
+              {diagnostics.input_ingress && (
+                <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
+                  <div className="text-[11px] font-mono font-semibold text-muted-foreground">Ingress</div>
+                  <Readout label="Color space" value={diagnostics.input_ingress.declared_color_space} />
+                  {diagnostics.input_ingress.raw_value_min != null && (
+                    <Readout label="Raw range" value={`${diagnostics.input_ingress.raw_value_min.toFixed(3)} – ${diagnostics.input_ingress.raw_value_max?.toFixed(3) ?? "?"}`} />
+                  )}
+                  {diagnostics.input_ingress.normalization_scale != null && (
+                    <Readout label="Norm scale" value={diagnostics.input_ingress.normalization_scale.toFixed(4)} />
+                  )}
+                  {diagnostics.input_ingress.out_of_range_fraction != null && (
+                    <Readout label="Out of range" value={`${(diagnostics.input_ingress.out_of_range_fraction * 100).toFixed(2)}%`} />
+                  )}
+                </div>
+              )}
+
+              {diagnostics.resize_strategy_diagnostics && (
+                <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
+                  <div className="text-[11px] font-mono font-semibold text-muted-foreground">Resize Strategy</div>
+                  <Readout label="Kernels used" value={diagnostics.resize_strategy_diagnostics.kernels_used.join(", ")} />
+                  {Object.entries(diagnostics.resize_strategy_diagnostics.per_kernel_pixel_count).map(
+                    ([kernel, count]) => (
+                      <Readout key={kernel} label={kernel} value={String(count)} />
+                    )
+                  )}
+                </div>
+              )}
+
+              {diagnostics.chroma_guard && (
+                <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
+                  <div className="text-[11px] font-mono font-semibold text-muted-foreground">Chroma Guard</div>
+                  <Readout label="Pixels clamped" value={`${(diagnostics.chroma_guard.pixels_clamped_fraction * 100).toFixed(2)}%`} />
+                  <Readout label="Mean shift" value={diagnostics.chroma_guard.mean_chroma_shift.toFixed(4)} />
+                  <Readout label="Max shift" value={diagnostics.chroma_guard.max_chroma_shift.toFixed(4)} />
+                </div>
+              )}
+
+              {diagnostics.evaluator_result && (
+                <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
+                  <div className="text-[11px] font-mono font-semibold text-muted-foreground">Quality Evaluator</div>
+                  <Readout label="Quality score" value={diagnostics.evaluator_result.predicted_quality_score.toFixed(3)} />
+                  <Readout label="Confidence" value={diagnostics.evaluator_result.confidence.toFixed(3)} />
+                  {diagnostics.evaluator_result.suggested_strength != null && (
+                    <Readout label="Suggested s*" value={diagnostics.evaluator_result.suggested_strength.toFixed(4)} />
+                  )}
+                  <details className="mt-1">
+                    <summary className="text-[10px] font-mono text-muted-foreground/50 cursor-pointer hover:text-primary transition-colors">
+                      Features
+                    </summary>
+                    <div className="pt-1 space-y-0.5">
+                      <Readout label="Edge density" value={diagnostics.evaluator_result.features.edge_density.toExponential(2)} />
+                      <Readout label="Mean gradient" value={diagnostics.evaluator_result.features.mean_gradient_magnitude.toExponential(2)} />
+                      <Readout label="Gradient var" value={diagnostics.evaluator_result.features.gradient_variance.toExponential(2)} />
+                      <Readout label="Mean local var" value={diagnostics.evaluator_result.features.mean_local_variance.toExponential(2)} />
+                      <Readout label="Local var var" value={diagnostics.evaluator_result.features.local_variance_variance.toExponential(2)} />
+                      <Readout label="Laplacian var" value={diagnostics.evaluator_result.features.laplacian_variance.toExponential(2)} />
+                      <Readout label="Luma entropy" value={diagnostics.evaluator_result.features.luminance_histogram_entropy.toFixed(3)} />
+                    </div>
+                  </details>
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
 
         {/* ── Fit ── */}

@@ -346,6 +346,28 @@ pub struct AutoSharpParams {
     /// Strength distribution strategy. Default: `Uniform`.
     #[serde(default)]
     pub sharpen_strategy: SharpenStrategy,
+
+    // --- Experimental (v0.4) ---
+
+    /// Input color space declaration. Default: `None` (= Srgb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_color_space: Option<InputColorSpace>,
+
+    /// Resize kernel strategy. Default: `None` (= Lanczos3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resize_strategy: Option<ResizeStrategy>,
+
+    /// Extended sharpening mode with chroma guard. Default: `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experimental_sharpen_mode: Option<ExperimentalSharpenMode>,
+
+    /// Color space for artifact evaluation. Default: `None` (= Rgb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation_color_space: Option<EvaluationColorSpace>,
+
+    /// Quality evaluator configuration. Default: `None` (disabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_config: Option<EvaluatorConfig>,
 }
 
 impl Default for AutoSharpParams {
@@ -368,6 +390,16 @@ impl Default for AutoSharpParams {
             metric_weights: MetricWeights::default(),
             diagnostics_level: DiagnosticsLevel::default(),
             sharpen_strategy: SharpenStrategy::default(),
+            input_color_space: None,
+            resize_strategy: None,
+            // BREAKING (v0.5): chroma guard and evaluator are now on by default.
+            // Previously these were None (off). Callers that need the minimal
+            // baseline can set both to None explicitly.
+            experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                max_chroma_shift: 0.10,
+            }),
+            evaluation_color_space: None,
+            evaluator_config: Some(EvaluatorConfig::Heuristic),
         }
     }
 }
@@ -480,6 +512,12 @@ pub struct StageTiming {
     /// Adaptive validation + backoff time (None when Uniform).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adaptive_validation_us: Option<u64>,
+    /// Input color-space ingress time (None when not configured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress_us: Option<u64>,
+    /// Evaluator execution time (None when not configured).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_us: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -997,6 +1035,24 @@ pub struct AutoSharpDiagnostics {
     // --- Provenance ---
     /// Per-stage classification of how faithful the implementation is to the papers.
     pub provenance: StageProvenance,
+
+    // --- Experimental (v0.4) ---
+
+    /// Input color-space ingress diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_ingress: Option<InputIngressDiagnostics>,
+
+    /// Resize strategy diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resize_strategy_diagnostics: Option<ResizeStrategyDiagnostics>,
+
+    /// Chroma guard diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma_guard: Option<ChromaGuardDiagnostics>,
+
+    /// Quality evaluator result (advisory).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_result: Option<QualityEvaluation>,
 }
 
 /// Return type of the top-level pipeline function.
@@ -1004,6 +1060,237 @@ pub struct ProcessOutput {
     /// Final processed image (clamped according to `ClampPolicy`).
     pub image: LinearRgbImage,
     pub diagnostics: AutoSharpDiagnostics,
+}
+
+// ---------------------------------------------------------------------------
+// Experimental types (v0.4)
+// ---------------------------------------------------------------------------
+
+// --- Branch C: RAW-friendly ingress ---
+
+/// Input color space declaration for the pipeline entry point.
+///
+/// Tells the pipeline how to interpret the pixel data it receives.
+/// When `None` (the default), the pipeline assumes data has already been
+/// linearized by the IO layer (`InputColorSpace::Srgb` semantics).
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum InputColorSpace {
+    /// Standard sRGB input (default). The IO layer has already applied
+    /// sRGB→linear; the pipeline treats data as linear RGB in [0, 1].
+    #[default]
+    Srgb,
+    /// Data is already in linear RGB [0, 1]. Validates range, emits
+    /// a diagnostic warning if values exceed [0, 1].
+    LinearRgb,
+    /// Data is in linear RGB but may exceed [0, 1] (HDR / RAW output).
+    /// The pipeline normalizes to [0, 1] and records the scale factor.
+    RawLinear,
+}
+
+/// Diagnostics from the input color-space ingress stage.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct InputIngressDiagnostics {
+    /// Which color space was declared by the caller.
+    pub declared_color_space: InputColorSpace,
+    /// (min, max) of raw channel values. Present for `RawLinear`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_value_min: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_value_max: Option<f32>,
+    /// Scale factor applied to bring values into [0, 1]. Present for `RawLinear`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalization_scale: Option<f32>,
+    /// Fraction of values > 1.0. Present for `LinearRgb` validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_of_range_fraction: Option<f32>,
+}
+
+// --- Branch B: Region-adaptive resize kernels ---
+
+/// Available resize kernels for downscaling.
+///
+/// Maps to `image::imageops::FilterType` variants.
+/// Provenance: `EngineeringChoice` — the paper's exact kernel is not confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ResizeKernel {
+    Lanczos3,
+    MitchellNetravali,
+    CatmullRom,
+    Gaussian,
+}
+
+/// Per-class kernel assignment for content-adaptive resizing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct KernelTable {
+    pub flat: ResizeKernel,
+    pub textured: ResizeKernel,
+    pub strong_edge: ResizeKernel,
+    pub microtexture: ResizeKernel,
+    pub risky_halo_zone: ResizeKernel,
+}
+
+impl Default for KernelTable {
+    fn default() -> Self {
+        Self {
+            flat: ResizeKernel::Gaussian,
+            textured: ResizeKernel::Lanczos3,
+            strong_edge: ResizeKernel::Lanczos3,
+            microtexture: ResizeKernel::CatmullRom,
+            risky_halo_zone: ResizeKernel::MitchellNetravali,
+        }
+    }
+}
+
+impl KernelTable {
+    /// Look up the kernel for a given region class.
+    #[inline]
+    pub fn kernel_for(&self, class: RegionClass) -> ResizeKernel {
+        match class {
+            RegionClass::Flat => self.flat,
+            RegionClass::Textured => self.textured,
+            RegionClass::StrongEdge => self.strong_edge,
+            RegionClass::Microtexture => self.microtexture,
+            RegionClass::RiskyHaloZone => self.risky_halo_zone,
+        }
+    }
+}
+
+/// How to select the resize kernel for downscaling.
+///
+/// Orthogonal to [`SharpenStrategy`] — controls the resize stage, not sharpening.
+/// When the pipeline receives `None`, it falls back to the existing Lanczos3 path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case", tag = "strategy")]
+pub enum ResizeStrategy {
+    /// Use a single kernel for the entire image.
+    Uniform { kernel: ResizeKernel },
+    /// Classify the **source** image and pick a kernel per region, then blend.
+    ContentAdaptive {
+        classification: ClassificationParams,
+        kernel_table: KernelTable,
+    },
+}
+
+/// Diagnostics from the resize strategy stage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ResizeStrategyDiagnostics {
+    /// Which distinct kernels were actually used.
+    pub kernels_used: Vec<ResizeKernel>,
+    /// Per-kernel pixel count in the output image.
+    pub per_kernel_pixel_count: std::collections::BTreeMap<String, u32>,
+}
+
+// --- Branch D: Alternative color handling ---
+
+/// Extended sharpening mode with chroma monitoring.
+///
+/// Supplements the existing [`SharpenMode`] axis. When set, the pipeline
+/// uses the extended sharpening path instead of the standard one.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentalSharpenMode {
+    /// Sharpen luminance, then monitor per-pixel chroma shift and apply
+    /// soft clamping when the shift exceeds the threshold.
+    LumaPlusChromaGuard {
+        /// Maximum allowed chroma shift as a fraction of original chroma magnitude.
+        /// Values above this trigger soft clamping. Default: 0.10 (10%).
+        max_chroma_shift: f32,
+    },
+}
+
+/// Color space used for artifact evaluation during probing and final measurement.
+///
+/// Orthogonal to [`ArtifactMetric`] — controls _which_ color representation
+/// the metric operates on, not _which_ metric function is called.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluationColorSpace {
+    /// Evaluate artifacts in linear RGB (current behavior).
+    #[default]
+    Rgb,
+    /// Evaluate artifacts on the luminance channel only.
+    LumaOnly,
+    /// Evaluate artifacts in an approximate CIE Lab space.
+    LabApprox,
+}
+
+/// Diagnostics from the chroma guard sharpening path.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaGuardDiagnostics {
+    /// Fraction of pixels where chroma soft-clamping was applied.
+    pub pixels_clamped_fraction: f32,
+    /// Mean chroma shift magnitude across all pixels.
+    pub mean_chroma_shift: f32,
+    /// Maximum chroma shift magnitude.
+    pub max_chroma_shift: f32,
+}
+
+// --- Branch A: Learned evaluator ---
+
+/// Configuration for the quality evaluator.
+///
+/// The evaluator runs after final sharpening and produces advisory diagnostics.
+/// It does **not** alter the pipeline's s* selection.
+///
+/// Provenance: `EngineeringChoice`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum EvaluatorConfig {
+    /// Hand-crafted feature extraction + linear quality model.
+    Heuristic,
+}
+
+/// Features extracted from an image for quality prediction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ImageFeatures {
+    /// Fraction of pixels classified as edges (Sobel magnitude > threshold).
+    pub edge_density: f32,
+    /// Mean Sobel gradient magnitude across all pixels.
+    pub mean_gradient_magnitude: f32,
+    /// Variance of gradient magnitudes.
+    pub gradient_variance: f32,
+    /// Mean local variance (5×5 window) across all pixels.
+    pub mean_local_variance: f32,
+    /// Variance of local variances (texture heterogeneity).
+    pub local_variance_variance: f32,
+    /// Variance of the Laplacian response (frequency content proxy).
+    pub laplacian_variance: f32,
+    /// Shannon entropy of the 64-bin luminance histogram.
+    pub luminance_histogram_entropy: f32,
+}
+
+/// Quality evaluation result from a [`QualityEvaluator`](crate::evaluator::QualityEvaluator).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct QualityEvaluation {
+    /// Predicted overall quality score in [0, 1] (higher = better).
+    pub predicted_quality_score: f32,
+    /// Optional suggested sharpening strength (advisory, not enforced).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_strength: Option<f32>,
+    /// Confidence in the prediction, in [0, 1].
+    pub confidence: f32,
+    /// Raw feature vector used for the prediction.
+    pub features: ImageFeatures,
 }
 
 // ---------------------------------------------------------------------------
