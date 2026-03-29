@@ -459,6 +459,7 @@ pub fn process_auto_sharp_downscale_with_progress(
         sharpen_mode: params.sharpen_mode,
         metric_mode: params.metric_mode,
         artifact_metric: params.artifact_metric,
+        selection_policy: params.selection_policy,
         target_artifact_ratio: params.target_artifact_ratio,
         baseline_artifact_ratio,
         probe_samples,

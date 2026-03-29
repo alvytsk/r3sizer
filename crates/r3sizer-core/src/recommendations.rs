@@ -447,6 +447,7 @@ mod tests {
             sharpen_mode: SharpenMode::Lightness,
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
+            selection_policy: SelectionPolicy::default(),
             target_artifact_ratio: 0.001,
             baseline_artifact_ratio: 0.0,
             probe_samples: vec![
