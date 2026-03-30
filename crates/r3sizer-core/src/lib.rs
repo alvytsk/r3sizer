@@ -34,7 +34,8 @@ pub mod recommendations;
 pub use pipeline::{process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress};
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
-    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
+    ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
@@ -42,7 +43,7 @@ pub use types::{
     ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
     RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SharpenMode, SharpenStrategy, StageTiming,
+    SaturationGuardParams, SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };
 

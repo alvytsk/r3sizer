@@ -124,16 +124,16 @@ pub fn process_auto_sharp_downscale_with_progress(
     // 2.5. Region classification (ContentAdaptive only)
     // -------------------------------------------------------------------
     let t0 = Instant::now();
-    let (gain_map, region_coverage, classification_us) =
+    let (gain_map, region_map, region_coverage, classification_us) =
         match &params.sharpen_strategy {
             SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
                 let rmap = classify(&base, classification);
                 let gmap = gain_map_from_region_map(&rmap, gain_table);
                 let cov = RegionCoverage::from_region_map(&rmap);
                 let us = t0.elapsed().as_micros() as u64;
-                (Some(gmap), Some(cov), Some(us))
+                (Some(gmap), Some(rmap), Some(cov), Some(us))
             }
-            SharpenStrategy::Uniform => (None, None, None),
+            SharpenStrategy::Uniform => (None, None, None, None),
         };
 
     // -------------------------------------------------------------------
@@ -374,9 +374,14 @@ pub fn process_auto_sharp_downscale_with_progress(
         };
     // Experimental: if chroma guard is configured, apply it as an override.
     {
-        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard { max_chroma_shift }) = params.experimental_sharpen_mode {
+        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift, chroma_region_factors, saturation_guard,
+        }) = &params.experimental_sharpen_mode {
             let (guarded, cg_diag) = crate::chroma_guard::sharpen_with_chroma_guard(
-                &base, selected_strength, params.sharpen_sigma, max_chroma_shift,
+                &base, selected_strength, params.sharpen_sigma, *max_chroma_shift,
+                region_map.as_ref(),
+                chroma_region_factors.as_ref(),
+                saturation_guard.as_ref(),
             )?;
             final_image = guarded;
             _chroma_guard_diag = Some(cg_diag);

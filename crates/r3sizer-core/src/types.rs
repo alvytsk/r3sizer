@@ -413,6 +413,8 @@ impl Default for AutoSharpParams {
             // baseline can set both to None explicitly.
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
                 max_chroma_shift: 0.10,
+                chroma_region_factors: Some(ChromaRegionFactors::default()),
+                saturation_guard: Some(SaturationGuardParams::default()),
             }),
             evaluation_color_space: None,
             evaluator_config: Some(EvaluatorConfig::Heuristic),
@@ -1235,11 +1237,84 @@ pub struct ResizeStrategyDiagnostics {
 pub enum ExperimentalSharpenMode {
     /// Sharpen luminance, then monitor per-pixel chroma shift and apply
     /// soft clamping when the shift exceeds the threshold.
+    ///
+    /// When `chroma_region_factors` and a region map are both available,
+    /// the threshold is modulated per-pixel by region class.  When
+    /// `saturation_guard` is set, already-saturated pixels receive a
+    /// tighter threshold.
     LumaPlusChromaGuard {
         /// Maximum allowed chroma shift as a fraction of original chroma magnitude.
         /// Values above this trigger soft clamping. Default: 0.10 (10%).
         max_chroma_shift: f32,
+        /// Per-region-class multipliers for `max_chroma_shift`.
+        /// Only effective when the pipeline also produces a region map
+        /// (i.e. `SharpenStrategy::ContentAdaptive`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chroma_region_factors: Option<ChromaRegionFactors>,
+        /// Saturation-dependent threshold tightening.
+        /// Active regardless of region map availability.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saturation_guard: Option<SaturationGuardParams>,
     },
+}
+
+/// Per-region-class multipliers that scale the chroma guard threshold.
+///
+/// Lower values = tighter guard (more chroma protection).
+/// Semantics mirror [`GainTable`]: one field per [`RegionClass`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaRegionFactors {
+    pub flat: f32,
+    pub textured: f32,
+    pub strong_edge: f32,
+    pub microtexture: f32,
+    pub risky_halo_zone: f32,
+}
+
+impl ChromaRegionFactors {
+    /// Look up the factor for a given region class.
+    #[inline]
+    pub fn factor_for(&self, class: RegionClass) -> f32 {
+        match class {
+            RegionClass::Flat => self.flat,
+            RegionClass::Textured => self.textured,
+            RegionClass::StrongEdge => self.strong_edge,
+            RegionClass::Microtexture => self.microtexture,
+            RegionClass::RiskyHaloZone => self.risky_halo_zone,
+        }
+    }
+}
+
+impl Default for ChromaRegionFactors {
+    fn default() -> Self {
+        Self {
+            flat: 1.00,
+            textured: 0.90,
+            strong_edge: 0.65,
+            microtexture: 0.80,
+            risky_halo_zone: 0.45,
+        }
+    }
+}
+
+/// Saturation-aware chroma guard parameters.
+///
+/// Tightens the chroma shift threshold for already-saturated pixels.
+/// `effective_scale = 1.0 − (1.0 − min_scale) × saturation^gamma`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct SaturationGuardParams {
+    /// Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+    pub min_scale: f32,
+    /// Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+    pub gamma: f32,
+}
+
+impl Default for SaturationGuardParams {
+    fn default() -> Self {
+        Self { min_scale: 0.6, gamma: 1.5 }
+    }
 }
 
 /// Color space used for artifact evaluation during probing and final measurement.
@@ -1260,7 +1335,7 @@ pub enum EvaluationColorSpace {
 }
 
 /// Diagnostics from the chroma guard sharpening path.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ChromaGuardDiagnostics {
     /// Fraction of pixels where chroma soft-clamping was applied.
@@ -1269,6 +1344,45 @@ pub struct ChromaGuardDiagnostics {
     pub mean_chroma_shift: f32,
     /// Maximum chroma shift magnitude.
     pub max_chroma_shift: f32,
+
+    // --- Context-aware guard diagnostics (step 5) ---
+
+    /// Minimum effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_min: Option<f32>,
+    /// Mean effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_mean: Option<f32>,
+    /// Maximum effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_max: Option<f32>,
+
+    /// Per-region-class clamp statistics.
+    /// Present only when a region map was available (ContentAdaptive strategy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_region: Option<ChromaPerRegionDiagnostics>,
+}
+
+/// Chroma guard clamp statistics for a single region class.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaRegionClampStats {
+    pub pixel_count: u32,
+    pub clamped_count: u32,
+    pub clamped_fraction: f32,
+    pub mean_shift: f32,
+    pub max_shift: f32,
+}
+
+/// Per-region breakdown of chroma guard behavior.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaPerRegionDiagnostics {
+    pub flat: ChromaRegionClampStats,
+    pub textured: ChromaRegionClampStats,
+    pub strong_edge: ChromaRegionClampStats,
+    pub microtexture: ChromaRegionClampStats,
+    pub risky_halo_zone: ChromaRegionClampStats,
 }
 
 // --- Branch A: Learned evaluator ---

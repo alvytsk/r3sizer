@@ -413,14 +413,41 @@ kernels_used: Array<ResizeKernel>,
  */
 per_kernel_pixel_count: { [key in string]: number }, };
 
+export type ChromaRegionFactors = { flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, };
+
+export type SaturationGuardParams = { 
+/**
+ * Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+ */
+min_scale: number, 
+/**
+ * Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+ */
+gamma: number, };
+
 export type ExperimentalSharpenMode = { "luma_plus_chroma_guard": { 
 /**
  * Maximum allowed chroma shift as a fraction of original chroma magnitude.
  * Values above this trigger soft clamping. Default: 0.10 (10%).
  */
-max_chroma_shift: number, } };
+max_chroma_shift: number, 
+/**
+ * Per-region-class multipliers for `max_chroma_shift`.
+ * Only effective when the pipeline also produces a region map
+ * (i.e. `SharpenStrategy::ContentAdaptive`).
+ */
+chroma_region_factors?: ChromaRegionFactors | null, 
+/**
+ * Saturation-dependent threshold tightening.
+ * Active regardless of region map availability.
+ */
+saturation_guard?: SaturationGuardParams | null, } };
 
 export type EvaluationColorSpace = "rgb" | "luma_only" | "lab_approx";
+
+export type ChromaRegionClampStats = { pixel_count: number, clamped_count: number, clamped_fraction: number, mean_shift: number, max_shift: number, };
+
+export type ChromaPerRegionDiagnostics = { flat: ChromaRegionClampStats, textured: ChromaRegionClampStats, strong_edge: ChromaRegionClampStats, microtexture: ChromaRegionClampStats, risky_halo_zone: ChromaRegionClampStats, };
 
 export type ChromaGuardDiagnostics = { 
 /**
@@ -434,7 +461,24 @@ mean_chroma_shift: number,
 /**
  * Maximum chroma shift magnitude.
  */
-max_chroma_shift: number, };
+max_chroma_shift: number, 
+/**
+ * Minimum effective threshold across all pixels.
+ */
+effective_threshold_min?: number | null, 
+/**
+ * Mean effective threshold across all pixels.
+ */
+effective_threshold_mean?: number | null, 
+/**
+ * Maximum effective threshold across all pixels.
+ */
+effective_threshold_max?: number | null, 
+/**
+ * Per-region-class clamp statistics.
+ * Present only when a region map was available (ContentAdaptive strategy).
+ */
+per_region?: ChromaPerRegionDiagnostics | null, };
 
 export type EvaluatorConfig = "heuristic";
 
@@ -587,7 +631,18 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   },
   "experimental_sharpen_mode": {
     "luma_plus_chroma_guard": {
-      "max_chroma_shift": 0.1
+      "max_chroma_shift": 0.1,
+      "chroma_region_factors": {
+        "flat": 1.0,
+        "textured": 0.9,
+        "strong_edge": 0.65,
+        "microtexture": 0.8,
+        "risky_halo_zone": 0.45
+      },
+      "saturation_guard": {
+        "min_scale": 0.6,
+        "gamma": 1.5
+      }
     }
   },
   "evaluator_config": "heuristic"
@@ -599,4 +654,17 @@ export const DEFAULT_KERNEL_TABLE: KernelTable = {
   "strong_edge": "lanczos3",
   "microtexture": "catmull_rom",
   "risky_halo_zone": "mitchell_netravali"
+};
+
+export const DEFAULT_CHROMA_REGION_FACTORS: ChromaRegionFactors = {
+  "flat": 1.0,
+  "textured": 0.9,
+  "strong_edge": 0.65,
+  "microtexture": 0.8,
+  "risky_halo_zone": 0.45
+};
+
+export const DEFAULT_SATURATION_GUARD_PARAMS: SaturationGuardParams = {
+  "min_scale": 0.6,
+  "gamma": 1.5
 };

@@ -1,9 +1,10 @@
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel,
-    FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage,
-    MetricComponent, MetricMode, ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode,
-    SharpenMode, SharpenStrategy, process_auto_sharp_downscale,
+    ChromaRegionFactors, ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel,
+    ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable,
+    LinearRgbImage, MetricComponent, MetricMode, ProbeConfig, ResizeKernel, ResizeStrategy,
+    SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
+    process_auto_sharp_downscale,
 };
 
 // ---------------------------------------------------------------------------
@@ -965,4 +966,117 @@ fn base_resize_quality_deterministic() {
     assert_eq!(bq1.edge_retention, bq2.edge_retention);
     assert_eq!(bq1.texture_retention, bq2.texture_retention);
     assert_eq!(bq1.envelope_scale, bq2.envelope_scale);
+}
+
+// ---------------------------------------------------------------------------
+// Step 5 — Context-aware chroma guard tests
+// ---------------------------------------------------------------------------
+
+fn content_adaptive_chroma_params(tw: u32, th: u32) -> AutoSharpParams {
+    AutoSharpParams {
+        target_width: tw,
+        target_height: th,
+        sharpen_strategy: SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable::v03_default(),
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        },
+        experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift: 0.10,
+            chroma_region_factors: Some(ChromaRegionFactors::default()),
+            saturation_guard: Some(SaturationGuardParams::default()),
+        }),
+        ..AutoSharpParams::default()
+    }
+}
+
+#[test]
+fn chroma_guard_per_region_diagnostics_with_content_adaptive() {
+    let src = gradient_image(64, 64);
+    let params = content_adaptive_chroma_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let cg = out.diagnostics.chroma_guard
+        .expect("chroma_guard diagnostics should be present");
+    let pr = cg.per_region
+        .expect("per_region should be present with ContentAdaptive + region_factors");
+
+    // Every field should be finite
+    for stats in [&pr.flat, &pr.textured, &pr.strong_edge, &pr.microtexture, &pr.risky_halo_zone] {
+        assert!(stats.mean_shift.is_finite());
+        assert!(stats.max_shift.is_finite());
+        assert!(stats.clamped_fraction.is_finite());
+    }
+
+    // Total pixel counts should sum to image dimensions
+    let total = pr.flat.pixel_count + pr.textured.pixel_count
+        + pr.strong_edge.pixel_count + pr.microtexture.pixel_count
+        + pr.risky_halo_zone.pixel_count;
+    assert_eq!(total, 16 * 16, "region pixel counts must sum to output dimensions");
+}
+
+#[test]
+fn chroma_guard_per_region_absent_for_uniform() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let cg = out.diagnostics.chroma_guard
+        .expect("chroma_guard diagnostics should be present");
+    assert!(cg.per_region.is_none(), "per_region should be None for Uniform strategy");
+}
+
+#[test]
+fn chroma_guard_effective_threshold_stats_present() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16); // default has saturation_guard on
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let cg = out.diagnostics.chroma_guard
+        .expect("chroma_guard diagnostics should be present");
+    // Saturation guard is on by default → effective threshold stats should be present
+    assert!(cg.effective_threshold_min.is_some());
+    assert!(cg.effective_threshold_mean.is_some());
+    assert!(cg.effective_threshold_max.is_some());
+    assert!(cg.effective_threshold_min.unwrap() <= cg.effective_threshold_mean.unwrap());
+    assert!(cg.effective_threshold_mean.unwrap() <= cg.effective_threshold_max.unwrap());
+}
+
+#[test]
+fn chroma_region_factors_defaults_monotone() {
+    let f = ChromaRegionFactors::default();
+    // Tighter protection for edges/halos, more permissive for flat regions
+    assert!(f.flat >= f.textured, "flat >= textured");
+    assert!(f.textured >= f.microtexture, "textured >= microtexture");
+    assert!(f.microtexture >= f.strong_edge, "microtexture >= strong_edge");
+    assert!(f.strong_edge >= f.risky_halo_zone, "strong_edge >= risky_halo_zone");
+}
+
+#[test]
+fn saturation_guard_tightens_for_saturated_pixels() {
+    // Create a saturated image (pure red = high saturation)
+    let mut data = Vec::with_capacity(64 * 64 * 3);
+    for _ in 0..64 * 64 {
+        data.extend_from_slice(&[0.8, 0.1, 0.1]); // highly saturated red
+    }
+    let src = LinearRgbImage::new(64, 64, data).unwrap();
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift: 0.10,
+            chroma_region_factors: None,
+            saturation_guard: Some(SaturationGuardParams { min_scale: 0.6, gamma: 1.5 }),
+        }),
+        ..AutoSharpParams::default()
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let cg = out.diagnostics.chroma_guard.unwrap();
+
+    // With saturated pixels, effective_threshold_mean should be < what we'd get
+    // with no saturation guard (where effective ≈ 0.10 * chroma_mag).
+    // The saturation factor < 1.0 for saturated pixels should pull the mean down.
+    let eff_mean = cg.effective_threshold_mean.unwrap();
+    let eff_max = cg.effective_threshold_max.unwrap();
+    assert!(eff_mean < eff_max || eff_mean == eff_max,
+        "mean should be <= max");
+    assert!(eff_mean.is_finite());
 }

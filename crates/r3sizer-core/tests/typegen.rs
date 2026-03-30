@@ -12,14 +12,15 @@ use ts_rs::{Config, TS};
 #[allow(deprecated)] // MetricBreakdown.aggregate
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    BaseResizeQuality, ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
+    ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
     MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbePassDiagnostics, ProbeSample,
     QualityEvaluation, Recommendation, RecommendationKind, RegionClass, RegionCoverage,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    Severity, SharpenMode, SharpenStrategy, StageTiming,
+    SaturationGuardParams, Severity, SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -92,8 +93,12 @@ fn export_typescript_bindings() {
             KernelTable::decl(&cfg),
             ResizeStrategy::decl(&cfg),
             ResizeStrategyDiagnostics::decl(&cfg),
+            ChromaRegionFactors::decl(&cfg),
+            SaturationGuardParams::decl(&cfg),
             ExperimentalSharpenMode::decl(&cfg),
             EvaluationColorSpace::decl(&cfg),
+            ChromaRegionClampStats::decl(&cfg),
+            ChromaPerRegionDiagnostics::decl(&cfg),
             ChromaGuardDiagnostics::decl(&cfg),
             EvaluatorConfig::decl(&cfg),
             ImageFeatures::decl(&cfg),
@@ -158,8 +163,22 @@ fn export_typescript_bindings() {
     let default_kernel_table =
         serde_json::to_string_pretty(&KernelTable::default()).unwrap();
     output.push_str(&format!(
-        "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n",
+        "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n\n",
         default_kernel_table
+    ));
+
+    let default_chroma_factors =
+        serde_json::to_string_pretty(&ChromaRegionFactors::default()).unwrap();
+    output.push_str(&format!(
+        "export const DEFAULT_CHROMA_REGION_FACTORS: ChromaRegionFactors = {};\n\n",
+        default_chroma_factors
+    ));
+
+    let default_sat_guard =
+        serde_json::to_string_pretty(&SaturationGuardParams::default()).unwrap();
+    output.push_str(&format!(
+        "export const DEFAULT_SATURATION_GUARD_PARAMS: SaturationGuardParams = {};\n",
+        default_sat_guard
     ));
 
     // Write to web directory
