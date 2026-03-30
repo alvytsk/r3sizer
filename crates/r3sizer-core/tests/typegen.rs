@@ -16,10 +16,10 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbeSample, QualityEvaluation,
-    Recommendation, RecommendationKind, RegionClass, RegionCoverage, ResizeKernel,
-    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, Severity,
-    SharpenMode, SharpenStrategy, StageTiming,
+    MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbePassDiagnostics, ProbeSample,
+    QualityEvaluation, Recommendation, RecommendationKind, RegionClass, RegionCoverage,
+    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
+    Severity, SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -78,6 +78,7 @@ fn export_typescript_bindings() {
         StageTiming::decl(&cfg),
         RegionCoverage::decl(&cfg),
         AdaptiveValidationOutcome::decl(&cfg),
+        ProbePassDiagnostics::decl(&cfg),
         AutoSharpDiagnostics::decl(&cfg),
     ];
 

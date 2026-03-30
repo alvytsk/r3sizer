@@ -200,10 +200,32 @@ pub enum ProbeConfig {
     Range { min: f32, max: f32, count: usize },
     /// Caller-supplied explicit list (must have >= 4 distinct, positive values).
     Explicit(Vec<f32>),
+    /// Two-pass adaptive strategy: coarse scan over the full range followed by
+    /// dense probing in a narrow window around the estimated P(s) = P0 crossing.
+    ///
+    /// The coarse pass brackets the crossing; the dense pass refines it.
+    /// All collected samples are merged and fed into the existing cubic fit path.
+    TwoPass {
+        /// Number of uniformly-spaced probes in the first (coarse) pass. Min: 3.
+        coarse_count: usize,
+        /// Lower bound of the coarse scan range (exclusive, must be > 0).
+        coarse_min: f32,
+        /// Upper bound of the coarse scan range (must be > `coarse_min`).
+        coarse_max: f32,
+        /// Number of probes in the second (dense) pass. Min: 2.
+        dense_count: usize,
+        /// How far to extend the crossing bracket on each side when building the
+        /// dense window, expressed as a fraction of the bracket width.
+        /// E.g. `0.5` extends by half the coarse interval on each side.
+        window_margin: f32,
+    },
 }
 
 impl ProbeConfig {
-    /// Resolve to a sorted `Vec<f32>`.
+    /// Resolve static configs (`Range`, `Explicit`) to a sorted `Vec<f32>`.
+    ///
+    /// Returns `Err` for `TwoPass` — that variant requires measurement between
+    /// passes and is handled directly in the pipeline.
     pub fn resolve(&self) -> Result<Vec<f32>, CoreError> {
         let mut values = match self {
             ProbeConfig::Range { min, max, count } => {
@@ -235,10 +257,35 @@ impl ProbeConfig {
                 }
                 v.clone()
             }
+            ProbeConfig::TwoPass { .. } => {
+                return Err(CoreError::InvalidParams(
+                    "TwoPass probe config is handled by the pipeline; use AutoSharpParams directly".into(),
+                ));
+            }
         };
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         Ok(values)
     }
+}
+
+/// Diagnostics from the two-pass adaptive probe placement strategy.
+///
+/// Present only when `ProbeConfig::TwoPass` was used; `None` for static configs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ProbePassDiagnostics {
+    /// Number of probes fired in the coarse pass.
+    pub coarse_count: usize,
+    /// Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
+    pub coarse_min: f32,
+    /// Coarse pass range upper bound (= `ProbeConfig::TwoPass::coarse_max`).
+    pub coarse_max: f32,
+    /// Number of probes fired in the dense pass.
+    pub dense_count: usize,
+    /// Dense window lower bound selected after coarse bracket search.
+    pub dense_min: f32,
+    /// Dense window upper bound selected after coarse bracket search.
+    pub dense_max: f32,
 }
 
 /// Polynomial fit strategy.
@@ -369,7 +416,26 @@ impl AutoSharpParams {
                 ));
             }
         }
-        self.probe_strengths.resolve()?;
+        match &self.probe_strengths {
+            ProbeConfig::TwoPass { coarse_count, coarse_min, coarse_max, dense_count, window_margin } => {
+                if *coarse_count < 3 {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_count must be >= 3".into()));
+                }
+                if *dense_count < 2 {
+                    return Err(CoreError::InvalidParams("TwoPass dense_count must be >= 2".into()));
+                }
+                if *coarse_min <= 0.0 {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be positive".into()));
+                }
+                if coarse_min >= coarse_max {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be less than coarse_max".into()));
+                }
+                if *window_margin < 0.0 {
+                    return Err(CoreError::InvalidParams("TwoPass window_margin must be >= 0".into()));
+                }
+            }
+            _ => { self.probe_strengths.resolve()?; }
+        }
         Ok(())
     }
 }
@@ -980,6 +1046,11 @@ pub struct AutoSharpDiagnostics {
     /// Actionable recommendations derived from pipeline diagnostics.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<Recommendation>,
+
+    // --- Two-pass probe placement (step 3) ---
+    /// Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_pass_diagnostics: Option<ProbePassDiagnostics>,
 }
 
 /// Return type of the top-level pipeline function.

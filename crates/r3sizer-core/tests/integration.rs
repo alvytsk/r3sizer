@@ -1,8 +1,8 @@
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel, FallbackReason,
-    FitStrategy, GainTable, ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig,
-    SelectionMode, SharpenMode, SharpenStrategy,
+    FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage, MetricComponent, MetricMode,
+    ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode, SharpenMode, SharpenStrategy,
     process_auto_sharp_downscale,
 };
 
@@ -668,4 +668,223 @@ fn content_adaptive_tight_budget_triggers_backoff_or_failure() {
             assert!(*iterations > 0);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: content-adaptive resize (resize_strategy path)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uniform_resize_strategy_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    for kernel in [
+        ResizeKernel::Lanczos3,
+        ResizeKernel::CatmullRom,
+        ResizeKernel::Gaussian,
+        ResizeKernel::MitchellNetravali,
+    ] {
+        let params = AutoSharpParams {
+            resize_strategy: Some(ResizeStrategy::Uniform { kernel }),
+            ..default_params(16, 16)
+        };
+        let out = process_auto_sharp_downscale(&src, &params).unwrap();
+        assert_eq!(out.image.width(), 16);
+        let diag = out
+            .diagnostics
+            .resize_strategy_diagnostics
+            .expect("resize_strategy_diagnostics should be Some for explicit strategy");
+        assert_eq!(diag.kernels_used, vec![kernel]);
+        let total: u32 = diag.per_kernel_pixel_count.values().sum();
+        assert_eq!(total, 16 * 16);
+    }
+}
+
+#[test]
+fn content_adaptive_resize_happy_path() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.image.height(), 16);
+    assert!(out.image.pixels().iter().all(|v| v.is_finite()));
+    let diag = out
+        .diagnostics
+        .resize_strategy_diagnostics
+        .expect("resize_strategy_diagnostics should be Some for content-adaptive");
+    assert!(!diag.kernels_used.is_empty());
+    let total: u32 = diag.per_kernel_pixel_count.values().sum();
+    assert_eq!(total, 16 * 16);
+}
+
+#[test]
+fn content_adaptive_resize_deterministic() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out1.image.pixels(), out2.image.pixels());
+    assert_eq!(
+        out1.diagnostics.selected_strength,
+        out2.diagnostics.selected_strength,
+    );
+}
+
+#[test]
+fn content_adaptive_resize_step_edge_uses_multiple_kernels() {
+    // Step edge (flat left, bright right) should trigger >= 2 kernels from the
+    // default KernelTable (flat=Gaussian vs edge=Lanczos3).
+    let w = 64_u32;
+    let h = 32_u32;
+    let mut data = vec![0.0_f32; (w * h * 3) as usize];
+    for y in 0..h {
+        for x in (w / 2)..w {
+            let idx = ((y * w + x) * 3) as usize;
+            data[idx] = 1.0;
+            data[idx + 1] = 1.0;
+            data[idx + 2] = 1.0;
+        }
+    }
+    let src = LinearRgbImage::new(w, h, data).unwrap();
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 8)
+    };
+    let diag = process_auto_sharp_downscale(&src, &params)
+        .unwrap()
+        .diagnostics
+        .resize_strategy_diagnostics
+        .unwrap();
+    assert!(
+        diag.kernels_used.len() >= 2,
+        "step-edge image should use >= 2 kernels, got {:?}",
+        diag.kernels_used,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: two-pass adaptive probe placement
+// ---------------------------------------------------------------------------
+
+fn two_pass_params(tw: u32, th: u32) -> AutoSharpParams {
+    AutoSharpParams {
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 5,
+            coarse_min: 0.05,
+            coarse_max: 3.0,
+            dense_count: 4,
+            window_margin: 0.5,
+        },
+        ..default_params(tw, th)
+    }
+}
+
+#[test]
+fn two_pass_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    let out = process_auto_sharp_downscale(&src, &two_pass_params(16, 16)).unwrap();
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.image.height(), 16);
+    for &v in out.image.pixels() {
+        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1]");
+    }
+    assert!(out.diagnostics.selected_strength > 0.0);
+    assert!(out.diagnostics.measured_artifact_ratio.is_finite());
+}
+
+#[test]
+fn two_pass_diagnostics_present() {
+    let src = gradient_image(64, 64);
+    let out = process_auto_sharp_downscale(&src, &two_pass_params(16, 16)).unwrap();
+    let pp = out
+        .diagnostics
+        .probe_pass_diagnostics
+        .expect("probe_pass_diagnostics must be Some for TwoPass config");
+    assert_eq!(pp.coarse_count, 5);
+    assert_eq!(pp.dense_count, 4);
+    assert!(pp.dense_min >= pp.coarse_min);
+    assert!(pp.dense_max <= pp.coarse_max);
+    assert!(pp.dense_min < pp.dense_max);
+}
+
+#[test]
+fn two_pass_dense_window_within_coarse_range() {
+    // Dense window must be a sub-interval of the coarse range.
+    let src = checkerboard(32, 32);
+    let out = process_auto_sharp_downscale(&src, &two_pass_params(8, 8)).unwrap();
+    let pp = out.diagnostics.probe_pass_diagnostics.unwrap();
+    assert!(
+        pp.dense_min >= pp.coarse_min && pp.dense_max <= pp.coarse_max,
+        "dense window [{}, {}] not within coarse range [{}, {}]",
+        pp.dense_min, pp.dense_max, pp.coarse_min, pp.coarse_max,
+    );
+}
+
+#[test]
+fn two_pass_deterministic() {
+    let src = gradient_image(64, 64);
+    let params = two_pass_params(16, 16);
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out1.image.pixels(), out2.image.pixels());
+    assert_eq!(
+        out1.diagnostics.selected_strength,
+        out2.diagnostics.selected_strength,
+    );
+    assert_eq!(
+        out1.diagnostics.probe_pass_diagnostics.unwrap().dense_min,
+        out2.diagnostics.probe_pass_diagnostics.unwrap().dense_min,
+    );
+}
+
+#[test]
+fn two_pass_probe_count_gte_static_minimum() {
+    // Merged sample count must satisfy the >=4 minimum needed by the cubic fit.
+    let src = gradient_image(64, 64);
+    let out = process_auto_sharp_downscale(&src, &two_pass_params(16, 16)).unwrap();
+    assert!(
+        out.diagnostics.probe_samples.len() >= 4,
+        "need >= 4 probe samples for cubic fit, got {}",
+        out.diagnostics.probe_samples.len(),
+    );
+}
+
+#[test]
+fn two_pass_validation_rejects_bad_params() {
+    let base = AutoSharpParams { target_width: 16, target_height: 16, ..AutoSharpParams::default() };
+
+    // coarse_count too small
+    let p = AutoSharpParams {
+        probe_strengths: ProbeConfig::TwoPass { coarse_count: 2, coarse_min: 0.05, coarse_max: 3.0, dense_count: 4, window_margin: 0.5 },
+        ..base.clone()
+    };
+    assert!(p.validate().is_err());
+
+    // dense_count too small
+    let p = AutoSharpParams {
+        probe_strengths: ProbeConfig::TwoPass { coarse_count: 5, coarse_min: 0.05, coarse_max: 3.0, dense_count: 1, window_margin: 0.5 },
+        ..base.clone()
+    };
+    assert!(p.validate().is_err());
+
+    // coarse_min >= coarse_max
+    let p = AutoSharpParams {
+        probe_strengths: ProbeConfig::TwoPass { coarse_count: 5, coarse_min: 2.0, coarse_max: 1.0, dense_count: 4, window_margin: 0.5 },
+        ..base.clone()
+    };
+    assert!(p.validate().is_err());
 }

@@ -481,6 +481,7 @@ mod tests {
             chroma_guard: None,
             evaluator_result: None,
             recommendations: Vec::new(),
+            probe_pass_diagnostics: None,
         }
     }
 

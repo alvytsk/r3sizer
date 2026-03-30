@@ -26,8 +26,8 @@ use crate::{
     solve::{find_sharpness, find_sharpness_direct},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, MetricWeights, ProbeSample, ProcessOutput, RegionCoverage,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
+    MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
+    RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
     StageTiming, CoreError,
 };
 
@@ -150,7 +150,6 @@ pub fn process_auto_sharp_downscale_with_progress(
     // -------------------------------------------------------------------
     on_stage("probing");
     let t0 = Instant::now();
-    let strengths = params.probe_strengths.resolve()?;
 
     // Build the Gaussian kernel once — sigma is constant across all probes.
     let kernel = make_kernel(params.sharpen_sigma)?;
@@ -171,25 +170,44 @@ pub fn process_auto_sharp_downscale_with_progress(
     let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
         eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
 
-    let probe_samples = probe_strengths(
-        &strengths,
-        &base,
-        base_luminance.as_deref(),
-        params.sharpen_mode,
-        params.metric_mode,
-        params.artifact_metric,
-        baseline_artifact_ratio,
-        &kernel,
-        &params.metric_weights,
-        metric_override,
-    )?;
+    // Dispatch: two-pass adaptive placement or static resolve.
+    let (probe_samples, probe_pass_diagnostics) = match &params.probe_strengths {
+        ProbeConfig::TwoPass {
+            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
+        } => {
+            run_two_pass_probing(
+                *coarse_count, *coarse_min, *coarse_max,
+                *dense_count, *window_margin,
+                params.target_artifact_ratio,
+                &base, base_luminance.as_deref(),
+                params.sharpen_mode, params.metric_mode, params.artifact_metric,
+                baseline_artifact_ratio, &kernel, &params.metric_weights, metric_override,
+            )?
+        }
+        _ => {
+            let strengths = params.probe_strengths.resolve()?;
+            let samples = probe_strengths(
+                &strengths,
+                &base,
+                base_luminance.as_deref(),
+                params.sharpen_mode,
+                params.metric_mode,
+                params.artifact_metric,
+                baseline_artifact_ratio,
+                &kernel,
+                &params.metric_weights,
+                metric_override,
+            )?;
+            (samples, None)
+        }
+    };
     let probing_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
     // 6–7. Fit + solve (or direct search)
     // -------------------------------------------------------------------
-    let s_min = strengths.first().copied().unwrap_or(0.05) as f64;
-    let s_max = strengths.last().copied().unwrap_or(3.0) as f64;
+    let s_min = probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05);
+    let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
     let p0 = params.target_artifact_ratio as f64;
 
     on_stage("fitting");
@@ -497,6 +515,7 @@ pub fn process_auto_sharp_downscale_with_progress(
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
         recommendations: Vec::new(),
+        probe_pass_diagnostics,
     };
 
     diagnostics.recommendations =
@@ -914,4 +933,116 @@ pub fn to_linear_inplace(img: &mut LinearRgbImage) {
 /// file encoding.
 pub fn to_srgb_inplace(img: &mut LinearRgbImage) {
     color::image_linear_to_srgb(img);
+}
+
+// ---------------------------------------------------------------------------
+// Two-pass adaptive probe placement (step 3)
+// ---------------------------------------------------------------------------
+
+/// Build `count` evenly-spaced values in `[lo, hi]`.
+fn linspace(lo: f32, hi: f32, count: usize) -> Vec<f32> {
+    if count == 0 {
+        return vec![];
+    }
+    if count == 1 {
+        return vec![lo];
+    }
+    (0..count)
+        .map(|i| lo + (hi - lo) * (i as f32) / ((count - 1) as f32))
+        .collect()
+}
+
+/// Given coarse probe results, find the dense window that brackets the P0 crossing.
+///
+/// Scans for the first upward crossing of `p0` in `metric_value` order.
+/// Extends the crossing interval by `margin` on each side, clamped to
+/// `[global_min, global_max]`.
+///
+/// Falls back to the upper or lower 30% of the range when no crossing is found.
+fn find_dense_window(
+    samples: &[ProbeSample],
+    p0: f32,
+    global_min: f32,
+    global_max: f32,
+    margin: f32,
+) -> (f32, f32) {
+    // Find first interval where metric_value crosses p0 upward.
+    for w in samples.windows(2) {
+        if w[0].metric_value <= p0 && w[1].metric_value > p0 {
+            let interval = (w[1].strength - w[0].strength).max(1e-6);
+            let pad = interval * margin;
+            let lo = (w[0].strength - pad).max(global_min);
+            let hi = (w[1].strength + pad).min(global_max);
+            return (lo, hi);
+        }
+    }
+
+    let span = ((global_max - global_min) * 0.3).max(1e-4);
+    if samples.last().is_some_and(|s| s.metric_value <= p0) {
+        // All probes under budget: concentrate at the upper end.
+        let lo = (global_max - span).max(global_min);
+        (lo, global_max)
+    } else {
+        // All probes over budget (or empty): concentrate at the lower end.
+        let hi = (global_min + span).min(global_max);
+        (global_min, hi)
+    }
+}
+
+/// Two-pass probing: coarse scan over `[coarse_min, coarse_max]`, then dense
+/// probing in a refined window around the estimated P0 crossing.
+///
+/// Returns all samples (coarse + dense, sorted by strength, near-duplicates
+/// removed) plus a `ProbePassDiagnostics` record.
+#[allow(clippy::too_many_arguments)]
+fn run_two_pass_probing(
+    coarse_count: usize,
+    coarse_min: f32,
+    coarse_max: f32,
+    dense_count: usize,
+    window_margin: f32,
+    p0: f32,
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    sharpen_mode: SharpenMode,
+    metric_mode: MetricMode,
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+    kernel: &[f32],
+    weights: &MetricWeights,
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
+    // Phase 1: coarse
+    let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
+    let coarse_samples = probe_strengths(
+        &coarse_strengths, base, base_luminance, sharpen_mode, metric_mode,
+        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+    )?;
+
+    // Locate dense window from coarse results
+    let (dense_lo, dense_hi) =
+        find_dense_window(&coarse_samples, p0, coarse_min, coarse_max, window_margin);
+
+    // Phase 2: dense
+    let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
+    let dense_samples = probe_strengths(
+        &dense_strengths, base, base_luminance, sharpen_mode, metric_mode,
+        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+    )?;
+
+    // Merge, sort, remove near-duplicates (within 1e-5 of each other)
+    let mut all: Vec<ProbeSample> = coarse_samples;
+    all.extend(dense_samples);
+    all.sort_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal));
+    all.dedup_by(|a, b| (a.strength - b.strength).abs() < 1e-5);
+
+    let diag = ProbePassDiagnostics {
+        coarse_count,
+        coarse_min,
+        coarse_max,
+        dense_count,
+        dense_min: dense_lo,
+        dense_max: dense_hi,
+    };
+    Ok((all, Some(diag)))
 }

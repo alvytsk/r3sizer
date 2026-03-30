@@ -39,7 +39,29 @@ export type GainTable = { flat: number, textured: number, strong_edge: number, m
 
 export type ClassificationParams = { gradient_low_threshold: number, gradient_high_threshold: number, variance_low_threshold: number, variance_high_threshold: number, variance_window: number, };
 
-export type ProbeConfig = { "Range": { min: number, max: number, count: number, } } | { "Explicit": Array<number> };
+export type ProbeConfig = { "Range": { min: number, max: number, count: number, } } | { "Explicit": Array<number> } | { "TwoPass": { 
+/**
+ * Number of uniformly-spaced probes in the first (coarse) pass. Min: 3.
+ */
+coarse_count: number, 
+/**
+ * Lower bound of the coarse scan range (exclusive, must be > 0).
+ */
+coarse_min: number, 
+/**
+ * Upper bound of the coarse scan range (must be > `coarse_min`).
+ */
+coarse_max: number, 
+/**
+ * Number of probes in the second (dense) pass. Min: 2.
+ */
+dense_count: number, 
+/**
+ * How far to extend the crossing bracket on each side when building the
+ * dense window, expressed as a fraction of the bracket width.
+ * E.g. `0.5` extends by half the coarse interval on each side.
+ */
+window_margin: number, } };
 
 export type SharpenStrategy = { "strategy": "uniform" } | { "strategy": "content_adaptive", classification: ClassificationParams, gain_table: GainTable, 
 /**
@@ -230,6 +252,32 @@ export type RegionCoverage = { total_pixels: number, flat: number, textured: num
 
 export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_metric: number, } | { "outcome": "passed_after_backoff", iterations: number, final_scale: number, measured_metric: number, } | { "outcome": "failed_budget_exceeded", iterations: number, best_scale: number, best_metric: number, };
 
+export type ProbePassDiagnostics = { 
+/**
+ * Number of probes fired in the coarse pass.
+ */
+coarse_count: number, 
+/**
+ * Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
+ */
+coarse_min: number, 
+/**
+ * Coarse pass range upper bound (= `ProbeConfig::TwoPass::coarse_max`).
+ */
+coarse_max: number, 
+/**
+ * Number of probes fired in the dense pass.
+ */
+dense_count: number, 
+/**
+ * Dense window lower bound selected after coarse bracket search.
+ */
+dense_min: number, 
+/**
+ * Dense window upper bound selected after coarse bracket search.
+ */
+dense_max: number, };
+
 export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, target_artifact_ratio: number, 
 /**
  * Artifact ratio of the downscaled image before any sharpening is applied.
@@ -302,7 +350,11 @@ evaluator_result?: QualityEvaluation | null,
 /**
  * Actionable recommendations derived from pipeline diagnostics.
  */
-recommendations?: Array<Recommendation>, };
+recommendations?: Array<Recommendation>, 
+/**
+ * Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
+ */
+probe_pass_diagnostics?: ProbePassDiagnostics | null, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 
