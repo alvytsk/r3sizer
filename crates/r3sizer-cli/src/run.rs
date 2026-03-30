@@ -1,7 +1,7 @@
 /// Core run logic: load → process → save → diagnostics.
 use anyhow::{bail, Context, Result};
 
-use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig, SharpenStrategy};
+use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
 use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
@@ -26,11 +26,22 @@ pub fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u3
 }
 
 /// Build pipeline params from CLI args + resolved dimensions.
+/// If `--preset` is set, uses the named preset; CLI flags override where specified.
 pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSharpParams {
+    // If a preset is specified, start from its configuration.
+    if let Some(ref name) = args.preset {
+        match crate::presets::preset_params(name, target_width, target_height) {
+            Ok(params) => return params,
+            Err(e) => {
+                eprintln!("Warning: {e}; falling back to manual configuration");
+            }
+        }
+    }
+
     let probe_strengths = if let Some(ref strengths) = args.probe_strengths {
         ProbeConfig::Explicit(strengths.clone())
     } else {
-        ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0])
+        AutoSharpParams::default().probe_strengths
     };
 
     let metric_weights = if let Some(ref w) = args.metric_weights {
@@ -64,7 +75,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
         selection_policy: args.selection_policy.into(),
-        sharpen_strategy: SharpenStrategy::default(),
+        // Inherit sharpen_strategy, chroma guard, and evaluator from default (Photo).
         ..Default::default()
     }
 }

@@ -26,8 +26,8 @@ use crate::{
     solve::{find_sharpness_with_policy, find_sharpness_direct_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, MetricWeights, ProbeSample, ProcessOutput, RegionCoverage,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
+    MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
+    RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
     StageTiming, CoreError,
 };
 
@@ -104,6 +104,14 @@ pub fn process_auto_sharp_downscale_with_progress(
     let resize_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
+    // 2.5. Base resize quality scoring (step 4)
+    // -------------------------------------------------------------------
+    let t0 = Instant::now();
+    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled);
+    let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
+    let base_quality_us = t0.elapsed().as_micros() as u64;
+
+    // -------------------------------------------------------------------
     // 3. Optional contrast leveling
     // -------------------------------------------------------------------
     let t0 = Instant::now();
@@ -116,16 +124,16 @@ pub fn process_auto_sharp_downscale_with_progress(
     // 2.5. Region classification (ContentAdaptive only)
     // -------------------------------------------------------------------
     let t0 = Instant::now();
-    let (gain_map, region_coverage, classification_us) =
+    let (gain_map, region_map, region_coverage, classification_us) =
         match &params.sharpen_strategy {
             SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
                 let rmap = classify(&base, classification);
                 let gmap = gain_map_from_region_map(&rmap, gain_table);
                 let cov = RegionCoverage::from_region_map(&rmap);
                 let us = t0.elapsed().as_micros() as u64;
-                (Some(gmap), Some(cov), Some(us))
+                (Some(gmap), Some(rmap), Some(cov), Some(us))
             }
-            SharpenStrategy::Uniform => (None, None, None),
+            SharpenStrategy::Uniform => (None, None, None, None),
         };
 
     // -------------------------------------------------------------------
@@ -150,7 +158,6 @@ pub fn process_auto_sharp_downscale_with_progress(
     // -------------------------------------------------------------------
     on_stage("probing");
     let t0 = Instant::now();
-    let strengths = params.probe_strengths.resolve()?;
 
     // Build the Gaussian kernel once — sigma is constant across all probes.
     let kernel = make_kernel(params.sharpen_sigma)?;
@@ -171,26 +178,52 @@ pub fn process_auto_sharp_downscale_with_progress(
     let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
         eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
 
-    let probe_samples = probe_strengths(
-        &strengths,
-        &base,
-        base_luminance.as_deref(),
-        params.sharpen_mode,
-        params.metric_mode,
-        params.artifact_metric,
-        baseline_artifact_ratio,
-        &kernel,
-        &params.metric_weights,
-        metric_override,
-    )?;
+    // Dispatch: two-pass adaptive placement or static resolve.
+    let (probe_samples, probe_pass_diagnostics) = match &params.probe_strengths {
+        ProbeConfig::TwoPass {
+            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
+        } => {
+            run_two_pass_probing(
+                *coarse_count, *coarse_min, *coarse_max,
+                *dense_count, *window_margin,
+                effective_p0,
+                &base, base_luminance.as_deref(),
+                params.sharpen_mode, params.metric_mode, params.artifact_metric,
+                baseline_artifact_ratio, &kernel, &params.metric_weights, metric_override,
+            )?
+        }
+        _ => {
+            let strengths = params.probe_strengths.resolve()?;
+            let samples = probe_strengths(
+                &strengths,
+                &base,
+                base_luminance.as_deref(),
+                params.sharpen_mode,
+                params.metric_mode,
+                params.artifact_metric,
+                baseline_artifact_ratio,
+                &kernel,
+                &params.metric_weights,
+                metric_override,
+            )?;
+            (samples, None)
+        }
+    };
     let probing_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
     // 6–7. Fit + solve (or direct search)
     // -------------------------------------------------------------------
-    let s_min = strengths.first().copied().unwrap_or(0.05) as f64;
-    let s_max = strengths.last().copied().unwrap_or(3.0) as f64;
-    let p0 = params.target_artifact_ratio as f64;
+    // In RelativeToBase mode P(0)=0 < P0 is always true, so roots below the first
+    // probe are physically valid. Allow s_min=0 so the solver can find crossings
+    // that fall between the implicit anchor and the first non-zero probe.
+    let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
+        0.0_f64
+    } else {
+        probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05)
+    };
+    let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
+    let p0 = effective_p0 as f64;
 
     on_stage("fitting");
 
@@ -201,7 +234,12 @@ pub fn process_auto_sharp_downscale_with_progress(
         .map(|ps| (ps.strength as f64, ps.metric_value as f64))
         .collect();
     if matches!(params.metric_mode, MetricMode::RelativeToBase) {
-        fit_data.insert(0, (0.0, 0.0));
+        // Prepend the theoretical anchor P(0)=0 unless the first probe is already
+        // at s=0 (adding a duplicate row degrades the Vandermonde fit quality).
+        let first_s = probe_samples.first().map(|p| p.strength).unwrap_or(1.0);
+        if first_s > 1e-6 {
+            fit_data.insert(0, (0.0, 0.0));
+        }
     }
 
     // Monotonicity check on probe samples.
@@ -212,7 +250,7 @@ pub fn process_auto_sharp_downscale_with_progress(
         FitStrategy::DirectSearch => {
             let result = find_sharpness_direct_with_policy(
                 &probe_samples,
-                params.target_artifact_ratio,
+                effective_p0,
                 params.selection_policy,
             )?;
             (result, FitStatus::Skipped, None, None)
@@ -224,12 +262,24 @@ pub fn process_auto_sharp_downscale_with_progress(
                     let result = find_sharpness_with_policy(
                         &poly, p0, s_min, s_max, &probe_samples, params.selection_policy,
                     )?;
-                    (result, FitStatus::Success, Some(poly), Some(quality))
+                    // R² quality gate: if the cubic fit is poor, the polynomial
+                    // may produce false crossings (e.g. step-like P(s) curves).
+                    // Fall back to direct search; keep fit data for diagnostics.
+                    if quality.r_squared < 0.85
+                        && matches!(result.selection_mode, SelectionMode::PolynomialRoot)
+                    {
+                        let direct = find_sharpness_direct_with_policy(
+                            &probe_samples, effective_p0, params.selection_policy,
+                        )?;
+                        (direct, FitStatus::Success, Some(poly), Some(quality))
+                    } else {
+                        (result, FitStatus::Success, Some(poly), Some(quality))
+                    }
                 }
                 Err(fit_err) => {
                     let result = find_sharpness_direct_with_policy(
                         &probe_samples,
-                        params.target_artifact_ratio,
+                        effective_p0,
                         params.selection_policy,
                     )?;
                     (
@@ -282,7 +332,7 @@ pub fn process_auto_sharp_downscale_with_progress(
     // Budget reachability
     // -------------------------------------------------------------------
     let budget_reachable_baseline = match params.metric_mode {
-        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= params.target_artifact_ratio,
+        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= effective_p0,
         MetricMode::RelativeToBase => true, // by construction, relative starts at 0
     };
     let budget_reachable = budget_reachable_baseline
@@ -303,17 +353,37 @@ pub fn process_auto_sharp_downscale_with_progress(
         &fit_status,
         budget_reachable_baseline,
         monotonic,
+        r_squared_ok,
         loo_stable,
         params.fit_strategy,
         &solve_result.crossing_status,
     );
 
     // -------------------------------------------------------------------
+    // 7.5 Evaluator strength cap (runs before final sharpening)
+    // -------------------------------------------------------------------
+    // When the evaluator is active, ask it for a suggested strength based
+    // on image content features.  If the solver picked higher than the
+    // evaluator recommends, cap it — the evaluator acts as a perceptual
+    // safety net that the gamut metric alone cannot provide (e.g. portraits
+    // where gamut excursion stays low but texture/halo damage is visible).
+    let evaluator_cap = match &params.evaluator_config {
+        Some(crate::types::EvaluatorConfig::Heuristic) => {
+            let eval = crate::evaluator::HeuristicEvaluator;
+            crate::evaluator::QualityEvaluator::suggest_strength(&eval, &base, 0.8)
+        }
+        None => None,
+    };
+    let selected_strength = match evaluator_cap {
+        Some(cap) if solve_result.selected_strength > cap => cap,
+        _ => solve_result.selected_strength,
+    };
+
+    // -------------------------------------------------------------------
     // 8. Final sharpening (strategy-dependent)
     // -------------------------------------------------------------------
     on_stage("sharpening");
     let t0 = Instant::now();
-    let selected_strength = solve_result.selected_strength;
 
     // Experimental: chroma guard sharpening overrides the standard path.
     let _chroma_guard_diag;
@@ -336,6 +406,9 @@ pub fn process_auto_sharp_downscale_with_progress(
                 },
                 Some(gm),
             ) => {
+                // When budget is already unreachable (fallback mode), backoff would
+                // only reduce sharpening further without ever meeting P0. Skip it.
+                let effective_max_backoff = if budget_reachable { *max_backoff_iterations } else { 0 };
                 adaptive_sharpen_with_validation(
                     &base,
                     base_luminance.as_deref(),
@@ -343,20 +416,28 @@ pub fn process_auto_sharp_downscale_with_progress(
                     selected_strength,
                     gm,
                     params.sharpen_sigma,
-                    params.target_artifact_ratio,
+                    effective_p0,
                     params.artifact_metric,
                     params.metric_mode,
                     baseline_artifact_ratio,
-                    *max_backoff_iterations,
+                    effective_max_backoff,
                     *backoff_scale_factor,
+                    params.evaluation_color_space,
                 )?
             }
         };
-    // Experimental: if chroma guard is configured, apply it as an override.
+    // Chroma guard: post-process the already-sharpened image.
+    // Compares chroma shift vs. the original base and soft-clamps where needed.
+    // Does NOT re-sharpen — preserves the content-adaptive gain map and backoff.
     {
-        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard { max_chroma_shift }) = params.experimental_sharpen_mode {
-            let (guarded, cg_diag) = crate::chroma_guard::sharpen_with_chroma_guard(
-                &base, selected_strength, params.sharpen_sigma, max_chroma_shift,
+        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift, chroma_region_factors, saturation_guard,
+        }) = &params.experimental_sharpen_mode {
+            let (guarded, cg_diag) = crate::chroma_guard::apply_chroma_guard(
+                &base, &final_image, *max_chroma_shift,
+                region_map.as_ref(),
+                chroma_region_factors.as_ref(),
+                saturation_guard.as_ref(),
             )?;
             final_image = guarded;
             _chroma_guard_diag = Some(cg_diag);
@@ -498,12 +579,16 @@ pub fn process_auto_sharp_downscale_with_progress(
             adaptive_validation_us,
             ingress_us: _ingress_us,
             evaluator_us: _evaluator_us,
+            base_quality_us: Some(base_quality_us),
         },
         input_ingress: _input_ingress_diag,
         resize_strategy_diagnostics: _resize_strategy_diag,
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
         recommendations: Vec::new(),
+        probe_pass_diagnostics,
+        base_resize_quality: Some(base_resize_quality),
+        effective_target_artifact_ratio: effective_p0,
     };
 
     diagnostics.recommendations =
@@ -683,6 +768,7 @@ fn determine_fallback_reason(
     fit_status: &FitStatus,
     budget_reachable_baseline: bool,
     monotonic: bool,
+    r_squared_ok: bool,
     loo_stable: bool,
     fit_strategy: FitStrategy,
     crossing_status: &crate::CrossingStatus,
@@ -700,6 +786,9 @@ fn determine_fallback_reason(
     }
     if matches!(fit_status, FitStatus::Failed { .. }) {
         return Some(FallbackReason::FitFailed);
+    }
+    if !r_squared_ok {
+        return Some(FallbackReason::FitPoorQuality);
     }
     if !monotonic {
         return Some(FallbackReason::MetricNonMonotonic);
@@ -740,14 +829,19 @@ fn adaptive_sharpen_with_validation(
     baseline_artifact_ratio: f32,
     max_backoff: u8,
     backoff_factor: f32,
+    evaluation_color_space: Option<crate::types::EvaluationColorSpace>,
 ) -> Result<(LinearRgbImage, Option<AdaptiveValidationOutcome>, Option<u64>), CoreError> {
     let w = base.width() as usize;
     let h = base.height() as usize;
 
     let measure = |img: &LinearRgbImage| -> f32 {
-        let raw = match artifact_metric {
-            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
-            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+        let raw = if let Some(cs) = evaluation_color_space {
+            crate::chroma_guard::evaluate_in_color_space(img, cs)
+        } else {
+            match artifact_metric {
+                ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+                ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+            }
         };
         compute_metric_value(raw, baseline_artifact_ratio, metric_mode)
     };
@@ -922,4 +1016,116 @@ pub fn to_linear_inplace(img: &mut LinearRgbImage) {
 /// file encoding.
 pub fn to_srgb_inplace(img: &mut LinearRgbImage) {
     color::image_linear_to_srgb(img);
+}
+
+// ---------------------------------------------------------------------------
+// Two-pass adaptive probe placement (step 3)
+// ---------------------------------------------------------------------------
+
+/// Build `count` evenly-spaced values in `[lo, hi]`.
+fn linspace(lo: f32, hi: f32, count: usize) -> Vec<f32> {
+    if count == 0 {
+        return vec![];
+    }
+    if count == 1 {
+        return vec![lo];
+    }
+    (0..count)
+        .map(|i| lo + (hi - lo) * (i as f32) / ((count - 1) as f32))
+        .collect()
+}
+
+/// Given coarse probe results, find the dense window that brackets the P0 crossing.
+///
+/// Scans for the first upward crossing of `p0` in `metric_value` order.
+/// Extends the crossing interval by `margin` on each side, clamped to
+/// `[global_min, global_max]`.
+///
+/// Falls back to the upper or lower 30% of the range when no crossing is found.
+fn find_dense_window(
+    samples: &[ProbeSample],
+    p0: f32,
+    global_min: f32,
+    global_max: f32,
+    margin: f32,
+) -> (f32, f32) {
+    // Find first interval where metric_value crosses p0 upward.
+    for w in samples.windows(2) {
+        if w[0].metric_value <= p0 && w[1].metric_value > p0 {
+            let interval = (w[1].strength - w[0].strength).max(1e-6);
+            let pad = interval * margin;
+            let lo = (w[0].strength - pad).max(global_min);
+            let hi = (w[1].strength + pad).min(global_max);
+            return (lo, hi);
+        }
+    }
+
+    let span = ((global_max - global_min) * 0.3).max(1e-4);
+    if samples.last().is_some_and(|s| s.metric_value <= p0) {
+        // All probes under budget: concentrate at the upper end.
+        let lo = (global_max - span).max(global_min);
+        (lo, global_max)
+    } else {
+        // All probes over budget (or empty): concentrate at the lower end.
+        let hi = (global_min + span).min(global_max);
+        (global_min, hi)
+    }
+}
+
+/// Two-pass probing: coarse scan over `[coarse_min, coarse_max]`, then dense
+/// probing in a refined window around the estimated P0 crossing.
+///
+/// Returns all samples (coarse + dense, sorted by strength, near-duplicates
+/// removed) plus a `ProbePassDiagnostics` record.
+#[allow(clippy::too_many_arguments)]
+fn run_two_pass_probing(
+    coarse_count: usize,
+    coarse_min: f32,
+    coarse_max: f32,
+    dense_count: usize,
+    window_margin: f32,
+    p0: f32,
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    sharpen_mode: SharpenMode,
+    metric_mode: MetricMode,
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+    kernel: &[f32],
+    weights: &MetricWeights,
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
+    // Phase 1: coarse
+    let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
+    let coarse_samples = probe_strengths(
+        &coarse_strengths, base, base_luminance, sharpen_mode, metric_mode,
+        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+    )?;
+
+    // Locate dense window from coarse results
+    let (dense_lo, dense_hi) =
+        find_dense_window(&coarse_samples, p0, coarse_min, coarse_max, window_margin);
+
+    // Phase 2: dense
+    let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
+    let dense_samples = probe_strengths(
+        &dense_strengths, base, base_luminance, sharpen_mode, metric_mode,
+        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+    )?;
+
+    // Merge, sort, remove near-duplicates (within 1e-5 of each other)
+    let mut all: Vec<ProbeSample> = coarse_samples;
+    all.extend(dense_samples);
+    all.sort_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal));
+    all.dedup_by(|a, b| (a.strength - b.strength).abs() < 1e-5);
+
+    let diag = ProbePassDiagnostics {
+        coarse_count,
+        coarse_min,
+        coarse_max,
+        dense_count,
+        dense_min: dense_lo,
+        dense_max: dense_hi,
+    };
+    Ok((all, Some(diag)))
 }

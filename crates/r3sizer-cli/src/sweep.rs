@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use r3sizer_core::SelectionMode;
 use r3sizer_io::{load_as_linear, save_from_linear};
@@ -14,61 +14,74 @@ use crate::run::{build_params, resolve_dimensions};
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "tiff", "tif", "bmp", "webp"];
 
 /// Per-file result in the sweep summary.
-#[derive(Debug, Serialize)]
-struct FileResult {
-    input: String,
-    output: Option<String>,
-    selected_strength: f32,
-    selection_mode: r3sizer_core::SelectionMode,
-    fallback_reason: Option<r3sizer_core::FallbackReason>,
-    measured_artifact_ratio: f32,
-    measured_metric_value: f32,
-    fit_r_squared: Option<f64>,
-    monotonic: Option<bool>,
-    total_us: u64,
-    gamut_excursion: f32,
-    halo_ringing: f32,
-    edge_overshoot: f32,
-    texture_flattening: f32,
-    composite_score: f32,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileResult {
+    pub input: String,
+    pub output: Option<String>,
+    pub selected_strength: f32,
+    pub selection_mode: r3sizer_core::SelectionMode,
+    pub fallback_reason: Option<r3sizer_core::FallbackReason>,
+    pub measured_artifact_ratio: f32,
+    pub measured_metric_value: f32,
+    pub fit_r_squared: Option<f64>,
+    pub monotonic: Option<bool>,
+    pub total_us: u64,
+    pub gamut_excursion: f32,
+    pub halo_ringing: f32,
+    pub edge_overshoot: f32,
+    pub texture_flattening: f32,
+    pub composite_score: f32,
+    pub ringing_score: f32,
+    pub envelope_scale: f32,
+    pub edge_retention: f32,
+    pub texture_retention: f32,
+    pub effective_target_artifact_ratio: f32,
+    pub chroma_clamped_fraction: Option<f32>,
+    pub chroma_effective_threshold_mean: Option<f32>,
 }
 
 /// Error entry for a file that failed processing.
-#[derive(Debug, Serialize)]
-struct FileError {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileError {
     input: String,
     error: String,
 }
 
 /// Per-component aggregate statistics.
-#[derive(Debug, Clone, Serialize)]
-struct ComponentStats {
-    mean: f32,
-    median: f32,
-    p90: f32,
-    p95: f32,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComponentStats {
+    pub mean: f32,
+    pub median: f32,
+    pub p90: f32,
+    pub p95: f32,
 }
 
 /// Aggregate statistics across all successfully processed files.
-#[derive(Debug, Serialize)]
-struct AggregateStats {
-    total_files: usize,
-    succeeded: usize,
-    failed: usize,
-    mean_selected_strength: f32,
-    median_selected_strength: f32,
-    mean_total_us: f64,
-    selection_mode_counts: SelectionModeCounts,
-    fit_success_rate: f32,
-    gamut_excursion: ComponentStats,
-    halo_ringing: ComponentStats,
-    edge_overshoot: ComponentStats,
-    texture_flattening: ComponentStats,
-    composite_score: ComponentStats,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AggregateStats {
+    pub total_files: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub mean_selected_strength: f32,
+    pub median_selected_strength: f32,
+    pub mean_total_us: f64,
+    pub selection_mode_counts: SelectionModeCounts,
+    pub fit_success_rate: f32,
+    pub gamut_excursion: ComponentStats,
+    pub halo_ringing: ComponentStats,
+    pub edge_overshoot: ComponentStats,
+    pub texture_flattening: ComponentStats,
+    pub composite_score: ComponentStats,
+    pub ringing_score: ComponentStats,
+    pub envelope_scale: ComponentStats,
+    pub edge_retention: ComponentStats,
+    pub texture_retention: ComponentStats,
+    pub effective_target_artifact_ratio: ComponentStats,
+    pub chroma_clamped_fraction: ComponentStats,
 }
 
-#[derive(Debug, Default, Serialize)]
-struct SelectionModeCounts {
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct SelectionModeCounts {
     polynomial_root: usize,
     best_sample_within_budget: usize,
     least_bad_sample: usize,
@@ -76,11 +89,11 @@ struct SelectionModeCounts {
 }
 
 /// Top-level sweep summary written to JSON.
-#[derive(Debug, Serialize)]
-struct SweepSummary {
-    aggregate: AggregateStats,
-    results: Vec<FileResult>,
-    errors: Vec<FileError>,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SweepSummary {
+    pub aggregate: AggregateStats,
+    pub results: Vec<FileResult>,
+    pub errors: Vec<FileError>,
 }
 
 /// Run sweep mode: process all images in a directory.
@@ -223,6 +236,18 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0)
     };
+    // Step 4: base resize quality
+    let (ringing_score, envelope_scale, edge_retention, texture_retention) =
+        if let Some(bq) = diag.base_resize_quality {
+            (bq.ringing_score, bq.envelope_scale, bq.edge_retention, bq.texture_retention)
+        } else {
+            (0.0, 1.0, 1.0, 1.0)
+        };
+
+    // Step 5: chroma guard
+    let chroma_clamped_fraction = diag.chroma_guard.as_ref().map(|cg| cg.pixels_clamped_fraction);
+    let chroma_effective_threshold_mean = diag.chroma_guard.as_ref().and_then(|cg| cg.effective_threshold_mean);
+
     Ok(FileResult {
         input: input_path.display().to_string(),
         output: output_path,
@@ -239,6 +264,13 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
         edge_overshoot: eo,
         texture_flattening: tf,
         composite_score: cs,
+        ringing_score,
+        envelope_scale,
+        edge_retention,
+        texture_retention,
+        effective_target_artifact_ratio: diag.effective_target_artifact_ratio,
+        chroma_clamped_fraction,
+        chroma_effective_threshold_mean,
     })
 }
 
@@ -284,7 +316,13 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
             halo_ringing: empty_cs.clone(),
             edge_overshoot: empty_cs.clone(),
             texture_flattening: empty_cs.clone(),
-            composite_score: empty_cs,
+            composite_score: empty_cs.clone(),
+            ringing_score: empty_cs.clone(),
+            envelope_scale: empty_cs.clone(),
+            edge_retention: empty_cs.clone(),
+            texture_retention: empty_cs.clone(),
+            effective_target_artifact_ratio: empty_cs.clone(),
+            chroma_clamped_fraction: empty_cs,
         };
     }
 
@@ -326,5 +364,11 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
         edge_overshoot: compute_component_stats(&results.iter().map(|r| r.edge_overshoot).collect::<Vec<_>>()),
         texture_flattening: compute_component_stats(&results.iter().map(|r| r.texture_flattening).collect::<Vec<_>>()),
         composite_score: compute_component_stats(&results.iter().map(|r| r.composite_score).collect::<Vec<_>>()),
+        ringing_score: compute_component_stats(&results.iter().map(|r| r.ringing_score).collect::<Vec<_>>()),
+        envelope_scale: compute_component_stats(&results.iter().map(|r| r.envelope_scale).collect::<Vec<_>>()),
+        edge_retention: compute_component_stats(&results.iter().map(|r| r.edge_retention).collect::<Vec<_>>()),
+        texture_retention: compute_component_stats(&results.iter().map(|r| r.texture_retention).collect::<Vec<_>>()),
+        effective_target_artifact_ratio: compute_component_stats(&results.iter().map(|r| r.effective_target_artifact_ratio).collect::<Vec<_>>()),
+        chroma_clamped_fraction: compute_component_stats(&results.iter().filter_map(|r| r.chroma_clamped_fraction).collect::<Vec<_>>()),
     }
 }

@@ -189,6 +189,7 @@ fn fallback_reason_label(r: &FallbackReason) -> &'static str {
         FallbackReason::MetricNonMonotonic => "metric non-monotonic",
         FallbackReason::BudgetTooStrictForContent => "budget too strict for content",
         FallbackReason::DirectSearchConfigured => "direct search configured",
+        FallbackReason::FitPoorQuality => "fit poor quality (R² < 0.85)",
     }
 }
 

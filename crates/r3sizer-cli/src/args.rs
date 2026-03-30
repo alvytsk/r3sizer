@@ -11,13 +11,13 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Input image file (PNG, JPEG, BMP, ...).
-    /// Not required when --sweep-dir is used.
-    #[arg(long, short = 'i', value_name = "FILE", required_unless_present = "sweep_dir")]
+    /// Not required when --sweep-dir or --generate-corpus is used.
+    #[arg(long, short = 'i', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
     pub input: Option<PathBuf>,
 
     /// Output image file.  Format is inferred from the extension.
-    /// Not required when --sweep-dir is used.
-    #[arg(long, short = 'o', value_name = "FILE", required_unless_present = "sweep_dir")]
+    /// Not required when --sweep-dir or --generate-corpus is used.
+    #[arg(long, short = 'o', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
     pub output: Option<PathBuf>,
 
     /// Target width in pixels.
@@ -34,8 +34,8 @@ pub struct Cli {
     pub preserve_aspect_ratio: bool,
 
     /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
-    /// Default: 0.001 (= 0.1 %).
-    #[arg(long, default_value_t = 0.001)]
+    /// Default: 0.003 (= 0.3 %, "photo" preset).
+    #[arg(long, default_value_t = 0.003)]
     pub target_artifact_ratio: f32,
 
     /// Path to write a JSON diagnostics file (optional).
@@ -78,6 +78,11 @@ pub struct Cli {
     #[arg(long, default_value = "summary")]
     pub diagnostics_level: DiagnosticsLevelArg,
 
+    /// Named pipeline preset. Overrides all pipeline settings.
+    /// Stable: photo (default), precision. Legacy: baseline, v3-adaptive, v5-full, v5-two-pass.
+    #[arg(long, value_name = "NAME")]
+    pub preset: Option<String>,
+
     /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only" (experimental).
     #[arg(long, default_value = "gamut-only")]
     pub selection_policy: SelectionPolicyArg,
@@ -95,6 +100,19 @@ pub struct Cli {
     /// Path to write the sweep summary JSON file.
     #[arg(long, value_name = "FILE", requires = "sweep_dir")]
     pub sweep_summary: Option<PathBuf>,
+
+    // --- Corpus generation ---
+
+    /// Generate a synthetic benchmark corpus in the given directory and exit.
+    #[arg(long, value_name = "DIR")]
+    pub generate_corpus: Option<PathBuf>,
+
+    // --- Sweep comparison ---
+
+    /// Compare two sweep summary JSON files: baseline,candidate.
+    /// Produces a diff report showing per-file and aggregate changes.
+    #[arg(long, value_delimiter = ',', num_args = 2, value_name = "BASE,CANDIDATE")]
+    pub sweep_diff: Option<Vec<PathBuf>>,
 }
 
 // ---------------------------------------------------------------------------

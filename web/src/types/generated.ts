@@ -27,7 +27,7 @@ export type SelectionMode = "polynomial_root" | "best_sample_within_budget" | "l
 
 export type SelectionPolicy = "gamut_only" | "hybrid" | "composite_only";
 
-export type FallbackReason = "fit_failed" | "fit_unstable" | "root_out_of_range" | "metric_non_monotonic" | "budget_too_strict_for_content" | "direct_search_configured";
+export type FallbackReason = "fit_failed" | "fit_unstable" | "root_out_of_range" | "metric_non_monotonic" | "budget_too_strict_for_content" | "direct_search_configured" | "fit_poor_quality";
 
 export type MetricComponent = "gamut_excursion" | "halo_ringing" | "edge_overshoot" | "texture_flattening";
 
@@ -41,7 +41,29 @@ export type GainTable = { flat: number, textured: number, strong_edge: number, m
 
 export type ClassificationParams = { gradient_low_threshold: number, gradient_high_threshold: number, variance_low_threshold: number, variance_high_threshold: number, variance_window: number, };
 
-export type ProbeConfig = { "Range": { min: number, max: number, count: number, } } | { "Explicit": Array<number> };
+export type ProbeConfig = { "Range": { min: number, max: number, count: number, } } | { "Explicit": Array<number> } | { "TwoPass": { 
+/**
+ * Number of uniformly-spaced probes in the first (coarse) pass. Min: 3.
+ */
+coarse_count: number, 
+/**
+ * Lower bound of the coarse scan range (exclusive, must be > 0).
+ */
+coarse_min: number, 
+/**
+ * Upper bound of the coarse scan range (must be > `coarse_min`).
+ */
+coarse_max: number, 
+/**
+ * Number of probes in the second (dense) pass. Min: 2.
+ */
+dense_count: number, 
+/**
+ * How far to extend the crossing bracket on each side when building the
+ * dense window, expressed as a fraction of the bracket width.
+ * E.g. `0.5` extends by half the coarse interval on each side.
+ */
+window_margin: number, } };
 
 export type SharpenStrategy = { "strategy": "uniform" } | { "strategy": "content_adaptive", classification: ClassificationParams, gain_table: GainTable, 
 /**
@@ -230,11 +252,66 @@ ingress_us?: number | null,
 /**
  * Evaluator execution time (None when not configured).
  */
-evaluator_us?: number | null, };
+evaluator_us?: number | null, 
+/**
+ * Base resize quality scoring time (step 4).
+ */
+base_quality_us?: number | null, };
 
 export type RegionCoverage = { total_pixels: number, flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, flat_fraction: number, textured_fraction: number, strong_edge_fraction: number, microtexture_fraction: number, risky_halo_zone_fraction: number, };
 
 export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_metric: number, } | { "outcome": "passed_after_backoff", iterations: number, final_scale: number, measured_metric: number, } | { "outcome": "failed_budget_exceeded", iterations: number, best_scale: number, best_metric: number, };
+
+export type ProbePassDiagnostics = { 
+/**
+ * Number of probes fired in the coarse pass.
+ */
+coarse_count: number, 
+/**
+ * Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
+ */
+coarse_min: number, 
+/**
+ * Coarse pass range upper bound (= `ProbeConfig::TwoPass::coarse_max`).
+ */
+coarse_max: number, 
+/**
+ * Number of probes fired in the dense pass.
+ */
+dense_count: number, 
+/**
+ * Dense window lower bound selected after coarse bracket search.
+ */
+dense_min: number, 
+/**
+ * Dense window upper bound selected after coarse bracket search.
+ */
+dense_max: number, };
+
+export type BaseResizeQuality = { 
+/**
+ * Fraction of source Sobel edge energy preserved in the resized image.
+ * Scale-independent per-pixel energy ratio; higher is better.
+ * Diagnostic only in v1 — does not affect solver budget.
+ */
+edge_retention: number, 
+/**
+ * Fraction of source local texture variance preserved in the resized image.
+ * Computed via 5×5 window mean variance ratio; higher is better.
+ * Diagnostic only in v1 — does not affect solver budget.
+ */
+texture_retention: number, 
+/**
+ * Fraction of near-edge pixels showing sign-flip oscillation (ringing proxy).
+ * Higher is worse.  Active in v1: drives `envelope_scale`.
+ */
+ringing_score: number, 
+/**
+ * Budget multiplier applied to `target_artifact_ratio` before probing:
+ * `effective_p0 = target_artifact_ratio × envelope_scale`.
+ * Derived as `clamp(1.0 − 2.0 × ringing_score, 0.65, 1.0)`.
+ */
+envelope_scale: number, };
 
 export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, 
 /**
@@ -312,7 +389,21 @@ evaluator_result?: QualityEvaluation | null,
 /**
  * Actionable recommendations derived from pipeline diagnostics.
  */
-recommendations?: Array<Recommendation>, };
+recommendations?: Array<Recommendation>, 
+/**
+ * Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
+ */
+probe_pass_diagnostics?: ProbePassDiagnostics | null, 
+/**
+ * Quality assessment of the base resized image before sharpening.
+ */
+base_resize_quality?: BaseResizeQuality | null, 
+/**
+ * Effective target artifact ratio after applying the ringing-aware envelope.
+ * `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
+ * Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
+ */
+effective_target_artifact_ratio: number, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 
@@ -332,14 +423,41 @@ kernels_used: Array<ResizeKernel>,
  */
 per_kernel_pixel_count: { [key in string]: number }, };
 
+export type ChromaRegionFactors = { flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, };
+
+export type SaturationGuardParams = { 
+/**
+ * Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+ */
+min_scale: number, 
+/**
+ * Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+ */
+gamma: number, };
+
 export type ExperimentalSharpenMode = { "luma_plus_chroma_guard": { 
 /**
  * Maximum allowed chroma shift as a fraction of original chroma magnitude.
  * Values above this trigger soft clamping. Default: 0.10 (10%).
  */
-max_chroma_shift: number, } };
+max_chroma_shift: number, 
+/**
+ * Per-region-class multipliers for `max_chroma_shift`.
+ * Only effective when the pipeline also produces a region map
+ * (i.e. `SharpenStrategy::ContentAdaptive`).
+ */
+chroma_region_factors?: ChromaRegionFactors | null, 
+/**
+ * Saturation-dependent threshold tightening.
+ * Active regardless of region map availability.
+ */
+saturation_guard?: SaturationGuardParams | null, } };
 
 export type EvaluationColorSpace = "rgb" | "luma_only" | "lab_approx";
+
+export type ChromaRegionClampStats = { pixel_count: number, clamped_count: number, clamped_fraction: number, mean_shift: number, max_shift: number, };
+
+export type ChromaPerRegionDiagnostics = { flat: ChromaRegionClampStats, textured: ChromaRegionClampStats, strong_edge: ChromaRegionClampStats, microtexture: ChromaRegionClampStats, risky_halo_zone: ChromaRegionClampStats, };
 
 export type ChromaGuardDiagnostics = { 
 /**
@@ -353,7 +471,24 @@ mean_chroma_shift: number,
 /**
  * Maximum chroma shift magnitude.
  */
-max_chroma_shift: number, };
+max_chroma_shift: number, 
+/**
+ * Minimum effective threshold across all pixels.
+ */
+effective_threshold_min?: number | null, 
+/**
+ * Mean effective threshold across all pixels.
+ */
+effective_threshold_mean?: number | null, 
+/**
+ * Maximum effective threshold across all pixels.
+ */
+effective_threshold_max?: number | null, 
+/**
+ * Per-region-class clamp statistics.
+ * Present only when a region map was available (ContentAdaptive strategy).
+ */
+per_region?: ChromaPerRegionDiagnostics | null, };
 
 export type EvaluatorConfig = "heuristic";
 
@@ -476,17 +611,15 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "target_width": 800,
   "target_height": 600,
   "probe_strengths": {
-    "Explicit": [
-      0.05,
-      0.1,
-      0.2,
-      0.4,
-      0.8,
-      1.5,
-      3.0
-    ]
+    "TwoPass": {
+      "coarse_count": 7,
+      "coarse_min": 0.003,
+      "coarse_max": 1.0,
+      "dense_count": 4,
+      "window_margin": 0.5
+    }
   },
-  "target_artifact_ratio": 0.001,
+  "target_artifact_ratio": 0.003,
   "enable_contrast_leveling": false,
   "sharpen_sigma": 1.0,
   "fit_strategy": "Cubic",
@@ -503,11 +636,38 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "selection_policy": "gamut_only",
   "diagnostics_level": "summary",
   "sharpen_strategy": {
-    "strategy": "uniform"
+    "strategy": "content_adaptive",
+    "classification": {
+      "gradient_low_threshold": 0.05,
+      "gradient_high_threshold": 0.4,
+      "variance_low_threshold": 0.001,
+      "variance_high_threshold": 0.01,
+      "variance_window": 5
+    },
+    "gain_table": {
+      "flat": 0.75,
+      "textured": 0.95,
+      "strong_edge": 1.0,
+      "microtexture": 1.1,
+      "risky_halo_zone": 0.7
+    },
+    "max_backoff_iterations": 4,
+    "backoff_scale_factor": 0.8
   },
   "experimental_sharpen_mode": {
     "luma_plus_chroma_guard": {
-      "max_chroma_shift": 0.1
+      "max_chroma_shift": 0.25,
+      "chroma_region_factors": {
+        "flat": 1.0,
+        "textured": 0.9,
+        "strong_edge": 0.65,
+        "microtexture": 0.8,
+        "risky_halo_zone": 0.45
+      },
+      "saturation_guard": {
+        "min_scale": 0.6,
+        "gamma": 1.5
+      }
     }
   },
   "evaluator_config": "heuristic"
@@ -519,4 +679,17 @@ export const DEFAULT_KERNEL_TABLE: KernelTable = {
   "strong_edge": "lanczos3",
   "microtexture": "catmull_rom",
   "risky_halo_zone": "mitchell_netravali"
+};
+
+export const DEFAULT_CHROMA_REGION_FACTORS: ChromaRegionFactors = {
+  "flat": 1.0,
+  "textured": 0.9,
+  "strong_edge": 0.65,
+  "microtexture": 0.8,
+  "risky_halo_zone": 0.45
+};
+
+export const DEFAULT_SATURATION_GUARD_PARAMS: SaturationGuardParams = {
+  "min_scale": 0.6,
+  "gamma": 1.5
 };

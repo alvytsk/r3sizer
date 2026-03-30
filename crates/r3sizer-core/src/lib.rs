@@ -23,6 +23,7 @@ pub mod sharpen;
 pub mod solve;
 pub mod types;
 
+pub mod base_quality;
 pub mod color_space;
 pub mod resize_strategy;
 pub mod chroma_guard;
@@ -32,16 +33,17 @@ pub mod recommendations;
 // Re-export the complete public surface.
 pub use pipeline::{process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress};
 pub use types::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
+    ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
+    ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample, ProbeConfig,
-    ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
-    Recommendation, RecommendationKind, Severity, ParamPatch,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, SelectionPolicy,
-    SharpenMode, SharpenStrategy, StageTiming,
+    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbePassDiagnostics,
+    ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
+    RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
+    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
+    SelectionPolicy, SaturationGuardParams, SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };
 

@@ -194,6 +194,8 @@ fn chroma_guard_produces_valid_output() {
     let params = AutoSharpParams {
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.10,
+            chroma_region_factors: None,
+            saturation_guard: None,
         }),
         ..default_params(4, 4)
     };
@@ -344,6 +346,8 @@ fn all_experimental_features_together() {
         resize_strategy: Some(ResizeStrategy::Uniform { kernel: ResizeKernel::CatmullRom }),
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.15,
+            chroma_region_factors: None,
+            saturation_guard: None,
         }),
         evaluation_color_space: Some(EvaluationColorSpace::LumaOnly),
         evaluator_config: Some(EvaluatorConfig::Heuristic),
@@ -384,6 +388,8 @@ fn experimental_json_round_trip() {
         resize_strategy: Some(ResizeStrategy::Uniform { kernel: ResizeKernel::Gaussian }),
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.10,
+            chroma_region_factors: None,
+            saturation_guard: None,
         }),
         evaluator_config: Some(EvaluatorConfig::Heuristic),
         diagnostics_level: DiagnosticsLevel::Full,

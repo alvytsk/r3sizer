@@ -225,10 +225,32 @@ pub enum ProbeConfig {
     Range { min: f32, max: f32, count: usize },
     /// Caller-supplied explicit list (must have >= 4 distinct, positive values).
     Explicit(Vec<f32>),
+    /// Two-pass adaptive strategy: coarse scan over the full range followed by
+    /// dense probing in a narrow window around the estimated P(s) = P0 crossing.
+    ///
+    /// The coarse pass brackets the crossing; the dense pass refines it.
+    /// All collected samples are merged and fed into the existing cubic fit path.
+    TwoPass {
+        /// Number of uniformly-spaced probes in the first (coarse) pass. Min: 3.
+        coarse_count: usize,
+        /// Lower bound of the coarse scan range (exclusive, must be > 0).
+        coarse_min: f32,
+        /// Upper bound of the coarse scan range (must be > `coarse_min`).
+        coarse_max: f32,
+        /// Number of probes in the second (dense) pass. Min: 2.
+        dense_count: usize,
+        /// How far to extend the crossing bracket on each side when building the
+        /// dense window, expressed as a fraction of the bracket width.
+        /// E.g. `0.5` extends by half the coarse interval on each side.
+        window_margin: f32,
+    },
 }
 
 impl ProbeConfig {
-    /// Resolve to a sorted `Vec<f32>`.
+    /// Resolve static configs (`Range`, `Explicit`) to a sorted `Vec<f32>`.
+    ///
+    /// Returns `Err` for `TwoPass` — that variant requires measurement between
+    /// passes and is handled directly in the pipeline.
     pub fn resolve(&self) -> Result<Vec<f32>, CoreError> {
         let mut values = match self {
             ProbeConfig::Range { min, max, count } => {
@@ -260,10 +282,60 @@ impl ProbeConfig {
                 }
                 v.clone()
             }
+            ProbeConfig::TwoPass { .. } => {
+                return Err(CoreError::InvalidParams(
+                    "TwoPass probe config is handled by the pipeline; use AutoSharpParams directly".into(),
+                ));
+            }
         };
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         Ok(values)
     }
+}
+
+/// Diagnostics from the two-pass adaptive probe placement strategy.
+///
+/// Present only when `ProbeConfig::TwoPass` was used; `None` for static configs.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ProbePassDiagnostics {
+    /// Number of probes fired in the coarse pass.
+    pub coarse_count: usize,
+    /// Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
+    pub coarse_min: f32,
+    /// Coarse pass range upper bound (= `ProbeConfig::TwoPass::coarse_max`).
+    pub coarse_max: f32,
+    /// Number of probes fired in the dense pass.
+    pub dense_count: usize,
+    /// Dense window lower bound selected after coarse bracket search.
+    pub dense_min: f32,
+    /// Dense window upper bound selected after coarse bracket search.
+    pub dense_max: f32,
+}
+
+/// Quality assessment of the resized image before any sharpening is applied.
+///
+/// Computed in the pipeline immediately after downscaling, using both the source
+/// and resized images.  In v1 only `ringing_score` is active (drives
+/// `envelope_scale`); `edge_retention` and `texture_retention` are diagnostic.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct BaseResizeQuality {
+    /// Fraction of source Sobel edge energy preserved in the resized image.
+    /// Scale-independent per-pixel energy ratio; higher is better.
+    /// Diagnostic only in v1 — does not affect solver budget.
+    pub edge_retention: f32,
+    /// Fraction of source local texture variance preserved in the resized image.
+    /// Computed via 5×5 window mean variance ratio; higher is better.
+    /// Diagnostic only in v1 — does not affect solver budget.
+    pub texture_retention: f32,
+    /// Fraction of near-edge pixels showing sign-flip oscillation (ringing proxy).
+    /// Higher is worse.  Active in v1: drives `envelope_scale`.
+    pub ringing_score: f32,
+    /// Budget multiplier applied to `target_artifact_ratio` before probing:
+    /// `effective_p0 = target_artifact_ratio × envelope_scale`.
+    /// Derived as `clamp(1.0 − 2.0 × ringing_score, 0.65, 1.0)`.
+    pub envelope_scale: f32,
 }
 
 /// Polynomial fit strategy.
@@ -344,14 +416,20 @@ pub struct AutoSharpParams {
 }
 
 impl Default for AutoSharpParams {
+    /// Default is the **Photo** preset: P0=0.003, two-pass probing up to 1.0,
+    /// content-adaptive sharpening with chroma guard and heuristic evaluator.
     fn default() -> Self {
         Self {
             target_width: 800,
             target_height: 600,
-            probe_strengths: ProbeConfig::Explicit(
-                vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0],
-            ),
-            target_artifact_ratio: 0.001,
+            probe_strengths: ProbeConfig::TwoPass {
+                coarse_count: 7,
+                coarse_min: 0.003,
+                coarse_max: 1.00,
+                dense_count: 4,
+                window_margin: 0.5,
+            },
+            target_artifact_ratio: 0.003,
             enable_contrast_leveling: false,
             sharpen_sigma: 1.0,
             fit_strategy: FitStrategy::Cubic,
@@ -362,14 +440,18 @@ impl Default for AutoSharpParams {
             metric_weights: MetricWeights::default(),
             selection_policy: SelectionPolicy::default(),
             diagnostics_level: DiagnosticsLevel::default(),
-            sharpen_strategy: SharpenStrategy::default(),
+            sharpen_strategy: SharpenStrategy::ContentAdaptive {
+                classification: ClassificationParams::default(),
+                gain_table: GainTable::v03_default(),
+                max_backoff_iterations: 4,
+                backoff_scale_factor: 0.8,
+            },
             input_color_space: None,
             resize_strategy: None,
-            // BREAKING (v0.5): chroma guard and evaluator are now on by default.
-            // Previously these were None (off). Callers that need the minimal
-            // baseline can set both to None explicitly.
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
-                max_chroma_shift: 0.10,
+                max_chroma_shift: 0.25,
+                chroma_region_factors: Some(ChromaRegionFactors::default()),
+                saturation_guard: Some(SaturationGuardParams::default()),
             }),
             evaluation_color_space: None,
             evaluator_config: Some(EvaluatorConfig::Heuristic),
@@ -378,6 +460,34 @@ impl Default for AutoSharpParams {
 }
 
 impl AutoSharpParams {
+    /// **Photo** preset: P0=0.003, two-pass probing [0.003, 1.00].
+    /// Intended for natural photographic content.
+    pub fn photo(target_width: u32, target_height: u32) -> Self {
+        Self {
+            target_width,
+            target_height,
+            ..Self::default()
+        }
+    }
+
+    /// **Precision** preset: P0=0.001, two-pass probing [0.003, 0.50].
+    /// Intended for text, UI, architecture, and hard-edge content.
+    pub fn precision(target_width: u32, target_height: u32) -> Self {
+        Self {
+            target_width,
+            target_height,
+            target_artifact_ratio: 0.001,
+            probe_strengths: ProbeConfig::TwoPass {
+                coarse_count: 7,
+                coarse_min: 0.003,
+                coarse_max: 0.50,
+                dense_count: 4,
+                window_margin: 0.5,
+            },
+            ..Self::default()
+        }
+    }
+
     /// Validate that parameters are internally consistent. Called at pipeline entry.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.target_width == 0 || self.target_height == 0 {
@@ -398,7 +508,26 @@ impl AutoSharpParams {
                 ));
             }
         }
-        self.probe_strengths.resolve()?;
+        match &self.probe_strengths {
+            ProbeConfig::TwoPass { coarse_count, coarse_min, coarse_max, dense_count, window_margin } => {
+                if *coarse_count < 3 {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_count must be >= 3".into()));
+                }
+                if *dense_count < 2 {
+                    return Err(CoreError::InvalidParams("TwoPass dense_count must be >= 2".into()));
+                }
+                if *coarse_min <= 0.0 {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be positive".into()));
+                }
+                if coarse_min >= coarse_max {
+                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be less than coarse_max".into()));
+                }
+                if *window_margin < 0.0 {
+                    return Err(CoreError::InvalidParams("TwoPass window_margin must be >= 0".into()));
+                }
+            }
+            _ => { self.probe_strengths.resolve()?; }
+        }
         Ok(())
     }
 }
@@ -456,6 +585,9 @@ pub enum FallbackReason {
     BudgetTooStrictForContent,
     /// User configured DirectSearch strategy — fit was not attempted.
     DirectSearchConfigured,
+    /// Fit succeeded numerically but R² is below the quality threshold (0.85).
+    /// The polynomial root may be a false crossing from a poorly-modeled P(s) curve.
+    FitPoorQuality,
 }
 
 /// Per-stage wall-clock timing in microseconds.
@@ -484,6 +616,9 @@ pub struct StageTiming {
     /// Evaluator execution time (None when not configured).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_us: Option<u64>,
+    /// Base resize quality scoring time (step 4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_quality_us: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,6 +1147,21 @@ pub struct AutoSharpDiagnostics {
     /// Actionable recommendations derived from pipeline diagnostics.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<Recommendation>,
+
+    // --- Two-pass probe placement (step 3) ---
+    /// Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_pass_diagnostics: Option<ProbePassDiagnostics>,
+
+    // --- Base resize quality (step 4) ---
+    /// Quality assessment of the base resized image before sharpening.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_resize_quality: Option<BaseResizeQuality>,
+    /// Effective target artifact ratio after applying the ringing-aware envelope.
+    /// `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
+    /// Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
+    #[serde(default)]
+    pub effective_target_artifact_ratio: f32,
 }
 
 /// Return type of the top-level pipeline function.
@@ -1158,11 +1308,84 @@ pub struct ResizeStrategyDiagnostics {
 pub enum ExperimentalSharpenMode {
     /// Sharpen luminance, then monitor per-pixel chroma shift and apply
     /// soft clamping when the shift exceeds the threshold.
+    ///
+    /// When `chroma_region_factors` and a region map are both available,
+    /// the threshold is modulated per-pixel by region class.  When
+    /// `saturation_guard` is set, already-saturated pixels receive a
+    /// tighter threshold.
     LumaPlusChromaGuard {
         /// Maximum allowed chroma shift as a fraction of original chroma magnitude.
         /// Values above this trigger soft clamping. Default: 0.10 (10%).
         max_chroma_shift: f32,
+        /// Per-region-class multipliers for `max_chroma_shift`.
+        /// Only effective when the pipeline also produces a region map
+        /// (i.e. `SharpenStrategy::ContentAdaptive`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chroma_region_factors: Option<ChromaRegionFactors>,
+        /// Saturation-dependent threshold tightening.
+        /// Active regardless of region map availability.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        saturation_guard: Option<SaturationGuardParams>,
     },
+}
+
+/// Per-region-class multipliers that scale the chroma guard threshold.
+///
+/// Lower values = tighter guard (more chroma protection).
+/// Semantics mirror [`GainTable`]: one field per [`RegionClass`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaRegionFactors {
+    pub flat: f32,
+    pub textured: f32,
+    pub strong_edge: f32,
+    pub microtexture: f32,
+    pub risky_halo_zone: f32,
+}
+
+impl ChromaRegionFactors {
+    /// Look up the factor for a given region class.
+    #[inline]
+    pub fn factor_for(&self, class: RegionClass) -> f32 {
+        match class {
+            RegionClass::Flat => self.flat,
+            RegionClass::Textured => self.textured,
+            RegionClass::StrongEdge => self.strong_edge,
+            RegionClass::Microtexture => self.microtexture,
+            RegionClass::RiskyHaloZone => self.risky_halo_zone,
+        }
+    }
+}
+
+impl Default for ChromaRegionFactors {
+    fn default() -> Self {
+        Self {
+            flat: 1.00,
+            textured: 0.90,
+            strong_edge: 0.65,
+            microtexture: 0.80,
+            risky_halo_zone: 0.45,
+        }
+    }
+}
+
+/// Saturation-aware chroma guard parameters.
+///
+/// Tightens the chroma shift threshold for already-saturated pixels.
+/// `effective_scale = 1.0 − (1.0 − min_scale) × saturation^gamma`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct SaturationGuardParams {
+    /// Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+    pub min_scale: f32,
+    /// Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+    pub gamma: f32,
+}
+
+impl Default for SaturationGuardParams {
+    fn default() -> Self {
+        Self { min_scale: 0.6, gamma: 1.5 }
+    }
 }
 
 /// Color space used for artifact evaluation during probing and final measurement.
@@ -1183,7 +1406,7 @@ pub enum EvaluationColorSpace {
 }
 
 /// Diagnostics from the chroma guard sharpening path.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ChromaGuardDiagnostics {
     /// Fraction of pixels where chroma soft-clamping was applied.
@@ -1192,6 +1415,45 @@ pub struct ChromaGuardDiagnostics {
     pub mean_chroma_shift: f32,
     /// Maximum chroma shift magnitude.
     pub max_chroma_shift: f32,
+
+    // --- Context-aware guard diagnostics (step 5) ---
+
+    /// Minimum effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_min: Option<f32>,
+    /// Mean effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_mean: Option<f32>,
+    /// Maximum effective threshold across all pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_threshold_max: Option<f32>,
+
+    /// Per-region-class clamp statistics.
+    /// Present only when a region map was available (ContentAdaptive strategy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_region: Option<ChromaPerRegionDiagnostics>,
+}
+
+/// Chroma guard clamp statistics for a single region class.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaRegionClampStats {
+    pub pixel_count: u32,
+    pub clamped_count: u32,
+    pub clamped_fraction: f32,
+    pub mean_shift: f32,
+    pub max_shift: f32,
+}
+
+/// Per-region breakdown of chroma guard behavior.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct ChromaPerRegionDiagnostics {
+    pub flat: ChromaRegionClampStats,
+    pub textured: ChromaRegionClampStats,
+    pub strong_edge: ChromaRegionClampStats,
+    pub microtexture: ChromaRegionClampStats,
+    pub risky_halo_zone: ChromaRegionClampStats,
 }
 
 // --- Branch A: Learned evaluator ---
