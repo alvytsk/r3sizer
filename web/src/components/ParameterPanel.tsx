@@ -37,6 +37,7 @@ import {
   DEFAULT_GAIN_TABLE,
   DEFAULT_CLASSIFICATION_PARAMS,
   DEFAULT_CONTENT_ADAPTIVE_STRATEGY,
+  DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY,
 } from "@/types/wasm-types";
 
 function sliderValue(v: number | readonly number[]): number {
@@ -413,8 +414,10 @@ function AdaptiveSettings({ strategy, updateParams }: AdaptiveSettingsProps) {
 
 const RESIZE_KERNEL: Record<string, string> = {
   lanczos3: "Lanczos3",
+  mitchell_netravali: "Mitchell-Netravali",
   catmull_rom: "Catmull-Rom",
   gaussian: "Gaussian",
+  content_adaptive: "Content Adaptive",
 };
 
 interface DimensionPreset {
@@ -592,33 +595,43 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest, Gaussian is smoothest, Catmull-Rom is in between.">Resize Kernel</ValueLabel>
+          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest, Gaussian is smoothest, Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects kernel per region (flat → Gaussian, edges → Lanczos3, etc.).">Resize Kernel</ValueLabel>
           <Select
             value={
-              params.resize_strategy?.strategy === "uniform"
-                ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
-                : "lanczos3"
+              params.resize_strategy?.strategy === "content_adaptive"
+                ? "content_adaptive"
+                : params.resize_strategy?.strategy === "uniform"
+                  ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                  : "lanczos3"
             }
-            onValueChange={(v) =>
-              updateParams({
-                resize_strategy: v === "lanczos3" ? undefined : { strategy: "uniform", kernel: v as "catmull_rom" | "gaussian" },
-              })
-            }
+            onValueChange={(v) => {
+              if (v === "lanczos3") {
+                updateParams({ resize_strategy: undefined });
+              } else if (v === "content_adaptive") {
+                updateParams({ resize_strategy: { ...DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY } });
+              } else {
+                updateParams({ resize_strategy: { strategy: "uniform", kernel: v as "mitchell_netravali" | "catmull_rom" | "gaussian" } });
+              }
+            }}
           >
             <SelectTrigger className="h-8 text-sm font-mono">
               <SelectedLabel
                 labels={RESIZE_KERNEL}
                 value={
-                  params.resize_strategy?.strategy === "uniform"
-                    ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
-                    : "lanczos3"
+                  params.resize_strategy?.strategy === "content_adaptive"
+                    ? "content_adaptive"
+                    : params.resize_strategy?.strategy === "uniform"
+                      ? (params.resize_strategy as { strategy: "uniform"; kernel: string }).kernel
+                      : "lanczos3"
                 }
               />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="lanczos3">Lanczos3</SelectItem>
+              <SelectItem value="mitchell_netravali">Mitchell-Netravali</SelectItem>
               <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
               <SelectItem value="gaussian">Gaussian</SelectItem>
+              <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
             </SelectContent>
           </Select>
         </div>

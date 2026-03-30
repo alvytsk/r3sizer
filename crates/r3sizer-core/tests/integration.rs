@@ -1,8 +1,8 @@
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel, FallbackReason,
-    FitStrategy, GainTable, ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig,
-    SelectionMode, SharpenMode, SharpenStrategy,
+    FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage, MetricComponent, MetricMode,
+    ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode, SharpenMode, SharpenStrategy,
     process_auto_sharp_downscale,
 };
 
@@ -773,4 +773,104 @@ fn composite_only_produces_valid_result() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 16);
     assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::CompositeOnly);
+}
+
+// ---------------------------------------------------------------------------
+// Content-adaptive resize (step 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uniform_resize_strategy_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    for kernel in [ResizeKernel::Lanczos3, ResizeKernel::CatmullRom, ResizeKernel::Gaussian, ResizeKernel::MitchellNetravali] {
+        let params = AutoSharpParams {
+            resize_strategy: Some(ResizeStrategy::Uniform { kernel }),
+            ..default_params(16, 16)
+        };
+        let out = process_auto_sharp_downscale(&src, &params).unwrap();
+        assert_eq!(out.image.width(), 16);
+        assert_eq!(out.image.height(), 16);
+        let diag = out.diagnostics.resize_strategy_diagnostics
+            .expect("resize_strategy_diagnostics should be Some for explicit strategy");
+        assert_eq!(diag.kernels_used, vec![kernel]);
+        let total: u32 = diag.per_kernel_pixel_count.values().sum();
+        assert_eq!(total, 16 * 16);
+    }
+}
+
+#[test]
+fn content_adaptive_resize_happy_path() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.image.height(), 16);
+    for &v in out.image.pixels() {
+        assert!(v.is_finite(), "pixel must be finite");
+    }
+
+    let diag = out.diagnostics.resize_strategy_diagnostics
+        .expect("resize_strategy_diagnostics should be Some for content-adaptive");
+    assert!(!diag.kernels_used.is_empty());
+    let total: u32 = diag.per_kernel_pixel_count.values().sum();
+    assert_eq!(total, 16 * 16, "per_kernel_pixel_count must sum to target pixel count");
+}
+
+#[test]
+fn content_adaptive_resize_deterministic() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out1.image.pixels(), out2.image.pixels());
+    assert_eq!(
+        out1.diagnostics.selected_strength,
+        out2.diagnostics.selected_strength,
+    );
+}
+
+#[test]
+fn content_adaptive_resize_step_edge_uses_multiple_kernels() {
+    // Step edge has mixed flat + edge regions, so the adaptive path should
+    // use more than one kernel when flat and edge kernels differ (default table).
+    let w = 64_u32;
+    let h = 32_u32;
+    let mut data = vec![0.0_f32; (w * h * 3) as usize];
+    for y in 0..h {
+        for x in (w / 2)..w {
+            let idx = ((y * w + x) * 3) as usize;
+            data[idx] = 1.0;
+            data[idx + 1] = 1.0;
+            data[idx + 2] = 1.0;
+        }
+    }
+    let src = LinearRgbImage::new(w, h, data).unwrap();
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(), // flat=Gaussian, edge=Lanczos3
+        }),
+        ..default_params(16, 8)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let diag = out.diagnostics.resize_strategy_diagnostics.unwrap();
+    // With a step edge, at least two distinct kernels should be used.
+    assert!(
+        diag.kernels_used.len() >= 2,
+        "expected ≥2 kernels for step-edge image, got {:?}",
+        diag.kernels_used
+    );
 }
