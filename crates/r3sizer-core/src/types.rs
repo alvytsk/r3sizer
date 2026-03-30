@@ -520,6 +520,9 @@ pub enum FallbackReason {
     BudgetTooStrictForContent,
     /// User configured DirectSearch strategy — fit was not attempted.
     DirectSearchConfigured,
+    /// Fit succeeded numerically but R² is below the quality threshold (0.85).
+    /// The polynomial root may be a false crossing from a poorly-modeled P(s) curve.
+    FitPoorQuality,
 }
 
 /// Per-stage wall-clock timing in microseconds.

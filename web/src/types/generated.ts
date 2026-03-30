@@ -25,7 +25,7 @@ export type CrossingStatus = "found" | "not_found_in_range" | "not_attempted";
 
 export type SelectionMode = "polynomial_root" | "best_sample_within_budget" | "least_bad_sample" | "budget_unreachable";
 
-export type FallbackReason = "fit_failed" | "fit_unstable" | "root_out_of_range" | "metric_non_monotonic" | "budget_too_strict_for_content" | "direct_search_configured";
+export type FallbackReason = "fit_failed" | "fit_unstable" | "root_out_of_range" | "metric_non_monotonic" | "budget_too_strict_for_content" | "direct_search_configured" | "fit_poor_quality";
 
 export type MetricComponent = "gamut_excursion" | "halo_ringing" | "edge_overshoot" | "texture_flattening";
 

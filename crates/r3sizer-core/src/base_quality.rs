@@ -35,7 +35,13 @@ const MIN_ENVELOPE_SCALE: f32 = 0.65;
 
 /// Minimum gradient magnitude (unnormalized Sobel scale; max ≈ 5.66 for luma
 /// in [0, 1]) required to consider a pixel "near an edge" for ringing detection.
-const EDGE_THRESHOLD: f32 = 0.10;
+///
+/// Calibrated against the synthetic benchmark corpus (step 6): 0.10 triggered
+/// false positives on textured content (`seeded_noise`, `concentric_circles`)
+/// where sign-flip oscillation is legitimate texture, not resize ringing.
+/// At 0.30, only hard step-edge transitions (Sobel >> 0.30) are counted,
+/// cleanly separating real Lanczos overshoot from texture-induced oscillation.
+const EDGE_THRESHOLD: f32 = 0.30;
 
 /// Minimum absolute 1-D pixel difference for a sign-flip to be counted.
 /// Filters out sub-percent noise while catching meaningful ringing.

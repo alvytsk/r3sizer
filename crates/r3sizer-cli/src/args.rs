@@ -11,13 +11,13 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     /// Input image file (PNG, JPEG, BMP, ...).
-    /// Not required when --sweep-dir is used.
-    #[arg(long, short = 'i', value_name = "FILE", required_unless_present = "sweep_dir")]
+    /// Not required when --sweep-dir or --generate-corpus is used.
+    #[arg(long, short = 'i', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus"])]
     pub input: Option<PathBuf>,
 
     /// Output image file.  Format is inferred from the extension.
-    /// Not required when --sweep-dir is used.
-    #[arg(long, short = 'o', value_name = "FILE", required_unless_present = "sweep_dir")]
+    /// Not required when --sweep-dir or --generate-corpus is used.
+    #[arg(long, short = 'o', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus"])]
     pub output: Option<PathBuf>,
 
     /// Target width in pixels.
@@ -78,6 +78,11 @@ pub struct Cli {
     #[arg(long, default_value = "summary")]
     pub diagnostics_level: DiagnosticsLevelArg,
 
+    /// Named pipeline preset. Overrides sharpen strategy, chroma guard, and evaluator settings.
+    /// Available: baseline, v3-adaptive, v5-full, v5-two-pass.
+    #[arg(long, value_name = "NAME")]
+    pub preset: Option<String>,
+
     // --- Sweep mode ---
 
     /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
@@ -91,6 +96,12 @@ pub struct Cli {
     /// Path to write the sweep summary JSON file.
     #[arg(long, value_name = "FILE", requires = "sweep_dir")]
     pub sweep_summary: Option<PathBuf>,
+
+    // --- Corpus generation ---
+
+    /// Generate a synthetic benchmark corpus in the given directory and exit.
+    #[arg(long, value_name = "DIR")]
+    pub generate_corpus: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------

@@ -245,7 +245,17 @@ pub fn process_auto_sharp_downscale_with_progress(
                 Ok((poly, quality)) => {
                     let result =
                         find_sharpness(&poly, p0, s_min, s_max, &probe_samples)?;
-                    (result, FitStatus::Success, Some(poly), Some(quality))
+                    // R² quality gate: if the cubic fit is poor, the polynomial
+                    // may produce false crossings (e.g. step-like P(s) curves).
+                    // Fall back to direct search; keep fit data for diagnostics.
+                    if quality.r_squared < 0.85
+                        && matches!(result.selection_mode, SelectionMode::PolynomialRoot)
+                    {
+                        let direct = find_sharpness_direct(&probe_samples, effective_p0)?;
+                        (direct, FitStatus::Success, Some(poly), Some(quality))
+                    } else {
+                        (result, FitStatus::Success, Some(poly), Some(quality))
+                    }
                 }
                 Err(fit_err) => {
                     let result = find_sharpness_direct(
@@ -323,6 +333,7 @@ pub fn process_auto_sharp_downscale_with_progress(
         &fit_status,
         budget_reachable_baseline,
         monotonic,
+        r_squared_ok,
         loo_stable,
         params.fit_strategy,
         &solve_result.crossing_status,
@@ -710,6 +721,7 @@ fn determine_fallback_reason(
     fit_status: &FitStatus,
     budget_reachable_baseline: bool,
     monotonic: bool,
+    r_squared_ok: bool,
     loo_stable: bool,
     fit_strategy: FitStrategy,
     crossing_status: &crate::CrossingStatus,
@@ -727,6 +739,9 @@ fn determine_fallback_reason(
     }
     if matches!(fit_status, FitStatus::Failed { .. }) {
         return Some(FallbackReason::FitFailed);
+    }
+    if !r_squared_ok {
+        return Some(FallbackReason::FitPoorQuality);
     }
     if !monotonic {
         return Some(FallbackReason::MetricNonMonotonic);

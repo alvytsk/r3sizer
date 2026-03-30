@@ -26,7 +26,18 @@ pub fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u3
 }
 
 /// Build pipeline params from CLI args + resolved dimensions.
+/// If `--preset` is set, uses the named preset; CLI flags override where specified.
 pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSharpParams {
+    // If a preset is specified, start from its configuration.
+    if let Some(ref name) = args.preset {
+        match crate::presets::preset_params(name, target_width, target_height) {
+            Ok(params) => return params,
+            Err(e) => {
+                eprintln!("Warning: {e}; falling back to manual configuration");
+            }
+        }
+    }
+
     let probe_strengths = if let Some(ref strengths) = args.probe_strengths {
         ProbeConfig::Explicit(strengths.clone())
     } else {

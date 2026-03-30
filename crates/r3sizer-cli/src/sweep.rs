@@ -31,6 +31,15 @@ struct FileResult {
     edge_overshoot: f32,
     texture_flattening: f32,
     composite_score: f32,
+    // Step 4: base resize quality
+    ringing_score: f32,
+    envelope_scale: f32,
+    edge_retention: f32,
+    texture_retention: f32,
+    effective_target_artifact_ratio: f32,
+    // Step 5: chroma guard
+    chroma_clamped_fraction: Option<f32>,
+    chroma_effective_threshold_mean: Option<f32>,
 }
 
 /// Error entry for a file that failed processing.
@@ -65,6 +74,14 @@ struct AggregateStats {
     edge_overshoot: ComponentStats,
     texture_flattening: ComponentStats,
     composite_score: ComponentStats,
+    // Step 4
+    ringing_score: ComponentStats,
+    envelope_scale: ComponentStats,
+    edge_retention: ComponentStats,
+    texture_retention: ComponentStats,
+    effective_target_artifact_ratio: ComponentStats,
+    // Step 5
+    chroma_clamped_fraction: ComponentStats,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -223,6 +240,18 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0)
     };
+    // Step 4: base resize quality
+    let (ringing_score, envelope_scale, edge_retention, texture_retention) =
+        if let Some(bq) = diag.base_resize_quality {
+            (bq.ringing_score, bq.envelope_scale, bq.edge_retention, bq.texture_retention)
+        } else {
+            (0.0, 1.0, 1.0, 1.0)
+        };
+
+    // Step 5: chroma guard
+    let chroma_clamped_fraction = diag.chroma_guard.as_ref().map(|cg| cg.pixels_clamped_fraction);
+    let chroma_effective_threshold_mean = diag.chroma_guard.as_ref().and_then(|cg| cg.effective_threshold_mean);
+
     Ok(FileResult {
         input: input_path.display().to_string(),
         output: output_path,
@@ -239,6 +268,13 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
         edge_overshoot: eo,
         texture_flattening: tf,
         composite_score: cs,
+        ringing_score,
+        envelope_scale,
+        edge_retention,
+        texture_retention,
+        effective_target_artifact_ratio: diag.effective_target_artifact_ratio,
+        chroma_clamped_fraction,
+        chroma_effective_threshold_mean,
     })
 }
 
@@ -284,7 +320,13 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
             halo_ringing: empty_cs.clone(),
             edge_overshoot: empty_cs.clone(),
             texture_flattening: empty_cs.clone(),
-            composite_score: empty_cs,
+            composite_score: empty_cs.clone(),
+            ringing_score: empty_cs.clone(),
+            envelope_scale: empty_cs.clone(),
+            edge_retention: empty_cs.clone(),
+            texture_retention: empty_cs.clone(),
+            effective_target_artifact_ratio: empty_cs.clone(),
+            chroma_clamped_fraction: empty_cs,
         };
     }
 
@@ -326,5 +368,11 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
         edge_overshoot: compute_component_stats(&results.iter().map(|r| r.edge_overshoot).collect::<Vec<_>>()),
         texture_flattening: compute_component_stats(&results.iter().map(|r| r.texture_flattening).collect::<Vec<_>>()),
         composite_score: compute_component_stats(&results.iter().map(|r| r.composite_score).collect::<Vec<_>>()),
+        ringing_score: compute_component_stats(&results.iter().map(|r| r.ringing_score).collect::<Vec<_>>()),
+        envelope_scale: compute_component_stats(&results.iter().map(|r| r.envelope_scale).collect::<Vec<_>>()),
+        edge_retention: compute_component_stats(&results.iter().map(|r| r.edge_retention).collect::<Vec<_>>()),
+        texture_retention: compute_component_stats(&results.iter().map(|r| r.texture_retention).collect::<Vec<_>>()),
+        effective_target_artifact_ratio: compute_component_stats(&results.iter().map(|r| r.effective_target_artifact_ratio).collect::<Vec<_>>()),
+        chroma_clamped_fraction: compute_component_stats(&results.iter().filter_map(|r| r.chroma_clamped_fraction).collect::<Vec<_>>()),
     }
 }
