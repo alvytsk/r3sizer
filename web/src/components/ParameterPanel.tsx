@@ -38,6 +38,8 @@ import {
   DEFAULT_CLASSIFICATION_PARAMS,
   DEFAULT_CONTENT_ADAPTIVE_STRATEGY,
   DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY,
+  DEFAULT_PARAMS,
+  PIPELINE_PRESETS,
 } from "@/types/wasm-types";
 
 function sliderValue(v: number | readonly number[]): number {
@@ -470,6 +472,39 @@ export function ParameterPanel() {
   return (
     <TooltipProvider>
     <div className="p-3 space-y-4">
+      {/* Pipeline preset selector */}
+      <div className="space-y-2">
+        <SectionLabel>Pipeline Preset</SectionLabel>
+        <Select
+          value=""
+          onValueChange={(v) => {
+            if (!v) return;
+            const preset = PIPELINE_PRESETS[v];
+            if (preset) {
+              updateParams({
+                ...DEFAULT_PARAMS,
+                ...preset,
+                target_width: params.target_width,
+                target_height: params.target_height,
+                diagnostics_level: "full",
+              });
+            }
+          }}
+        >
+          <SelectTrigger className="h-7 text-xs font-mono">
+            <span className="flex flex-1 text-left truncate text-muted-foreground" data-slot="select-value">
+              Apply preset...
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="baseline">Baseline (uniform, no guard)</SelectItem>
+            <SelectItem value="v3-adaptive">v3-adaptive (CA sharpen)</SelectItem>
+            <SelectItem value="v5-full">v5-full (CA + chroma guard)</SelectItem>
+            <SelectItem value="v5-two-pass">v5-two-pass (+ adaptive probing)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="space-y-2">
         <SectionLabel>Dimensions</SectionLabel>
         <div>

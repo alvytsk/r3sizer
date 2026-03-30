@@ -12,12 +12,12 @@ use std::path::PathBuf;
 pub struct Cli {
     /// Input image file (PNG, JPEG, BMP, ...).
     /// Not required when --sweep-dir or --generate-corpus is used.
-    #[arg(long, short = 'i', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus"])]
+    #[arg(long, short = 'i', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
     pub input: Option<PathBuf>,
 
     /// Output image file.  Format is inferred from the extension.
     /// Not required when --sweep-dir or --generate-corpus is used.
-    #[arg(long, short = 'o', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus"])]
+    #[arg(long, short = 'o', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
     pub output: Option<PathBuf>,
 
     /// Target width in pixels.
@@ -102,6 +102,13 @@ pub struct Cli {
     /// Generate a synthetic benchmark corpus in the given directory and exit.
     #[arg(long, value_name = "DIR")]
     pub generate_corpus: Option<PathBuf>,
+
+    // --- Sweep comparison ---
+
+    /// Compare two sweep summary JSON files: baseline,candidate.
+    /// Produces a diff report showing per-file and aggregate changes.
+    #[arg(long, value_delimiter = ',', num_args = 2, value_name = "BASE,CANDIDATE")]
+    pub sweep_diff: Option<Vec<PathBuf>>,
 }
 
 // ---------------------------------------------------------------------------

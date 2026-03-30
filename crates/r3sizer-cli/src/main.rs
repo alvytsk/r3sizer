@@ -1,5 +1,6 @@
 mod args;
 mod corpus;
+mod diff;
 mod output;
 mod presets;
 mod run;
@@ -12,6 +13,8 @@ fn main() {
 
     let result = if let Some(ref dir) = args.generate_corpus {
         corpus::generate_corpus(dir)
+    } else if let Some(ref paths) = args.sweep_diff {
+        diff::run_diff(&paths[0], &paths[1])
     } else if args.sweep_dir.is_some() {
         sweep::run_sweep(&args)
     } else {
