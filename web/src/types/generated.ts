@@ -631,7 +631,7 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   },
   "experimental_sharpen_mode": {
     "luma_plus_chroma_guard": {
-      "max_chroma_shift": 0.1,
+      "max_chroma_shift": 0.2,
       "chroma_region_factors": {
         "flat": 1.0,
         "textured": 0.9,

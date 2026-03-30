@@ -116,7 +116,9 @@ pub fn sharpen_with_chroma_guard(
             None => 1.0,
         };
 
-        let effective_threshold = max_chroma_shift * orig_mag.max(1e-6) * region_factor * sat_factor;
+        // Floor at 0.01 so near-achromatic pixels still have a small absolute
+        // threshold rather than collapsing to zero.
+        let effective_threshold = max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
 
         // Accumulate effective threshold stats
         if effective_threshold < eff_min { eff_min = effective_threshold; }

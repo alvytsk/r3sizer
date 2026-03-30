@@ -52,7 +52,7 @@ pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, St
                 backoff_scale_factor: 0.8,
             },
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
-                max_chroma_shift: 0.10,
+                max_chroma_shift: 0.20,
                 chroma_region_factors: Some(ChromaRegionFactors::default()),
                 saturation_guard: Some(SaturationGuardParams::default()),
             }),
@@ -77,7 +77,7 @@ pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, St
                 backoff_scale_factor: 0.8,
             },
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
-                max_chroma_shift: 0.10,
+                max_chroma_shift: 0.20,
                 chroma_region_factors: Some(ChromaRegionFactors::default()),
                 saturation_guard: Some(SaturationGuardParams::default()),
             }),

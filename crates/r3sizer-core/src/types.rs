@@ -412,7 +412,7 @@ impl Default for AutoSharpParams {
             // Previously these were None (off). Callers that need the minimal
             // baseline can set both to None explicitly.
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
-                max_chroma_shift: 0.10,
+                max_chroma_shift: 0.20,
                 chroma_region_factors: Some(ChromaRegionFactors::default()),
                 saturation_guard: Some(SaturationGuardParams::default()),
             }),
