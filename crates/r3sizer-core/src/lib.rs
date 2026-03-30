@@ -43,7 +43,7 @@ pub use types::{
     ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
     RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SaturationGuardParams, SharpenMode, SharpenStrategy, StageTiming,
+    SelectionPolicy, SaturationGuardParams, SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };
 

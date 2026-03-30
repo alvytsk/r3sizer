@@ -9,7 +9,8 @@
 
 use crate::types::{
     AutoSharpDiagnostics, AutoSharpParams, ClassificationParams, GainTable, ParamPatch,
-    ProbeConfig, Recommendation, RecommendationKind, Severity, SharpenMode, SharpenStrategy,
+    ProbeConfig, Recommendation, RecommendationKind, SelectionMode, SelectionPolicy, Severity,
+    SharpenMode, SharpenStrategy,
 };
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ pub fn generate_recommendations(
     rule_switch_to_lightness(diag, params, &mut recs);
     rule_widen_probe_range(diag, params, &mut recs);
     rule_lower_sigma(diag, params, &mut recs);
+    rule_switch_to_hybrid(diag, params, &mut recs);
 
     recs
 }
@@ -352,6 +354,109 @@ fn rule_lower_sigma(
 }
 
 // ---------------------------------------------------------------------------
+// Rule 7 — SwitchToHybrid
+// ---------------------------------------------------------------------------
+
+/// Recommend Hybrid selection policy when GamutOnly fallback chose a sample
+/// that a composite-aware ranking would have replaced.
+///
+/// Only fires when the solver used fallback (BestSampleWithinBudget or
+/// LeastBadSample) — polynomial root selection is identical across policies.
+fn rule_switch_to_hybrid(
+    diag: &AutoSharpDiagnostics,
+    params: &AutoSharpParams,
+    recs: &mut Vec<Recommendation>,
+) {
+    // Only relevant when currently using GamutOnly.
+    if params.selection_policy != SelectionPolicy::GamutOnly {
+        return;
+    }
+
+    // Only fires on fallback modes — polynomial root is policy-independent.
+    let is_fallback = matches!(
+        diag.selection_mode,
+        SelectionMode::BestSampleWithinBudget | SelectionMode::LeastBadSample
+    );
+    if !is_fallback {
+        return;
+    }
+
+    // Need per-probe breakdowns to compare composite scores.
+    let probes = &diag.probe_samples;
+    if probes.is_empty() || probes.iter().all(|p| p.breakdown.is_none()) {
+        return;
+    }
+
+    let selected_s = diag.selected_strength;
+
+    // Find the composite score of the currently selected sample.
+    let selected_composite = probes
+        .iter()
+        .find(|p| (p.strength - selected_s).abs() < 1e-6)
+        .and_then(|p| p.breakdown.as_ref())
+        .map(|b| b.composite_score);
+
+    let selected_composite = match selected_composite {
+        Some(c) => c,
+        None => return,
+    };
+
+    // Find the best alternative composite score among eligible samples.
+    let best_alternative = if diag.selection_mode == SelectionMode::BestSampleWithinBudget {
+        // Among budget-qualifying samples, find the one with lowest composite.
+        probes
+            .iter()
+            .filter(|p| p.metric_value <= diag.target_artifact_ratio)
+            .filter_map(|p| p.breakdown.as_ref().map(|b| (p, b.composite_score)))
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+    } else {
+        // LeastBadSample: find the one with lowest composite among all.
+        probes
+            .iter()
+            .filter_map(|p| p.breakdown.as_ref().map(|b| (p, b.composite_score)))
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+    };
+
+    let (alt_sample, alt_composite) = match best_alternative {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    // Only recommend if the alternative is meaningfully better.
+    // Require at least 20% relative improvement to avoid noisy recommendations.
+    if selected_composite <= 0.0 || alt_composite >= selected_composite * 0.80 {
+        return;
+    }
+
+    // The alternative must actually be a *different* sample.
+    if (alt_sample.strength - selected_s).abs() < 1e-6 {
+        return;
+    }
+
+    let improvement_pct = (1.0 - alt_composite / selected_composite) * 100.0;
+    let confidence = (improvement_pct / 100.0).clamp(0.3, 0.9);
+
+    recs.push(Recommendation {
+        kind: RecommendationKind::SwitchToHybrid,
+        severity: Severity::Suggestion,
+        confidence,
+        reason: format!(
+            "Hybrid policy would select s={:.3} (composite {:.4}) instead of \
+             s={:.3} (composite {:.4}), a {:.0}% reduction in composite artifact score.",
+            alt_sample.strength,
+            alt_composite,
+            selected_s,
+            selected_composite,
+            improvement_pct,
+        ),
+        patch: ParamPatch {
+            selection_policy: Some(SelectionPolicy::Hybrid),
+            ..ParamPatch::default()
+        },
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -447,6 +552,7 @@ mod tests {
             sharpen_mode: SharpenMode::Lightness,
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
+            selection_policy: SelectionPolicy::default(),
             target_artifact_ratio: 0.001,
             baseline_artifact_ratio: 0.0,
             probe_samples: vec![
@@ -750,6 +856,10 @@ mod tests {
                     !(a.patch.sharpen_sigma.is_some() && b.patch.sharpen_sigma.is_some()),
                     "two recs both set sharpen_sigma: {:?} and {:?}", a.kind, b.kind
                 );
+                assert!(
+                    !(a.patch.selection_policy.is_some() && b.patch.selection_policy.is_some()),
+                    "two recs both set selection_policy: {:?} and {:?}", a.kind, b.kind
+                );
             }
         }
     }
@@ -788,5 +898,147 @@ mod tests {
             ProbeSample { strength: 0.5, artifact_ratio: 0.0, metric_value: 0.005, breakdown: None },
         ];
         assert!(interpolate_from_probes(&probes, 0.6).is_none());
+    }
+
+    // ── Rule 7: SwitchToHybrid ──────────────────────────────────────
+
+    fn make_breakdown(gamut: f32, composite: f32) -> Option<MetricBreakdown> {
+        use std::collections::BTreeMap;
+        let mut components = BTreeMap::new();
+        components.insert(MetricComponent::GamutExcursion, gamut);
+        components.insert(MetricComponent::HaloRinging, 0.0);
+        components.insert(MetricComponent::EdgeOvershoot, 0.0);
+        components.insert(MetricComponent::TextureFlattening, 0.0);
+        #[allow(deprecated)]
+        Some(MetricBreakdown {
+            components,
+            selected_metric: MetricComponent::GamutExcursion,
+            selection_score: gamut,
+            composite_score: composite,
+            aggregate: gamut,
+        })
+    }
+
+    #[test]
+    fn rule7_fires_when_hybrid_would_pick_better_composite() {
+        let mut diag = base_diag();
+        diag.selection_mode = SelectionMode::BestSampleWithinBudget;
+        diag.selected_strength = 2.0;
+        diag.selection_policy = SelectionPolicy::GamutOnly;
+        diag.probe_samples = vec![
+            // s=1.0: within budget, great composite
+            ProbeSample {
+                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                breakdown: make_breakdown(0.0005, 0.01),
+            },
+            // s=2.0: within budget, poor composite — this is what GamutOnly picked (max strength)
+            ProbeSample {
+                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                breakdown: make_breakdown(0.0008, 0.06),
+            },
+            // s=3.0: exceeds budget
+            ProbeSample {
+                strength: 3.0, artifact_ratio: 0.005, metric_value: 0.005,
+                breakdown: make_breakdown(0.005, 0.10),
+            },
+        ];
+
+        let recs = generate_recommendations(&diag, &base_params());
+        assert!(
+            recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid),
+            "should recommend Hybrid when composite improvement is significant"
+        );
+        let rec = recs.iter().find(|r| r.kind == RecommendationKind::SwitchToHybrid).unwrap();
+        assert_eq!(rec.patch.selection_policy, Some(SelectionPolicy::Hybrid));
+        assert!(rec.reason.contains("1.000")); // recommends s=1.0
+    }
+
+    #[test]
+    fn rule7_fires_on_least_bad_fallback() {
+        let mut diag = base_diag();
+        diag.selection_mode = SelectionMode::LeastBadSample;
+        diag.selected_strength = 1.0;
+        diag.selection_policy = SelectionPolicy::GamutOnly;
+        diag.probe_samples = vec![
+            // GamutOnly picked s=1.0 (lowest gamut), but s=2.0 has much better composite
+            ProbeSample {
+                strength: 1.0, artifact_ratio: 0.005, metric_value: 0.005,
+                breakdown: make_breakdown(0.005, 0.08),
+            },
+            ProbeSample {
+                strength: 2.0, artifact_ratio: 0.010, metric_value: 0.010,
+                breakdown: make_breakdown(0.010, 0.02),
+            },
+        ];
+
+        let recs = generate_recommendations(&diag, &base_params());
+        assert!(recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+    }
+
+    #[test]
+    fn rule7_skips_when_already_hybrid() {
+        let mut diag = base_diag();
+        diag.selection_mode = SelectionMode::BestSampleWithinBudget;
+        diag.selected_strength = 2.0;
+        diag.selection_policy = SelectionPolicy::Hybrid;
+        diag.probe_samples = vec![
+            ProbeSample {
+                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                breakdown: make_breakdown(0.0005, 0.01),
+            },
+            ProbeSample {
+                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                breakdown: make_breakdown(0.0008, 0.06),
+            },
+        ];
+        let mut params = base_params();
+        params.selection_policy = SelectionPolicy::Hybrid;
+
+        let recs = generate_recommendations(&diag, &params);
+        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+    }
+
+    #[test]
+    fn rule7_skips_on_polynomial_root() {
+        let mut diag = base_diag();
+        diag.selection_mode = SelectionMode::PolynomialRoot;
+        diag.selection_policy = SelectionPolicy::GamutOnly;
+        diag.probe_samples = vec![
+            ProbeSample {
+                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                breakdown: make_breakdown(0.0005, 0.01),
+            },
+            ProbeSample {
+                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                breakdown: make_breakdown(0.0008, 0.06),
+            },
+        ];
+
+        let recs = generate_recommendations(&diag, &base_params());
+        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+    }
+
+    #[test]
+    fn rule7_skips_when_improvement_marginal() {
+        let mut diag = base_diag();
+        diag.selection_mode = SelectionMode::BestSampleWithinBudget;
+        diag.selected_strength = 2.0;
+        diag.selection_policy = SelectionPolicy::GamutOnly;
+        diag.probe_samples = vec![
+            ProbeSample {
+                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                breakdown: make_breakdown(0.0005, 0.049), // only ~2% better than 0.05
+            },
+            ProbeSample {
+                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                breakdown: make_breakdown(0.0008, 0.050),
+            },
+        ];
+
+        let recs = generate_recommendations(&diag, &base_params());
+        assert!(
+            !recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid),
+            "should not recommend Hybrid for marginal improvement"
+        );
     }
 }

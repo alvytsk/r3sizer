@@ -74,6 +74,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         artifact_metric: args.artifact_metric.into(),
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
+        selection_policy: args.selection_policy.into(),
         // Inherit sharpen_strategy, chroma guard, and evaluator from default (Photo).
         ..Default::default()
     }

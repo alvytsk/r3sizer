@@ -678,6 +678,111 @@ fn content_adaptive_tight_budget_triggers_backoff_or_failure() {
 }
 
 // ---------------------------------------------------------------------------
+// SelectionPolicy tests
+// ---------------------------------------------------------------------------
+
+use r3sizer_core::SelectionPolicy;
+
+#[test]
+fn gamut_only_policy_identical_to_default() {
+    let src = gradient_image(64, 64);
+    let params_default = default_params(16, 16);
+    let params_explicit = AutoSharpParams {
+        selection_policy: SelectionPolicy::GamutOnly,
+        ..default_params(16, 16)
+    };
+    let out_default = process_auto_sharp_downscale(&src, &params_default).unwrap();
+    let out_explicit = process_auto_sharp_downscale(&src, &params_explicit).unwrap();
+    assert_eq!(
+        out_default.diagnostics.selected_strength,
+        out_explicit.diagnostics.selected_strength,
+        "GamutOnly must be identical to default behavior"
+    );
+    assert_eq!(out_default.image.pixels(), out_explicit.image.pixels());
+}
+
+#[test]
+fn hybrid_policy_respects_gamut_budget() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+
+    // If selection was BestSampleWithinBudget, selected probe must be within gamut budget.
+    if d.selection_mode == SelectionMode::BestSampleWithinBudget {
+        let selected = d.probe_samples.iter()
+            .find(|s| (s.strength - d.selected_strength).abs() < 1e-6)
+            .expect("selected strength must correspond to a probe sample");
+        assert!(
+            selected.metric_value <= d.target_artifact_ratio,
+            "Hybrid must not select an out-of-budget sample when in-budget exists: metric_value={} > target={}",
+            selected.metric_value, d.target_artifact_ratio,
+        );
+    }
+}
+
+#[test]
+fn hybrid_policy_produces_valid_result() {
+    let src = checkerboard(32, 32);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        ..default_params(8, 8)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 8);
+    assert_eq!(out.image.height(), 8);
+    for &v in out.image.pixels() {
+        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1]");
+    }
+}
+
+#[test]
+fn hybrid_diagnostics_include_selection_policy() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::Hybrid);
+
+    let json = serde_json::to_string_pretty(&out.diagnostics).expect("serialize");
+    assert!(json.contains("\"selection_policy\""));
+    assert!(json.contains("\"hybrid\""));
+    let deser: AutoSharpDiagnostics = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(deser.selection_policy, SelectionPolicy::Hybrid);
+}
+
+#[test]
+fn gamut_only_diagnostics_include_selection_policy() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::GamutOnly);
+
+    let json = serde_json::to_string_pretty(&out.diagnostics).expect("serialize");
+    assert!(json.contains("\"selection_policy\""));
+}
+
+#[test]
+fn composite_only_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::CompositeOnly,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::CompositeOnly);
+}
+
+// ---------------------------------------------------------------------------
 // Step 2: content-adaptive resize (resize_strategy path)
 // ---------------------------------------------------------------------------
 
@@ -696,6 +801,7 @@ fn uniform_resize_strategy_produces_valid_result() {
         };
         let out = process_auto_sharp_downscale(&src, &params).unwrap();
         assert_eq!(out.image.width(), 16);
+        assert_eq!(out.image.height(), 16);
         let diag = out
             .diagnostics
             .resize_strategy_diagnostics
@@ -719,14 +825,17 @@ fn content_adaptive_resize_happy_path() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 16);
     assert_eq!(out.image.height(), 16);
-    assert!(out.image.pixels().iter().all(|v| v.is_finite()));
+    for &v in out.image.pixels() {
+        assert!(v.is_finite(), "pixel must be finite");
+    }
+
     let diag = out
         .diagnostics
         .resize_strategy_diagnostics
         .expect("resize_strategy_diagnostics should be Some for content-adaptive");
     assert!(!diag.kernels_used.is_empty());
     let total: u32 = diag.per_kernel_pixel_count.values().sum();
-    assert_eq!(total, 16 * 16);
+    assert_eq!(total, 16 * 16, "per_kernel_pixel_count must sum to target pixel count");
 }
 
 #[test]
@@ -897,7 +1006,7 @@ fn two_pass_validation_rejects_bad_params() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 4 — Base resize quality tests
+// Step 4 -- Base resize quality tests
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -957,7 +1066,7 @@ fn smooth_image_minimal_ringing() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let bq = out.diagnostics.base_resize_quality.unwrap();
     assert_eq!(bq.ringing_score, 0.0, "solid image should have zero ringing");
-    assert!((bq.envelope_scale - 1.0).abs() < 1e-6, "no ringing → envelope_scale == 1.0");
+    assert!((bq.envelope_scale - 1.0).abs() < 1e-6, "no ringing -> envelope_scale == 1.0");
 }
 
 #[test]
@@ -975,7 +1084,7 @@ fn base_resize_quality_deterministic() {
 }
 
 // ---------------------------------------------------------------------------
-// Step 5 — Context-aware chroma guard tests
+// Step 5 -- Context-aware chroma guard tests
 // ---------------------------------------------------------------------------
 
 fn content_adaptive_chroma_params(tw: u32, th: u32) -> AutoSharpParams {
@@ -1041,7 +1150,7 @@ fn chroma_guard_effective_threshold_stats_present() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let cg = out.diagnostics.chroma_guard
         .expect("chroma_guard diagnostics should be present");
-    // Saturation guard is on by default → effective threshold stats should be present
+    // Saturation guard is on by default -> effective threshold stats should be present
     assert!(cg.effective_threshold_min.is_some());
     assert!(cg.effective_threshold_mean.is_some());
     assert!(cg.effective_threshold_max.is_some());
@@ -1081,7 +1190,7 @@ fn saturation_guard_tightens_for_saturated_pixels() {
     let cg = out.diagnostics.chroma_guard.unwrap();
 
     // With saturated pixels, effective_threshold_mean should be < what we'd get
-    // with no saturation guard (where effective ≈ 0.10 * chroma_mag).
+    // with no saturation guard (where effective ~ 0.10 * chroma_mag).
     // The saturation factor < 1.0 for saturated pixels should pull the mean down.
     let eff_mean = cg.effective_threshold_mean.unwrap();
     let eff_max = cg.effective_threshold_max.unwrap();

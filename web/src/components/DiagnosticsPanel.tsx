@@ -716,6 +716,7 @@ const REC_KIND_LABELS: Record<RecommendationKind, string> = {
   switch_to_lightness: "Switch to lightness mode",
   widen_probe_range: "Widen probe range",
   lower_sigma: "Lower blur sigma",
+  switch_to_hybrid: "Switch to hybrid selection policy",
 };
 
 const ADVICE_STYLES: Record<Advice["kind"], { border: string; bg: string; icon: string; title: string }> = {

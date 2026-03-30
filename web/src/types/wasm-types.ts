@@ -29,6 +29,7 @@ export type {
   DiagnosticsLevel,
   CrossingStatus,
   SelectionMode,
+  SelectionPolicy,
   FallbackReason,
   MetricComponent,
   RegionClass,

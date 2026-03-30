@@ -20,7 +20,7 @@ use r3sizer_core::{
     MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbePassDiagnostics, ProbeSample,
     QualityEvaluation, Recommendation, RecommendationKind, RegionClass, RegionCoverage,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SaturationGuardParams, Severity, SharpenMode, SharpenStrategy, StageTiming,
+    SelectionPolicy, SaturationGuardParams, Severity, SharpenMode, SharpenStrategy, StageTiming,
 };
 
 #[test]
@@ -55,6 +55,7 @@ fn export_typescript_bindings() {
         DiagnosticsLevel::decl(&cfg),
         CrossingStatus::decl(&cfg),
         SelectionMode::decl(&cfg),
+        SelectionPolicy::decl(&cfg),
         FallbackReason::decl(&cfg),
         MetricComponent::decl(&cfg),
         RegionClass::decl(&cfg),

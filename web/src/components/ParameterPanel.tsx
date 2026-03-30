@@ -226,6 +226,12 @@ const ARTIFACT_METRIC: Record<string, string> = {
   pixel_out_of_gamut_ratio: "Pixel Out-of-Gamut Ratio",
 };
 
+const SELECTION_POLICY: Record<string, string> = {
+  gamut_only: "Gamut Only",
+  hybrid: "Hybrid",
+  composite_only: "Composite Only (exp)",
+};
+
 const FIT_STRATEGY: Record<string, string> = {
   Cubic: "Cubic",
   DirectSearch: "Direct Search",
@@ -669,7 +675,7 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest; Gaussian is smoothest; Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects the kernel per region.">Resize Kernel</ValueLabel>
+          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest; Gaussian is smoothest; Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects kernel per region (flat → Gaussian, edges → Lanczos3, etc.).">Resize Kernel</ValueLabel>
           <Select
             value={
               params.resize_strategy?.strategy === "content_adaptive"
@@ -828,6 +834,26 @@ export function ParameterPanel() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          {/* Selection policy */}
+          <div>
+            <ValueLabel tip="Gamut Only uses gamut excursion for both fitting and fallback ranking. Hybrid keeps gamut as the hard safety constraint but ranks fallback candidates by composite score (halo, overshoot, texture). Composite Only is experimental.">Selection Policy</ValueLabel>
+            <Select
+              value={params.selection_policy}
+              onValueChange={(v) => {
+                if (v) updateParams({ selection_policy: v as typeof params.selection_policy });
+              }}
+            >
+              <SelectTrigger className="h-8 text-sm font-mono">
+                <SelectedLabel labels={SELECTION_POLICY} value={params.selection_policy} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gamut_only">Gamut Only</SelectItem>
+                <SelectItem value="hybrid">Hybrid</SelectItem>
+                <SelectItem value="composite_only">Composite Only (exp)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Fit strategy & clamp policy */}

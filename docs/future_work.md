@@ -53,14 +53,29 @@ Instead of a fixed probe list, consider a two-pass approach: coarse scan to
 find the approximate crossing region, then dense probing near the crossing.
 This would reduce the number of expensive sharpen+measure operations.
 
-### Composite metric components (v0.2)
-The `MetricBreakdown` scaffold is in place with four `MetricComponent` variants.
+### Composite metric components (v0.2) — COMPLETED
+
+All four `MetricComponent` variants are now active and fully implemented:
+1. `GamutExcursion` — fraction of channel values outside [0, 1]
+2. `HaloRinging` — sign-alternating oscillations near strong edges
+3. `EdgeOvershoot` — sharpening exceeding local edge-strength proxy
+4. `TextureFlattening` — changes in fine-scale local variance
+
+Configurable weights are supported via `MetricWeights` (default: 1.0, 0.3, 0.3, 0.1).
+
+### Selection policy (v0.2.1)
+
+`SelectionPolicy` controls how fallback candidates are ranked:
+- `GamutOnly` (default): gamut excursion drives both fitting and fallback ranking.
+- `Hybrid`: gamut excursion is the hard safety constraint; composite score ranks
+  fallback candidates. Polynomial fitting still uses gamut excursion.
+- `CompositeOnly` (experimental): currently treated as Hybrid. Future work will
+  add composite-driven polynomial fitting with a separate `target_selection_score`.
+
 Next steps:
-1. Implement `HaloRinging` detection (edge profile analysis)
-2. Implement `EdgeOvershoot` measurement (gradient-based)
-3. Implement `TextureFlattening` detection (local variance comparison)
-4. Add configurable weights to `compute_metric_breakdown`
-5. Tune aggregate formula to balance components
+1. Sweep-based comparison of GamutOnly vs Hybrid on a diverse corpus.
+2. Add `target_selection_score` parameter for CompositeOnly mode.
+3. Investigate composite-driven polynomial fitting (requires monotonicity analysis).
 
 ### Robustness threshold tuning
 Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.5) are engineering
