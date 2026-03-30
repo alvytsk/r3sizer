@@ -6,6 +6,43 @@ import type {
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
 import { processImageAsync, prepareImage, setProgressCallback } from "@/wasm";
 
+export type ExportFormat = "jpeg" | "png" | "webp";
+
+// ---------------------------------------------------------------------------
+// localStorage persistence (dimensions + export prefs only)
+// ---------------------------------------------------------------------------
+
+const PREFS_KEY = "r3sizer-prefs";
+
+type PersistedPrefs = {
+  exportFormat: ExportFormat;
+  exportQuality: number;
+  targetWidth: number;
+  targetHeight: number;
+};
+
+function loadPrefs(): Partial<PersistedPrefs> {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    return raw ? (JSON.parse(raw) as Partial<PersistedPrefs>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePrefs(patch: Partial<PersistedPrefs>): void {
+  try {
+    const current = loadPrefs();
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+  } catch {
+    // localStorage unavailable (private mode, storage full, etc.)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
 interface ProcessorState {
   // Input
   inputFile: File | null;
@@ -16,6 +53,11 @@ interface ProcessorState {
   // Parameters
   params: AutoSharpParams;
   preserveAspectRatio: boolean;
+  lockDimensions: boolean;
+
+  // Export preferences (persisted)
+  exportFormat: ExportFormat;
+  exportQuality: number;
 
   // Processing
   isProcessing: boolean;
@@ -38,11 +80,14 @@ interface ProcessorState {
   ) => void;
   updateParams: (partial: Partial<AutoSharpParams>) => void;
   setPreserveAspectRatio: (v: boolean) => void;
-  lockDimensions: boolean;
   setLockDimensions: (v: boolean) => void;
+  setExportFormat: (format: ExportFormat) => void;
+  setExportQuality: (quality: number) => void;
   process: () => Promise<void>;
   reset: () => void;
 }
+
+const savedPrefs = loadPrefs();
 
 export const useProcessorStore = create<ProcessorState>((set, get) => ({
   inputFile: null,
@@ -50,9 +95,16 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   inputWidth: 0,
   inputHeight: 0,
 
-  params: { ...DEFAULT_PARAMS },
+  params: {
+    ...DEFAULT_PARAMS,
+    target_width: savedPrefs.targetWidth ?? DEFAULT_PARAMS.target_width,
+    target_height: savedPrefs.targetHeight ?? DEFAULT_PARAMS.target_height,
+  },
   preserveAspectRatio: true,
   lockDimensions: false,
+
+  exportFormat: savedPrefs.exportFormat ?? "jpeg",
+  exportQuality: savedPrefs.exportQuality ?? 90,
 
   isProcessing: false,
   processingStage: null,
@@ -109,6 +161,13 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       }
     }
 
+    if ("target_width" in partial || "target_height" in partial) {
+      savePrefs({
+        targetWidth: newParams.target_width,
+        targetHeight: newParams.target_height,
+      });
+    }
+
     set({ params: newParams });
   },
 
@@ -120,6 +179,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
         const aspect = state.inputWidth / state.inputHeight;
         const newParams = { ...state.params };
         newParams.target_height = Math.round(newParams.target_width / aspect);
+        savePrefs({ targetHeight: newParams.target_height });
         set({ params: newParams });
       }
     }
@@ -127,6 +187,16 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
 
   setLockDimensions: (v) => {
     set({ lockDimensions: v });
+  },
+
+  setExportFormat: (format) => {
+    savePrefs({ exportFormat: format });
+    set({ exportFormat: format });
+  },
+
+  setExportQuality: (quality) => {
+    savePrefs({ exportQuality: quality });
+    set({ exportQuality: quality });
   },
 
   process: async () => {
@@ -168,6 +238,9 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     }
   },
 
+  // Full reset: clears image + processing state, restores default params.
+  // Export format/quality are intentionally kept — they are user preferences,
+  // not tied to a specific image.
   reset: () =>
     set({
       inputFile: null,
