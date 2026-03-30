@@ -198,6 +198,146 @@ pub fn sharpen_with_chroma_guard(
     Ok((image, diag))
 }
 
+/// Apply chroma guard as a post-process on an already-sharpened image.
+///
+/// Unlike [`sharpen_with_chroma_guard`], this does **not** re-sharpen.
+/// It compares the sharpened image against the original base and soft-clamps
+/// chroma where the shift exceeds the context-aware threshold.
+#[allow(clippy::too_many_arguments)]
+pub fn apply_chroma_guard(
+    base: &LinearRgbImage,
+    sharpened: &LinearRgbImage,
+    max_chroma_shift: f32,
+    region_map: Option<&RegionMap>,
+    region_factors: Option<&ChromaRegionFactors>,
+    saturation_guard: Option<&SaturationGuardParams>,
+) -> Result<(LinearRgbImage, ChromaGuardDiagnostics), CoreError> {
+    let w = base.width() as usize;
+    let src_data = base.pixels();
+    let rec_data = sharpened.pixels();
+    let n_pixels = w * (base.height() as usize);
+    let mut out_data = vec![0.0f32; n_pixels * 3];
+
+    let mut clamped_count: u32 = 0;
+    let mut total_shift = 0.0f64;
+    let mut max_shift_global = 0.0f32;
+
+    let mut eff_min = f32::INFINITY;
+    let mut eff_max = f32::NEG_INFINITY;
+    let mut eff_sum = 0.0f64;
+
+    let has_region = region_map.is_some() && region_factors.is_some();
+    let mut region_counts = [0u32; REGION_CLASS_COUNT];
+    let mut region_clamped = [0u32; REGION_CLASS_COUNT];
+    let mut region_shift_sum = [0.0f64; REGION_CLASS_COUNT];
+    let mut region_shift_max = [0.0f32; REGION_CLASS_COUNT];
+
+    for i in 0..n_pixels {
+        let idx = i * 3;
+        let (r, g, b) = (src_data[idx], src_data[idx + 1], src_data[idx + 2]);
+        let (r2, g2, b2) = (rec_data[idx], rec_data[idx + 1], rec_data[idx + 2]);
+
+        let l_orig = luminance_from_linear_srgb(r, g, b);
+        let l_new = luminance_from_linear_srgb(r2, g2, b2);
+
+        let (cr_orig, cg_orig, cb_orig) = (r - l_orig, g - l_orig, b - l_orig);
+        let (cr_new, cg_new, cb_new) = (r2 - l_new, g2 - l_new, b2 - l_new);
+
+        let (dr, dg, db) = (cr_new - cr_orig, cg_new - cg_orig, cb_new - cb_orig);
+        let shift = (dr * dr + dg * dg + db * db).sqrt();
+        let orig_mag = (cr_orig * cr_orig + cg_orig * cg_orig + cb_orig * cb_orig).sqrt();
+
+        let region_factor = match (region_map, region_factors) {
+            (Some(rmap), Some(factors)) => {
+                let (px, py) = ((i % w) as u32, (i / w) as u32);
+                factors.factor_for(rmap.get(px, py))
+            }
+            _ => 1.0,
+        };
+
+        let sat_factor = match saturation_guard {
+            Some(sp) => {
+                let sat_norm = (r.max(g).max(b) - r.min(g).min(b)).clamp(0.0, 1.0);
+                1.0 - (1.0 - sp.min_scale) * sat_norm.powf(sp.gamma)
+            }
+            None => 1.0,
+        };
+
+        let effective_threshold = max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
+
+        if effective_threshold < eff_min { eff_min = effective_threshold; }
+        if effective_threshold > eff_max { eff_max = effective_threshold; }
+        eff_sum += effective_threshold as f64;
+
+        total_shift += shift as f64;
+        if shift > max_shift_global { max_shift_global = shift; }
+
+        if has_region {
+            let rmap = region_map.unwrap();
+            let (px, py) = ((i % w) as u32, (i / w) as u32);
+            let cls = rmap.get(px, py) as usize;
+            region_counts[cls] += 1;
+            region_shift_sum[cls] += shift as f64;
+            if shift > region_shift_max[cls] { region_shift_max[cls] = shift; }
+            if shift > effective_threshold {
+                region_clamped[cls] += 1;
+            }
+        }
+
+        if shift > effective_threshold {
+            let blend = effective_threshold / shift;
+            let cr = cr_orig + blend * (cr_new - cr_orig);
+            let cg = cg_orig + blend * (cg_new - cg_orig);
+            let cb = cb_orig + blend * (cb_new - cb_orig);
+            out_data[idx] = l_new + cr;
+            out_data[idx + 1] = l_new + cg;
+            out_data[idx + 2] = l_new + cb;
+            clamped_count += 1;
+        } else {
+            out_data[idx] = r2;
+            out_data[idx + 1] = g2;
+            out_data[idx + 2] = b2;
+        }
+    }
+
+    let image = LinearRgbImage::new(base.width(), base.height(), out_data)?;
+
+    let per_region = if has_region {
+        let mk = |cls: usize| -> ChromaRegionClampStats {
+            let cnt = region_counts[cls];
+            ChromaRegionClampStats {
+                pixel_count: cnt,
+                clamped_count: region_clamped[cls],
+                clamped_fraction: if cnt > 0 { region_clamped[cls] as f32 / cnt as f32 } else { 0.0 },
+                mean_shift: if cnt > 0 { (region_shift_sum[cls] / cnt as f64) as f32 } else { 0.0 },
+                max_shift: region_shift_max[cls],
+            }
+        };
+        Some(ChromaPerRegionDiagnostics {
+            flat: mk(RegionClass::Flat as usize),
+            textured: mk(RegionClass::Textured as usize),
+            strong_edge: mk(RegionClass::StrongEdge as usize),
+            microtexture: mk(RegionClass::Microtexture as usize),
+            risky_halo_zone: mk(RegionClass::RiskyHaloZone as usize),
+        })
+    } else {
+        None
+    };
+
+    let has_modulation = region_factors.is_some() || saturation_guard.is_some();
+    let diag = ChromaGuardDiagnostics {
+        pixels_clamped_fraction: clamped_count as f32 / n_pixels.max(1) as f32,
+        mean_chroma_shift: if n_pixels > 0 { (total_shift / n_pixels as f64) as f32 } else { 0.0 },
+        max_chroma_shift: max_shift_global,
+        effective_threshold_min: if has_modulation && n_pixels > 0 { Some(eff_min) } else { None },
+        effective_threshold_mean: if has_modulation && n_pixels > 0 { Some((eff_sum / n_pixels as f64) as f32) } else { None },
+        effective_threshold_max: if has_modulation && n_pixels > 0 { Some(eff_max) } else { None },
+        per_region,
+    };
+
+    Ok((image, diag))
+}
+
 // ---------------------------------------------------------------------------
 // Alternative evaluation color spaces
 // ---------------------------------------------------------------------------

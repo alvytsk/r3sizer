@@ -514,7 +514,9 @@ mod tests {
     fn rule1_fires_on_high_edge_density_uniform() {
         let mut diag = base_diag();
         diag.evaluator_result = Some(eval_with_edge_density(0.25));
-        let params = base_params();
+        let mut params = base_params();
+        // Rule 1 only fires when strategy is Uniform.
+        params.sharpen_strategy = SharpenStrategy::Uniform;
 
         let recs = generate_recommendations(&diag, &params);
         assert!(recs.iter().any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
@@ -583,8 +585,11 @@ mod tests {
             strong_edge_fraction: 0.10, microtexture_fraction: 0.05,
             risky_halo_zone_fraction: 0.20,
         });
+        let mut params = base_params();
+        // Rule 2 requires ContentAdaptive; verify it skips when Uniform.
+        params.sharpen_strategy = SharpenStrategy::Uniform;
 
-        let recs = generate_recommendations(&diag, &base_params());
+        let recs = generate_recommendations(&diag, &params);
         assert!(!recs.iter().any(|r| r.kind == RecommendationKind::LowerStrongEdgeGain));
     }
 

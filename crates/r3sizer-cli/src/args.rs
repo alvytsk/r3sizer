@@ -34,8 +34,8 @@ pub struct Cli {
     pub preserve_aspect_ratio: bool,
 
     /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
-    /// Default: 0.001 (= 0.1 %).
-    #[arg(long, default_value_t = 0.001)]
+    /// Default: 0.003 (= 0.3 %, "photo" preset).
+    #[arg(long, default_value_t = 0.003)]
     pub target_artifact_ratio: f32,
 
     /// Path to write a JSON diagnostics file (optional).
@@ -78,8 +78,8 @@ pub struct Cli {
     #[arg(long, default_value = "summary")]
     pub diagnostics_level: DiagnosticsLevelArg,
 
-    /// Named pipeline preset. Overrides sharpen strategy, chroma guard, and evaluator settings.
-    /// Available: baseline, v3-adaptive, v5-full, v5-two-pass.
+    /// Named pipeline preset. Overrides all pipeline settings.
+    /// Stable: photo (default), precision. Legacy: baseline, v3-adaptive, v5-full, v5-two-pass.
     #[arg(long, value_name = "NAME")]
     pub preset: Option<String>,
 

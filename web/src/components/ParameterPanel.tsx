@@ -468,43 +468,12 @@ export function ParameterPanel() {
   const presetKey = matchingPreset ? `${matchingPreset.w}x${matchingPreset.h}` : "";
 
   const logRatio = Math.log10(params.target_artifact_ratio);
+  const [activePreset, setActivePreset] = useState("photo");
 
   return (
     <TooltipProvider>
     <div className="p-3 space-y-4">
-      {/* Pipeline preset selector */}
-      <div className="space-y-2">
-        <SectionLabel>Pipeline Preset</SectionLabel>
-        <Select
-          value=""
-          onValueChange={(v) => {
-            if (!v) return;
-            const preset = PIPELINE_PRESETS[v];
-            if (preset) {
-              updateParams({
-                ...DEFAULT_PARAMS,
-                ...preset,
-                target_width: params.target_width,
-                target_height: params.target_height,
-                diagnostics_level: "full",
-              });
-            }
-          }}
-        >
-          <SelectTrigger className="h-7 text-xs font-mono">
-            <span className="flex flex-1 text-left truncate text-muted-foreground" data-slot="select-value">
-              Apply preset...
-            </span>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="baseline">Baseline (uniform, no guard)</SelectItem>
-            <SelectItem value="v3-adaptive">v3-adaptive (CA sharpen)</SelectItem>
-            <SelectItem value="v5-full">v5-full (CA + chroma guard)</SelectItem>
-            <SelectItem value="v5-two-pass">v5-two-pass (+ adaptive probing)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
+      {/* Dimensions */}
       <div className="space-y-2">
         <SectionLabel>Dimensions</SectionLabel>
         <div>
@@ -604,6 +573,82 @@ export function ParameterPanel() {
         )}
       </div>
 
+      {/* Pipeline preset */}
+      <div className="space-y-2">
+        <SectionLabel>Pipeline</SectionLabel>
+        <div className="grid grid-cols-2 gap-1">
+          {(["photo", "precision"] as const).map((key) => {
+            const active = activePreset === key;
+            const meta = key === "photo"
+              ? { label: "Photo", desc: "natural images" }
+              : { label: "Precision", desc: "text, UI, architecture" };
+            return (
+              <button
+                key={key}
+                type="button"
+                className={[
+                  "relative rounded-md px-2.5 py-2 text-left transition-all duration-150",
+                  "border font-mono",
+                  active
+                    ? "border-primary/40 bg-primary/[0.08] ring-1 ring-primary/20"
+                    : "border-border/30 bg-card/30 hover:border-border/50 hover:bg-card/60",
+                ].join(" ")}
+                onClick={() => {
+                  const preset = PIPELINE_PRESETS[key];
+                  if (preset) {
+                    setActivePreset(key);
+                    updateParams({
+                      ...DEFAULT_PARAMS,
+                      ...preset,
+                      target_width: params.target_width,
+                      target_height: params.target_height,
+                      diagnostics_level: "full",
+                    });
+                  }
+                }}
+              >
+                <span className={`text-xs font-semibold ${active ? "text-primary" : "text-foreground/70"}`}>
+                  {meta.label}
+                </span>
+                <span className={`block text-[10px] mt-0.5 ${active ? "text-primary/60" : "text-muted-foreground/40"}`}>
+                  {meta.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Active config summary */}
+        <div className="rounded-md border border-border/20 bg-surface/50 px-2.5 py-2">
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/40">P₀</span>
+            <span className="text-base font-mono font-bold text-primary tabular-nums">
+              {params.target_artifact_ratio.toExponential(0)}
+            </span>
+            <span className="text-[10px] text-muted-foreground/30">
+              ({(params.target_artifact_ratio * 100).toFixed(1)}% budget)
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/50 font-mono">
+            <span>
+              {"TwoPass" in params.probe_strengths
+                ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} probes`
+                : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} probes`}
+            </span>
+            <span className="text-border/40">|</span>
+            <span>
+              {params.sharpen_strategy.strategy === "content_adaptive" ? "adaptive" : "uniform"}
+              {params.experimental_sharpen_mode ? " + guard" : ""}
+            </span>
+            <span className="text-border/40">|</span>
+            <span>{params.sharpen_mode}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Visual divider: setup ↑ / tuning ↓ ── */}
+      <div className="h-px bg-gradient-to-r from-transparent via-border/40 to-transparent" />
+
+      {/* Sharpening — only sigma and resize kernel at top level */}
       <div className="space-y-2">
         <SectionLabel>Sharpening</SectionLabel>
         <div>
@@ -624,7 +669,7 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest; Gaussian is smoothest; Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects the kernel per region (flat → Gaussian, edges → Lanczos3, etc.).">Resize Kernel</ValueLabel>
+          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest; Gaussian is smoothest; Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects the kernel per region.">Resize Kernel</ValueLabel>
           <Select
             value={
               params.resize_strategy?.strategy === "content_adaptive"
@@ -664,120 +709,131 @@ export function ParameterPanel() {
             </SelectContent>
           </Select>
         </div>
-        <div>
-          <ValueLabel tip="Lightness sharpens only luminance (less color fringing). RGB sharpens all channels independently (stronger but may shift colors).">Mode</ValueLabel>
-          <Select
-            value={params.sharpen_mode}
-            onValueChange={(v) => {
-              if (!v) return;
-              updateParams({ sharpen_mode: v as typeof params.sharpen_mode });
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={SHARPEN_MODE} value={params.sharpen_mode} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="lightness">Lightness</SelectItem>
-              <SelectItem value="rgb">RGB</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <ValueLabel tip="Uniform applies equal sharpening everywhere. Content Adaptive varies strength per region — less on edges (avoids halos), more on textures.">Strategy</ValueLabel>
-          <Select
-            value={params.sharpen_strategy.strategy}
-            onValueChange={(v) => {
-              if (!v) return;
-              if (v === "uniform") {
-                updateParams({ sharpen_strategy: { strategy: "uniform" } });
-              } else {
-                updateParams({
-                  sharpen_strategy: { ...DEFAULT_CONTENT_ADAPTIVE_STRATEGY },
-                });
-              }
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={SHARPEN_STRATEGY} value={params.sharpen_strategy.strategy} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="uniform">Uniform</SelectItem>
-              <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {params.sharpen_strategy.strategy === "content_adaptive" && (
-          <AdaptiveSettings
-            strategy={params.sharpen_strategy}
-            updateParams={updateParams}
-          />
-        )}
       </div>
 
+      {/* Advanced — everything else collapsed */}
       <div className="space-y-2">
-        <SectionLabel>Metric</SectionLabel>
-        <div>
-          <div className="flex items-baseline justify-between">
-            <ValueLabel tip="Maximum allowed fraction of pixels with out-of-range values after sharpening. Lower = less artifacts but softer image. Higher = sharper but more clipping. 1e-3 (0.1%) is a good default.">Target P(s)</ValueLabel>
-            <span className="text-xs font-mono text-primary">
-              {params.target_artifact_ratio.toExponential(1)}
-            </span>
-          </div>
-          <Slider
-            min={-4}
-            max={-1}
-            step={0.1}
-            value={[logRatio]}
-            onValueChange={(v) =>
-              updateParams({ target_artifact_ratio: Math.pow(10, sliderValue(v)) })
-            }
-          />
-        </div>
-        <div>
-          <ValueLabel tip="Relative subtracts the baseline artifact ratio (from resize alone) so only sharpening-induced artifacts are measured. Absolute measures total artifacts including resize.">Metric Mode</ValueLabel>
-          <Select
-            value={params.metric_mode}
-            onValueChange={(v) => {
-              if (v) updateParams({ metric_mode: v as typeof params.metric_mode });
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={METRIC_MODE} value={params.metric_mode} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="relative_to_base">Relative to Baseline</SelectItem>
-              <SelectItem value="absolute_total">Absolute Total</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <ValueLabel tip="Channel Clipping counts individual R/G/B values outside [0,1]. Pixel Out-of-Gamut counts pixels where any channel is clipped. Channel is more sensitive, Pixel is more conservative.">Artifact Metric</ValueLabel>
-          <Select
-            value={params.artifact_metric}
-            onValueChange={(v) => {
-              if (v) updateParams({ artifact_metric: v as typeof params.artifact_metric });
-            }}
-          >
-            <SelectTrigger className="h-8 text-sm font-mono">
-              <SelectedLabel labels={ARTIFACT_METRIC} value={params.artifact_metric} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="channel_clipping_ratio">Channel Clipping Ratio</SelectItem>
-              <SelectItem value="pixel_out_of_gamut_ratio">Pixel Out-of-Gamut Ratio</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
       <Collapsible>
-        <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
-          <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[panel-open]:rotate-180" />
+        <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground/60 hover:text-primary transition-colors border-b border-border/20 pb-1 w-full">
+          <div className="w-0.5 h-3 rounded-full bg-muted-foreground/20 group-hover:bg-primary/50 transition-colors" />
           Advanced
+          <ChevronDown className="h-3 w-3 ml-auto transition-transform duration-200 group-data-[panel-open]:rotate-180" />
         </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-2 pt-2">
+        <CollapsibleContent className="space-y-3 pt-3">
+
+          {/* Target artifact ratio */}
+          <div>
+            <div className="flex items-baseline justify-between">
+              <ValueLabel tip="Maximum allowed fraction of pixels with out-of-range values after sharpening. Lower = less artifacts but softer image. Higher = sharper but more clipping.">Target P(s)</ValueLabel>
+              <span className="text-xs font-mono text-primary">
+                {params.target_artifact_ratio.toExponential(1)}
+              </span>
+            </div>
+            <Slider
+              min={-4}
+              max={-1}
+              step={0.1}
+              value={[logRatio]}
+              onValueChange={(v) =>
+                updateParams({ target_artifact_ratio: Math.pow(10, sliderValue(v)) })
+              }
+            />
+          </div>
+
+          {/* Sharpen mode & strategy */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <ValueLabel tip="Cubic fits a polynomial to probe data and solves analytically for optimal strength. Direct Search picks the best probe sample directly — simpler but less precise.">Fit Strategy</ValueLabel>
+              <ValueLabel tip="Lightness sharpens only luminance (less color fringing). RGB sharpens all channels independently (stronger but may shift colors).">Mode</ValueLabel>
+              <Select
+                value={params.sharpen_mode}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  updateParams({ sharpen_mode: v as typeof params.sharpen_mode });
+                }}
+              >
+                <SelectTrigger className="h-8 text-sm font-mono">
+                  <SelectedLabel labels={SHARPEN_MODE} value={params.sharpen_mode} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="lightness">Lightness</SelectItem>
+                  <SelectItem value="rgb">RGB</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <ValueLabel tip="Uniform applies equal sharpening everywhere. Content Adaptive varies strength per region.">Strategy</ValueLabel>
+              <Select
+                value={params.sharpen_strategy.strategy}
+                onValueChange={(v) => {
+                  if (!v) return;
+                  if (v === "uniform") {
+                    updateParams({ sharpen_strategy: { strategy: "uniform" } });
+                  } else {
+                    updateParams({
+                      sharpen_strategy: { ...DEFAULT_CONTENT_ADAPTIVE_STRATEGY },
+                    });
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 text-sm font-mono">
+                  <SelectedLabel labels={SHARPEN_STRATEGY} value={params.sharpen_strategy.strategy} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="uniform">Uniform</SelectItem>
+                  <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          {params.sharpen_strategy.strategy === "content_adaptive" && (
+            <AdaptiveSettings
+              strategy={params.sharpen_strategy}
+              updateParams={updateParams}
+            />
+          )}
+
+          {/* Metric mode & artifact metric */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <ValueLabel tip="Relative subtracts the baseline artifact ratio so only sharpening-induced artifacts are measured.">Metric Mode</ValueLabel>
+              <Select
+                value={params.metric_mode}
+                onValueChange={(v) => {
+                  if (v) updateParams({ metric_mode: v as typeof params.metric_mode });
+                }}
+              >
+                <SelectTrigger className="h-8 text-sm font-mono">
+                  <SelectedLabel labels={METRIC_MODE} value={params.metric_mode} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relative_to_base">Relative</SelectItem>
+                  <SelectItem value="absolute_total">Absolute</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <ValueLabel tip="Channel Clipping counts individual R/G/B values outside [0,1]. Pixel Out-of-Gamut counts pixels where any channel is clipped.">Artifact Metric</ValueLabel>
+              <Select
+                value={params.artifact_metric}
+                onValueChange={(v) => {
+                  if (v) updateParams({ artifact_metric: v as typeof params.artifact_metric });
+                }}
+              >
+                <SelectTrigger className="h-8 text-sm font-mono">
+                  <SelectedLabel labels={ARTIFACT_METRIC} value={params.artifact_metric} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="channel_clipping_ratio">Channel Clipping</SelectItem>
+                  <SelectItem value="pixel_out_of_gamut_ratio">Pixel OOG</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Fit strategy & clamp policy */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <ValueLabel tip="Cubic fits a polynomial and solves analytically. Direct Search picks the best probe sample directly.">Fit Strategy</ValueLabel>
               <Select
                 value={params.fit_strategy}
                 onValueChange={(v) => {
@@ -794,7 +850,7 @@ export function ParameterPanel() {
               </Select>
             </div>
             <div>
-              <ValueLabel tip="Clamp clips out-of-range values to [0,1]. Normalize rescales the entire image to fit — preserves relative differences but may shift overall brightness.">Clamp Policy</ValueLabel>
+              <ValueLabel tip="Clamp clips values to [0,1]. Normalize rescales the entire image to fit.">Clamp Policy</ValueLabel>
               <Select
                 value={params.output_clamp}
                 onValueChange={(v) => {
@@ -811,46 +867,41 @@ export function ParameterPanel() {
               </Select>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="contrast"
-              checked={params.enable_contrast_leveling}
-              onCheckedChange={(v) =>
-                updateParams({ enable_contrast_leveling: v })
-              }
-            />
-            <Label htmlFor="contrast" className="text-[13px] text-muted-foreground">
-              Contrast leveling
-            </Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="evaluator"
-              checked={params.evaluator_config != null}
-              onCheckedChange={(v) =>
-                updateParams({ evaluator_config: v ? "heuristic" : null })
-              }
-            />
-            <span className="flex items-center gap-1">
-              <Label htmlFor="evaluator" className="text-[13px] text-muted-foreground">
-                Quality evaluator
+
+          {/* Toggles */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="contrast"
+                checked={params.enable_contrast_leveling}
+                onCheckedChange={(v) =>
+                  updateParams({ enable_contrast_leveling: v })
+                }
+              />
+              <Label htmlFor="contrast" className="text-[13px] text-muted-foreground">
+                Contrast leveling
               </Label>
-              <Tooltip>
-                <TooltipTrigger
-                  render={<span />}
-                  className="inline-flex text-muted-foreground/40 hover:text-primary transition-colors"
-                >
-                  <Info className="h-3 w-3" />
-                </TooltipTrigger>
-                <TooltipContent side="right">Enables the heuristic quality evaluator. When off, recommendations based on image features are unavailable.</TooltipContent>
-              </Tooltip>
-            </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="evaluator"
+                checked={params.evaluator_config != null}
+                onCheckedChange={(v) =>
+                  updateParams({ evaluator_config: v ? "heuristic" : null })
+                }
+              />
+              <Label htmlFor="evaluator" className="text-[13px] text-muted-foreground">
+                Evaluator
+              </Label>
+            </div>
           </div>
+
+          {/* Probe strengths override */}
           <div>
-            <ValueLabel tip="Sharpening strengths to sample when building the artifact curve. More points improve fit accuracy. Default: 0.05, 0.15, 0.30, 0.50.">Probe strengths</ValueLabel>
+            <ValueLabel tip="Override the two-pass probe placement with explicit comma-separated strengths.">Probe strengths</ValueLabel>
             <Input
               className="h-8 text-sm font-mono"
-              placeholder="comma-separated"
+              placeholder="auto (two-pass)"
               value={("Explicit" in params.probe_strengths ? params.probe_strengths.Explicit : []).join(", ")}
               onChange={(e) => {
                 const vals = e.target.value
@@ -866,6 +917,7 @@ export function ParameterPanel() {
             />
           </div>
 
+          {/* Metric weights */}
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between">
               <ValueLabel>Metric Weights</ValueLabel>
@@ -913,6 +965,7 @@ export function ParameterPanel() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+      </div>
 
     </div>
     </TooltipProvider>

@@ -388,14 +388,20 @@ pub struct AutoSharpParams {
 }
 
 impl Default for AutoSharpParams {
+    /// Default is the **Photo** preset: P0=0.003, two-pass probing up to 1.0,
+    /// content-adaptive sharpening with chroma guard and heuristic evaluator.
     fn default() -> Self {
         Self {
             target_width: 800,
             target_height: 600,
-            probe_strengths: ProbeConfig::Explicit(
-                vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0],
-            ),
-            target_artifact_ratio: 0.001,
+            probe_strengths: ProbeConfig::TwoPass {
+                coarse_count: 7,
+                coarse_min: 0.003,
+                coarse_max: 1.00,
+                dense_count: 4,
+                window_margin: 0.5,
+            },
+            target_artifact_ratio: 0.003,
             enable_contrast_leveling: false,
             sharpen_sigma: 1.0,
             fit_strategy: FitStrategy::Cubic,
@@ -405,12 +411,14 @@ impl Default for AutoSharpParams {
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
             metric_weights: MetricWeights::default(),
             diagnostics_level: DiagnosticsLevel::default(),
-            sharpen_strategy: SharpenStrategy::default(),
+            sharpen_strategy: SharpenStrategy::ContentAdaptive {
+                classification: ClassificationParams::default(),
+                gain_table: GainTable::v03_default(),
+                max_backoff_iterations: 4,
+                backoff_scale_factor: 0.8,
+            },
             input_color_space: None,
             resize_strategy: None,
-            // BREAKING (v0.5): chroma guard and evaluator are now on by default.
-            // Previously these were None (off). Callers that need the minimal
-            // baseline can set both to None explicitly.
             experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
                 max_chroma_shift: 0.25,
                 chroma_region_factors: Some(ChromaRegionFactors::default()),
@@ -423,6 +431,34 @@ impl Default for AutoSharpParams {
 }
 
 impl AutoSharpParams {
+    /// **Photo** preset: P0=0.003, two-pass probing [0.003, 1.00].
+    /// Intended for natural photographic content.
+    pub fn photo(target_width: u32, target_height: u32) -> Self {
+        Self {
+            target_width,
+            target_height,
+            ..Self::default()
+        }
+    }
+
+    /// **Precision** preset: P0=0.001, two-pass probing [0.003, 0.50].
+    /// Intended for text, UI, architecture, and hard-edge content.
+    pub fn precision(target_width: u32, target_height: u32) -> Self {
+        Self {
+            target_width,
+            target_height,
+            target_artifact_ratio: 0.001,
+            probe_strengths: ProbeConfig::TwoPass {
+                coarse_count: 7,
+                coarse_min: 0.003,
+                coarse_max: 0.50,
+                dense_count: 4,
+                window_margin: 0.5,
+            },
+            ..Self::default()
+        }
+    }
+
     /// Validate that parameters are internally consistent. Called at pipeline entry.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.target_width == 0 || self.target_height == 0 {

@@ -1,0 +1,236 @@
+{
+  "input_size": {
+    "width": 2673,
+    "height": 3565
+  },
+  "output_size": {
+    "width": 800,
+    "height": 1067
+  },
+  "sharpen_mode": "lightness",
+  "metric_mode": "relative_to_base",
+  "artifact_metric": "channel_clipping_ratio",
+  "target_artifact_ratio": 0.0010000000474974513,
+  "baseline_artifact_ratio": 0,
+  "probe_samples": [
+    {
+      "strength": 0,
+      "artifact_ratio": 0,
+      "metric_value": 0,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0,
+          "halo_ringing": 0,
+          "edge_overshoot": 0,
+          "texture_flattening": 0
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0,
+        "composite_score": 0,
+        "aggregate": 0
+      }
+    },
+    {
+      "strength": 0.009999999776482582,
+      "artifact_ratio": 0.00022961574723012745,
+      "metric_value": 0.00022961574723012745,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.00022961574723012745,
+          "halo_ringing": 0.353237509727478,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.008763453923165798
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.00022961574723012745,
+        "composite_score": 0.1070772185921669,
+        "aggregate": 0.00022961574723012745
+      }
+    },
+    {
+      "strength": 0.019999999552965164,
+      "artifact_ratio": 0.0002678850432857871,
+      "metric_value": 0.0002678850432857871,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.0002678850432857871,
+          "halo_ringing": 0.4000377357006073,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.017513487488031387
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.0002678850432857871,
+        "composite_score": 0.12203055620193481,
+        "aggregate": 0.0002678850432857871
+      }
+    },
+    {
+      "strength": 0.03500000014901161,
+      "artifact_ratio": 0.0003338800452183932,
+      "metric_value": 0.0003338800452183932,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.0003338800452183932,
+          "halo_ringing": 0.42224302887916565,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.030614446848630905
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.0003338800452183932,
+        "composite_score": 0.13006822764873505,
+        "aggregate": 0.0003338800452183932
+      }
+    },
+    {
+      "strength": 0.05000000074505806,
+      "artifact_ratio": 0.00040456108399666846,
+      "metric_value": 0.00040456108399666846,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.00040456108399666846,
+          "halo_ringing": 0.4310398995876312,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.04368491470813751
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.00040456108399666846,
+        "composite_score": 0.1340850293636322,
+        "aggregate": 0.00040456108399666846
+      }
+    },
+    {
+      "strength": 0.07999999821186066,
+      "artifact_ratio": 0.0005732583813369274,
+      "metric_value": 0.0005732583813369274,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.0005732583813369274,
+          "halo_ringing": 0.4391380548477173,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.0697341188788414
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.0005732583813369274,
+        "composite_score": 0.13928809762001038,
+        "aggregate": 0.0005732583813369274
+      }
+    },
+    {
+      "strength": 0.11999999731779099,
+      "artifact_ratio": 0.0008220087620429695,
+      "metric_value": 0.0008220087620429695,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.0008220087620429695,
+          "halo_ringing": 0.4435679316520691,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.10426826775074005
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.0008220087620429695,
+        "composite_score": 0.14431920647621155,
+        "aggregate": 0.0008220087620429695
+      }
+    },
+    {
+      "strength": 0.20000000298023224,
+      "artifact_ratio": 0.0016143393004313111,
+      "metric_value": 0.0016143393004313111,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.0016143393004313111,
+          "halo_ringing": 0.4470196068286896,
+          "edge_overshoot": 0,
+          "texture_flattening": 0.17265889048576355
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.0016143393004313111,
+        "composite_score": 0.15298610925674438,
+        "aggregate": 0.0016143393004313111
+      }
+    },
+    {
+      "strength": 0.44999998807907104,
+      "artifact_ratio": 0.005430334247648716,
+      "metric_value": 0.005430334247648716,
+      "breakdown": {
+        "components": {
+          "gamut_excursion": 0.005430334247648716,
+          "halo_ringing": 0.45019879937171936,
+          "edge_overshoot": 0.00009260913066100329,
+          "texture_flattening": 0.380480021238327
+        },
+        "selected_metric": "gamut_excursion",
+        "selection_score": 0.005430334247648716,
+        "composite_score": 0.17856575548648834,
+        "aggregate": 0.005430334247648716
+      }
+    }
+  ],
+  "fit_status": {
+    "status": "success"
+  },
+  "fit_coefficients": {
+    "a": 0.02508866552646235,
+    "b": 0.001177501303802491,
+    "c": 0.006296778432860187,
+    "d": 0.00007369305200142896
+  },
+  "fit_quality": {
+    "residual_sum_of_squares": 3.182923501106901e-8,
+    "r_squared": 0.9986812714781891,
+    "max_residual": 0.00009281207351857573,
+    "min_pivot": 0.000014119538917071713
+  },
+  "crossing_status": "found",
+  "robustness": {
+    "monotonic": true,
+    "quasi_monotonic": true,
+    "r_squared_ok": true,
+    "well_conditioned": true,
+    "loo_stable": true,
+    "max_loo_root_change": 0.20970939177229628
+  },
+  "selected_strength": 0.13155004382133484,
+  "selection_mode": "polynomial_root",
+  "budget_reachable": true,
+  "measured_artifact_ratio": 0.0009122149203903973,
+  "measured_metric_value": 0.0009122149203903973,
+  "metric_components": {
+    "components": {
+      "gamut_excursion": 0.0009122149203903973,
+      "halo_ringing": 0.4443435072898865,
+      "edge_overshoot": 0,
+      "texture_flattening": 0.11417115479707718
+    },
+    "selected_metric": "gamut_excursion",
+    "selection_score": 0.0009122149203903973,
+    "composite_score": 0.14563240110874176,
+    "aggregate": 0.0009122149203903973
+  },
+  "metric_weights": {
+    "gamut_excursion": 1,
+    "halo_ringing": 0.30000001192092896,
+    "edge_overshoot": 0.30000001192092896,
+    "texture_flattening": 0.10000000149011612
+  },
+  "timing": {
+    "resize_us": 136900,
+    "contrast_us": 0,
+    "baseline_us": 3800,
+    "probing_us": 761400,
+    "fit_us": 0,
+    "robustness_us": 100,
+    "final_sharpen_us": 9300,
+    "clamp_us": 2500,
+    "total_us": 1230900,
+    "base_quality_us": 238500
+  },
+  "base_resize_quality": {
+    "edge_retention": 1,
+    "texture_retention": 1,
+    "ringing_score": 0.010236645117402077,
+    "envelope_scale": 0.979526698589325
+  },
+  "effective_target_artifact_ratio": 0.0009795267833396792
+}

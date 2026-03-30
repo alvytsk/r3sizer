@@ -214,7 +214,14 @@ pub fn process_auto_sharp_downscale_with_progress(
     // -------------------------------------------------------------------
     // 6–7. Fit + solve (or direct search)
     // -------------------------------------------------------------------
-    let s_min = probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05);
+    // In RelativeToBase mode P(0)=0 < P0 is always true, so roots below the first
+    // probe are physically valid. Allow s_min=0 so the solver can find crossings
+    // that fall between the implicit anchor and the first non-zero probe.
+    let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
+        0.0_f64
+    } else {
+        probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05)
+    };
     let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
     let p0 = effective_p0 as f64;
 
@@ -227,7 +234,12 @@ pub fn process_auto_sharp_downscale_with_progress(
         .map(|ps| (ps.strength as f64, ps.metric_value as f64))
         .collect();
     if matches!(params.metric_mode, MetricMode::RelativeToBase) {
-        fit_data.insert(0, (0.0, 0.0));
+        // Prepend the theoretical anchor P(0)=0 unless the first probe is already
+        // at s=0 (adding a duplicate row degrades the Vandermonde fit quality).
+        let first_s = probe_samples.first().map(|p| p.strength).unwrap_or(1.0);
+        if first_s > 1e-6 {
+            fit_data.insert(0, (0.0, 0.0));
+        }
     }
 
     // Monotonicity check on probe samples.
@@ -340,11 +352,30 @@ pub fn process_auto_sharp_downscale_with_progress(
     );
 
     // -------------------------------------------------------------------
+    // 7.5 Evaluator strength cap (runs before final sharpening)
+    // -------------------------------------------------------------------
+    // When the evaluator is active, ask it for a suggested strength based
+    // on image content features.  If the solver picked higher than the
+    // evaluator recommends, cap it — the evaluator acts as a perceptual
+    // safety net that the gamut metric alone cannot provide (e.g. portraits
+    // where gamut excursion stays low but texture/halo damage is visible).
+    let evaluator_cap = match &params.evaluator_config {
+        Some(crate::types::EvaluatorConfig::Heuristic) => {
+            let eval = crate::evaluator::HeuristicEvaluator;
+            crate::evaluator::QualityEvaluator::suggest_strength(&eval, &base, 0.8)
+        }
+        None => None,
+    };
+    let selected_strength = match evaluator_cap {
+        Some(cap) if solve_result.selected_strength > cap => cap,
+        _ => solve_result.selected_strength,
+    };
+
+    // -------------------------------------------------------------------
     // 8. Final sharpening (strategy-dependent)
     // -------------------------------------------------------------------
     on_stage("sharpening");
     let t0 = Instant::now();
-    let selected_strength = solve_result.selected_strength;
 
     // Experimental: chroma guard sharpening overrides the standard path.
     let _chroma_guard_diag;
@@ -367,6 +398,9 @@ pub fn process_auto_sharp_downscale_with_progress(
                 },
                 Some(gm),
             ) => {
+                // When budget is already unreachable (fallback mode), backoff would
+                // only reduce sharpening further without ever meeting P0. Skip it.
+                let effective_max_backoff = if budget_reachable { *max_backoff_iterations } else { 0 };
                 adaptive_sharpen_with_validation(
                     &base,
                     base_luminance.as_deref(),
@@ -378,18 +412,21 @@ pub fn process_auto_sharp_downscale_with_progress(
                     params.artifact_metric,
                     params.metric_mode,
                     baseline_artifact_ratio,
-                    *max_backoff_iterations,
+                    effective_max_backoff,
                     *backoff_scale_factor,
+                    params.evaluation_color_space,
                 )?
             }
         };
-    // Experimental: if chroma guard is configured, apply it as an override.
+    // Chroma guard: post-process the already-sharpened image.
+    // Compares chroma shift vs. the original base and soft-clamps where needed.
+    // Does NOT re-sharpen — preserves the content-adaptive gain map and backoff.
     {
         if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift, chroma_region_factors, saturation_guard,
         }) = &params.experimental_sharpen_mode {
-            let (guarded, cg_diag) = crate::chroma_guard::sharpen_with_chroma_guard(
-                &base, selected_strength, params.sharpen_sigma, *max_chroma_shift,
+            let (guarded, cg_diag) = crate::chroma_guard::apply_chroma_guard(
+                &base, &final_image, *max_chroma_shift,
                 region_map.as_ref(),
                 chroma_region_factors.as_ref(),
                 saturation_guard.as_ref(),
@@ -782,14 +819,19 @@ fn adaptive_sharpen_with_validation(
     baseline_artifact_ratio: f32,
     max_backoff: u8,
     backoff_factor: f32,
+    evaluation_color_space: Option<crate::types::EvaluationColorSpace>,
 ) -> Result<(LinearRgbImage, Option<AdaptiveValidationOutcome>, Option<u64>), CoreError> {
     let w = base.width() as usize;
     let h = base.height() as usize;
 
     let measure = |img: &LinearRgbImage| -> f32 {
-        let raw = match artifact_metric {
-            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
-            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+        let raw = if let Some(cs) = evaluation_color_space {
+            crate::chroma_guard::evaluate_in_color_space(img, cs)
+        } else {
+            match artifact_metric {
+                ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
+                ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
+            }
         };
         compute_metric_value(raw, baseline_artifact_ratio, metric_mode)
     };

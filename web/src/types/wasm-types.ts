@@ -110,68 +110,53 @@ export interface ProcessResult {
 
 // ── Pipeline presets for benchmarking ───────────────────────────────────
 
-/** Named pipeline presets matching CLI --preset options. */
+// Shared building blocks for the stable presets.
+const _CA_STRATEGY = {
+  strategy: "content_adaptive" as const,
+  classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
+  gain_table: { ...DEFAULT_GAIN_TABLE },
+  max_backoff_iterations: 4,
+  backoff_scale_factor: 0.8,
+};
+const _CHROMA_GUARD = {
+  luma_plus_chroma_guard: {
+    max_chroma_shift: 0.25,
+    chroma_region_factors: {
+      flat: 1.0, textured: 0.9, strong_edge: 0.65,
+      microtexture: 0.8, risky_halo_zone: 0.45,
+    },
+    saturation_guard: { min_scale: 0.6, gamma: 1.5 },
+  },
+};
+
+/** Named pipeline presets. */
 export const PIPELINE_PRESETS: Record<string, Partial<AutoSharpParams>> = {
-  baseline: {
-    sharpen_strategy: { strategy: "uniform" },
-    experimental_sharpen_mode: undefined,
-    evaluator_config: undefined,
-  },
-  "v3-adaptive": {
-    sharpen_strategy: {
-      strategy: "content_adaptive",
-      classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
-      gain_table: { ...DEFAULT_GAIN_TABLE },
-      max_backoff_iterations: 4,
-      backoff_scale_factor: 0.8,
-    },
-    experimental_sharpen_mode: undefined,
-    evaluator_config: undefined,
-  },
-  "v5-full": {
-    sharpen_strategy: {
-      strategy: "content_adaptive",
-      classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
-      gain_table: { ...DEFAULT_GAIN_TABLE },
-      max_backoff_iterations: 4,
-      backoff_scale_factor: 0.8,
-    },
-    experimental_sharpen_mode: {
-      luma_plus_chroma_guard: {
-        max_chroma_shift: 0.25,
-        chroma_region_factors: {
-          flat: 1.0, textured: 0.9, strong_edge: 0.65,
-          microtexture: 0.8, risky_halo_zone: 0.45,
-        },
-        saturation_guard: { min_scale: 0.6, gamma: 1.5 },
-      },
-    },
-    evaluator_config: "heuristic",
-  },
-  "v5-two-pass": {
+  // photo (default): P0=0.003 — natural photographs.
+  //   Coarse range [0.003, 1.00], 7 probes.
+  photo: {
+    target_artifact_ratio: 0.003,
     probe_strengths: {
       TwoPass: {
-        coarse_count: 5, coarse_min: 0.05, coarse_max: 3.0,
+        coarse_count: 7, coarse_min: 0.003, coarse_max: 1.00,
         dense_count: 4, window_margin: 0.5,
       },
     },
-    sharpen_strategy: {
-      strategy: "content_adaptive",
-      classification: { ...DEFAULT_CLASSIFICATION_PARAMS },
-      gain_table: { ...DEFAULT_GAIN_TABLE },
-      max_backoff_iterations: 4,
-      backoff_scale_factor: 0.8,
-    },
-    experimental_sharpen_mode: {
-      luma_plus_chroma_guard: {
-        max_chroma_shift: 0.25,
-        chroma_region_factors: {
-          flat: 1.0, textured: 0.9, strong_edge: 0.65,
-          microtexture: 0.8, risky_halo_zone: 0.45,
-        },
-        saturation_guard: { min_scale: 0.6, gamma: 1.5 },
+    sharpen_strategy: { ..._CA_STRATEGY },
+    experimental_sharpen_mode: { ..._CHROMA_GUARD },
+    evaluator_config: "heuristic",
+  },
+  // precision: P0=0.001 — text, UI, architecture.
+  //   Coarse range [0.003, 0.50], 7 probes.
+  precision: {
+    target_artifact_ratio: 0.001,
+    probe_strengths: {
+      TwoPass: {
+        coarse_count: 7, coarse_min: 0.003, coarse_max: 0.50,
+        dense_count: 4, window_margin: 0.5,
       },
     },
+    sharpen_strategy: { ..._CA_STRATEGY },
+    experimental_sharpen_mode: { ..._CHROMA_GUARD },
     evaluator_config: "heuristic",
   },
 };

@@ -1,22 +1,34 @@
-/// Named pipeline configuration presets for corpus benchmarking.
+/// Named pipeline configuration presets.
 ///
-/// Each preset represents a distinct pipeline configuration for A/B comparison:
+/// Stable presets:
+///   - **photo** (default): P0=0.003 — natural photographic content
+///   - **precision**: P0=0.001 — text, UI, architecture, hard-edge preservation
 ///
-/// - **baseline**: Minimal pipeline — uniform sharpen, no chroma guard, no evaluator
-/// - **v3-adaptive**: Content-adaptive sharpening with default gain table
-/// - **v5-full**: Full v5 pipeline — adaptive sharpen + chroma guard + saturation guard + evaluator
-/// - **v5-two-pass**: Same as v5-full but with two-pass adaptive probing
+/// Legacy presets (for A/B comparison):
+///   - **baseline**: Minimal pipeline — uniform sharpen, no chroma guard, no evaluator
+///   - **v3-adaptive**: Content-adaptive sharpening with default gain table
+///   - **v5-full**: Full v5 pipeline — adaptive sharpen + chroma guard + saturation guard + evaluator
+///   - **v5-two-pass**: Same as v5-full but with two-pass adaptive probing
 use r3sizer_core::{
     AutoSharpParams, ClassificationParams, ChromaRegionFactors, ExperimentalSharpenMode,
     EvaluatorConfig, GainTable, ProbeConfig, SaturationGuardParams, SharpenStrategy,
 };
 
 /// List of available preset names (for help text / validation).
-pub const PRESET_NAMES: &[&str] = &["baseline", "v3-adaptive", "v5-full", "v5-two-pass"];
+pub const PRESET_NAMES: &[&str] = &[
+    "photo", "precision",
+    "baseline", "v3-adaptive", "v5-full", "v5-two-pass",
+];
 
 /// Build pipeline params from a named preset.
 pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, String> {
     match name {
+        // ── Stable presets ──────────────────────────────────────────────
+        "photo" => Ok(AutoSharpParams::photo(tw, th)),
+
+        "precision" => Ok(AutoSharpParams::precision(tw, th)),
+
+        // ── Legacy presets ──────────────────────────────────────────────
         "baseline" => Ok(AutoSharpParams {
             target_width: tw,
             target_height: th,
@@ -43,8 +55,6 @@ pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, St
         "v5-full" => Ok(AutoSharpParams {
             target_width: tw,
             target_height: th,
-            // Default already has everything on (adaptive sharpen is Uniform by
-            // default, but chroma guard + evaluator are on).  Override to CA.
             sharpen_strategy: SharpenStrategy::ContentAdaptive {
                 classification: ClassificationParams::default(),
                 gain_table: GainTable::v03_default(),
@@ -65,8 +75,8 @@ pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, St
             target_height: th,
             probe_strengths: ProbeConfig::TwoPass {
                 coarse_count: 5,
-                coarse_min: 0.05,
-                coarse_max: 3.0,
+                coarse_min: 0.003,
+                coarse_max: 0.50,
                 dense_count: 4,
                 window_margin: 0.5,
             },

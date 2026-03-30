@@ -601,17 +601,15 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   "target_width": 800,
   "target_height": 600,
   "probe_strengths": {
-    "Explicit": [
-      0.05,
-      0.1,
-      0.2,
-      0.4,
-      0.8,
-      1.5,
-      3.0
-    ]
+    "TwoPass": {
+      "coarse_count": 7,
+      "coarse_min": 0.003,
+      "coarse_max": 1.0,
+      "dense_count": 4,
+      "window_margin": 0.5
+    }
   },
-  "target_artifact_ratio": 0.001,
+  "target_artifact_ratio": 0.003,
   "enable_contrast_leveling": false,
   "sharpen_sigma": 1.0,
   "fit_strategy": "Cubic",
@@ -627,7 +625,23 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
   },
   "diagnostics_level": "summary",
   "sharpen_strategy": {
-    "strategy": "uniform"
+    "strategy": "content_adaptive",
+    "classification": {
+      "gradient_low_threshold": 0.05,
+      "gradient_high_threshold": 0.4,
+      "variance_low_threshold": 0.001,
+      "variance_high_threshold": 0.01,
+      "variance_window": 5
+    },
+    "gain_table": {
+      "flat": 0.75,
+      "textured": 0.95,
+      "strong_edge": 1.0,
+      "microtexture": 1.1,
+      "risky_halo_zone": 0.7
+    },
+    "max_backoff_iterations": 4,
+    "backoff_scale_factor": 0.8
   },
   "experimental_sharpen_mode": {
     "luma_plus_chroma_guard": {

@@ -1,7 +1,7 @@
 /// Core run logic: load → process → save → diagnostics.
 use anyhow::{bail, Context, Result};
 
-use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig, SharpenStrategy};
+use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
 use r3sizer_io::{load_as_linear, save_from_linear};
 
 use crate::{args::Cli, output::print_summary};
@@ -41,7 +41,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
     let probe_strengths = if let Some(ref strengths) = args.probe_strengths {
         ProbeConfig::Explicit(strengths.clone())
     } else {
-        ProbeConfig::Explicit(vec![0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0])
+        AutoSharpParams::default().probe_strengths
     };
 
     let metric_weights = if let Some(ref w) = args.metric_weights {
@@ -74,7 +74,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         artifact_metric: args.artifact_metric.into(),
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
-        sharpen_strategy: SharpenStrategy::default(),
+        // Inherit sharpen_strategy, chroma guard, and evaluator from default (Photo).
         ..Default::default()
     }
 }

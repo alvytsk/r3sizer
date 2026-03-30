@@ -120,9 +120,10 @@ fn selected_strength_within_probe_range() {
     let params = default_params(4, 4);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let s = out.diagnostics.selected_strength;
+    // Default is Photo preset: TwoPass with coarse_max=1.0
     assert!(
-        s >= 0.05 && s <= 3.0,
-        "selected_strength {s} outside probe range [0.05, 3.0]"
+        s >= 0.00 && s <= 1.00,
+        "selected_strength {s} outside probe range [0.00, 1.00]"
     );
 }
 
@@ -131,7 +132,12 @@ fn probe_sample_count_matches_config() {
     let src = gradient_image(16, 16);
     let params = default_params(4, 4);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    assert_eq!(out.diagnostics.probe_samples.len(), 7);
+    // Default is TwoPass: 7 coarse + 4 dense = 11 total probes
+    let count = out.diagnostics.probe_samples.len();
+    assert!(
+        count >= 7 && count <= 11,
+        "expected 7-11 probes for TwoPass default, got {count}"
+    );
 }
 
 #[test]
@@ -554,17 +560,17 @@ fn diagnostics_json_round_trip() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn uniform_strategy_identical_to_default() {
+fn default_strategy_is_content_adaptive() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let d = &out.diagnostics;
 
-    // New fields are None for Uniform
-    assert!(d.region_coverage.is_none(), "region_coverage should be None for Uniform");
-    assert!(d.adaptive_validation.is_none(), "adaptive_validation should be None for Uniform");
-    assert!(d.timing.classification_us.is_none());
-    assert!(d.timing.adaptive_validation_us.is_none());
+    // Default is now ContentAdaptive (Photo preset)
+    assert!(d.region_coverage.is_some(), "region_coverage should be present for ContentAdaptive");
+    assert!(d.adaptive_validation.is_some(), "adaptive_validation should be present for ContentAdaptive");
+    assert!(d.timing.classification_us.is_some());
+    assert!(d.timing.adaptive_validation_us.is_some());
 
     // Existing semantics unchanged
     assert!(d.selected_strength > 0.0);
@@ -1018,7 +1024,10 @@ fn chroma_guard_per_region_diagnostics_with_content_adaptive() {
 #[test]
 fn chroma_guard_per_region_absent_for_uniform() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        sharpen_strategy: SharpenStrategy::Uniform,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let cg = out.diagnostics.chroma_guard
         .expect("chroma_guard diagnostics should be present");

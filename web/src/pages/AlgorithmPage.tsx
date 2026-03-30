@@ -15,7 +15,7 @@ const PIPELINE_STAGES = [
   { name: "fit", desc: "cubic P\u0302(s)" },
   { name: "solve", desc: "Cardano" },
   { name: "sharpen", desc: "adaptive + guard" },
-  { name: "evaluate", desc: "advisory" },
+  { name: "evaluate", desc: "cap + score" },
   { name: "encode", desc: "linear \u2192 sRGB" },
 ] as const;
 
@@ -50,11 +50,11 @@ const DESIGN_DECISIONS = [
   },
   {
     title: "Chroma guard is non-destructive",
-    text: "The chroma guard monitors per-pixel chroma shift after lightness sharpening and applies soft clamping only where the shift exceeds the threshold (default 10%). It cannot increase saturation, only reduce it back toward the original.",
+    text: "The chroma guard monitors per-pixel chroma shift after lightness sharpening and applies soft clamping only where the shift exceeds the threshold (default 25%). Per-region factors further tighten the budget for edges and halo zones. It cannot increase saturation, only reduce it back toward the original.",
   },
   {
-    title: "Evaluator is advisory only",
-    text: "The quality evaluator runs after final sharpening and predicts a quality score from hand-crafted image features. It does not alter s* selection. Its output is purely diagnostic \u2014 a sanity check, not a control signal.",
+    title: "Evaluator caps strength, then scores",
+    text: "Before final sharpening, the evaluator suggests a maximum strength from image content features (edge density, gradient variance). If the solver\u2019s s* exceeds this cap, it is reduced \u2014 preventing perceptual oversharpening that the gamut metric alone cannot detect (e.g. portraits). After sharpening, the evaluator also predicts a quality score for diagnostics.",
   },
 ] as const;
 
@@ -81,6 +81,7 @@ const DIAGNOSTICS_FIELDS = [
 
 const TOC_SECTIONS = [
   { id: "pipeline", label: "Pipeline" },
+  { id: "presets", label: "Presets" },
   { id: "stages", label: "Stages" },
   { id: "math", label: "Math" },
   { id: "design", label: "Decisions" },
@@ -329,7 +330,7 @@ export default function AlgorithmPage() {
 
           <div className="relative z-10 py-16 sm:py-20 max-w-xl">
             <div className="flex items-center gap-3 mb-5 animate-fade-up">
-              <Tag>v0.5</Tag>
+              <Tag>v0.6</Tag>
               <Tag>auto-sharpness</Tag>
             </div>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold text-foreground tracking-tight mb-5 animate-fade-up delay-100">
@@ -346,8 +347,13 @@ export default function AlgorithmPage() {
               <p className="text-sm text-primary/90 leading-relaxed">
                 <span className="font-bold font-mono">Core constraint</span>{" \u2014 "}
                 find <InlineMath tex="s^*" /> maximizing sharpness subject
-                to <InlineMath tex="P(s^*) \leq P_0" />, where <InlineMath tex="P_0 = 0.001" /> (0.1%
-                of color values outside the valid gamut).
+                to <InlineMath tex="P(s^*) \leq P_0" />, where <InlineMath tex="P_0" /> is
+                the target artifact ratio (fraction of color values outside valid gamut).
+              </p>
+              <p className="text-xs text-primary/60 mt-2">
+                Two calibrated presets: <strong>Photo</strong> (<InlineMath tex="P_0 = 0.003" />, default)
+                for natural images, and <strong>Precision</strong> (<InlineMath tex="P_0 = 0.001" />)
+                for text, UI, and architecture.
               </p>
             </div>
           </div>
@@ -417,6 +423,63 @@ export default function AlgorithmPage() {
               </div>
             ))}
           </div>
+
+          {/* Calibrated presets */}
+          <SectionHeading id="presets">Calibrated Presets</SectionHeading>
+          <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+            Two presets are calibrated against an 8-scene corpus spanning text,
+            architecture, portraits, foliage, saturated color, low-light noise,
+            and mixed street scenes. Both use two-pass adaptive probing, content-adaptive
+            sharpening, and chroma guard.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <div className="rounded-lg border border-primary/30 bg-primary/[0.04] px-4 py-3.5">
+              <p className="text-sm font-bold text-foreground mb-1">Photo <span className="text-xs font-normal text-primary/60 ml-1">default</span></p>
+              <ul className="space-y-1 text-sm text-muted-foreground list-none">
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span><InlineMath tex="P_0 = 0.003" /> (0.3% artifact budget)</span></li>
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span>Coarse range [0.003, 1.0], 7 probes</span></li>
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span>4 dense probes around the crossing</span></li>
+              </ul>
+              <p className="text-xs text-muted-foreground/50 mt-2">
+                Natural photographs, portraits, landscapes. Allows stronger
+                sharpening where the content tolerates it.
+              </p>
+            </div>
+            <div className="rounded-lg border border-border/40 bg-card px-4 py-3.5">
+              <p className="text-sm font-bold text-foreground mb-1">Precision</p>
+              <ul className="space-y-1 text-sm text-muted-foreground list-none">
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span><InlineMath tex="P_0 = 0.001" /> (0.1% artifact budget)</span></li>
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span>Coarse range [0.003, 0.5], 7 probes</span></li>
+                <li className="flex gap-2"><span className="text-primary/60">&#9654;</span><span>4 dense probes around the crossing</span></li>
+              </ul>
+              <p className="text-xs text-muted-foreground/50 mt-2">
+                Screenshots, UI, architecture, text. Tight budget preserves
+                hard edges without color fringing.
+              </p>
+            </div>
+          </div>
+
+          <p className="text-sm text-muted-foreground leading-relaxed mb-2">
+            Corpus validation confirms two distinct content regimes:
+          </p>
+          <ul className="space-y-1 text-sm text-muted-foreground list-none mb-2">
+            <li className="flex gap-2">
+              <span className="text-primary/60">&#9654;</span>
+              <span><strong>Artifact-sensitive</strong> (text, architecture) — crossings
+                at <InlineMath tex="s^* \approx 0.001\text{--}0.05" /></span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary/60">&#9654;</span>
+              <span><strong>Artifact-tolerant</strong> (portraits, low-light) — crossings
+                at <InlineMath tex="s^* \approx 0.08\text{--}0.80" /></span>
+            </li>
+          </ul>
+          <p className="text-xs text-muted-foreground/50">
+            Mixed-street under Precision exhausting the budget is expected — the
+            scene contains text with surrounding photographic content, and the
+            strict budget correctly limits sharpening to protect the text.
+          </p>
 
           {/* Stage-by-stage breakdown */}
           <SectionHeading id="stages">Stage Details</SectionHeading>
@@ -497,14 +560,31 @@ export default function AlgorithmPage() {
 
             <PipelineStep n={6} title="Probe Sharpening">
               <p>
-                The core exploration phase. For each strength in the probe set
-                (default: 7 non-uniform samples denser near zero), sharpening is
-                applied and artifacts measured.
+                The core exploration phase. The default <strong>two-pass</strong> strategy
+                places probes adaptively:
               </p>
-              <div className="mt-3 mb-2 text-xs font-mono text-muted-foreground/70">
-                Default probes: [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]
-              </div>
-              <p className="mt-2 font-medium text-foreground/80">Lightness sharpening (default)</p>
+              <ul className="mt-2 space-y-1.5 list-none text-sm">
+                <li className="flex gap-2">
+                  <span className="text-primary/60 mt-0.5">&#9654;</span>
+                  <span>
+                    <strong>Coarse pass</strong> — 7 probes log-spaced from 0.003 to the
+                    preset ceiling (Photo: 1.0, Precision: 0.5). Brackets
+                    the <InlineMath tex="P_0" /> crossing.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-primary/60 mt-0.5">&#9654;</span>
+                  <span>
+                    <strong>Dense pass</strong> — 4 probes concentrated around the
+                    bracketed crossing, refining the fit where it matters.
+                  </span>
+                </li>
+              </ul>
+              <p className="mt-2 text-muted-foreground/60 text-xs">
+                Total: 11 probes (7 coarse + 4 dense). If all coarse probes are
+                under budget, the dense pass targets the upper 30% of the coarse range.
+              </p>
+              <p className="mt-3 font-medium text-foreground/80">Lightness sharpening (default)</p>
               <p>
                 CIE Y luminance is extracted, sharpened via unsharp mask, then RGB
                 is reconstructed multiplicatively:
@@ -663,18 +743,25 @@ export default function AlgorithmPage() {
               <p className="mt-2">
                 <strong>Chroma guard</strong> (on by default) — after lightness
                 sharpening, per-pixel chroma shift is measured in Cb/Cr space.
-                Where the shift exceeds 10%, soft clamping blends back toward the
-                original chroma.
+                Where the shift exceeds the threshold (25%, further tightened
+                per-region), soft clamping blends back toward the original chroma.
               </p>
             </PipelineStep>
 
             <PipelineStep n={12} title="Quality Evaluation & Output">
               <p>
-                A heuristic evaluator extracts seven image features — edge
+                <strong>Before</strong> final sharpening, the evaluator maps image
+                content features (edge density, gradient variance) to a
+                suggested maximum strength. If the solver&apos;s <InlineMath tex="s^*" /> exceeds
+                this cap, it is reduced — preventing perceptual oversharpening
+                that the gamut metric alone cannot detect (e.g. smooth portraits
+                where gamut excursion stays low but texture damage is visible).
+              </p>
+              <p className="mt-2">
+                <strong>After</strong> final sharpening, the evaluator also predicts
+                a quality score in [0, 1] from seven image features — edge
                 density, gradient variance, local variance, Laplacian variance,
-                luminance entropy — and maps them to a predicted quality score
-                in [0, 1]. This is <strong>advisory only</strong> and does not
-                alter <InlineMath tex="s^*" />.
+                luminance entropy — for diagnostics and downstream recommendations.
               </p>
               <p className="mt-2">
                 The pipeline then inspects the full diagnostics and emits
@@ -787,7 +874,7 @@ export default function AlgorithmPage() {
               "All processing in linear RGB space",
               ["P", " = fraction of color values outside valid gamut"],
               ["P(s)", " approximated by cubic polynomial"],
-              ["P_0 = 0.001", " (0.1%) as target threshold"],
+              ["P_0 = 0.001", " (0.1%) as paper reference threshold"],
               "Maximize sharpness subject to artifact budget",
               ["L = 0.2126R + 0.7152G + 0.0722B", " (CIE Y luminance)"],
             ]}
@@ -804,7 +891,8 @@ export default function AlgorithmPage() {
               "Unsharp mask sharpening operator (exact operator unknown)",
               ["\\sigma = 1.0", " Gaussian default (reasonable starting value)"],
               "Percentile-stretch contrast leveling (placeholder)",
-              "Probe strengths chosen empirically, not from paper",
+              "Two-pass probe placement calibrated on 8-scene corpus (not from paper)",
+              ["P_0 = 0.003", " (Photo) and 0.001 (Precision) calibrated for two content regimes"],
               ["R^2 > 0.85", ", LOO < 25% thresholds (engineering choices)"],
             ]}
           />
