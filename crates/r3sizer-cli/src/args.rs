@@ -78,6 +78,10 @@ pub struct Cli {
     #[arg(long, default_value = "summary")]
     pub diagnostics_level: DiagnosticsLevelArg,
 
+    /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only" (experimental).
+    #[arg(long, default_value = "gamut-only")]
+    pub selection_policy: SelectionPolicyArg,
+
     // --- Sweep mode ---
 
     /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
@@ -153,6 +157,23 @@ impl From<DiagnosticsLevelArg> for r3sizer_core::DiagnosticsLevel {
         match val {
             DiagnosticsLevelArg::Summary => r3sizer_core::DiagnosticsLevel::Summary,
             DiagnosticsLevelArg::Full => r3sizer_core::DiagnosticsLevel::Full,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SelectionPolicyArg {
+    GamutOnly,
+    Hybrid,
+    CompositeOnly,
+}
+
+impl From<SelectionPolicyArg> for r3sizer_core::SelectionPolicy {
+    fn from(val: SelectionPolicyArg) -> Self {
+        match val {
+            SelectionPolicyArg::GamutOnly => r3sizer_core::SelectionPolicy::GamutOnly,
+            SelectionPolicyArg::Hybrid => r3sizer_core::SelectionPolicy::Hybrid,
+            SelectionPolicyArg::CompositeOnly => r3sizer_core::SelectionPolicy::CompositeOnly,
         }
     }
 }

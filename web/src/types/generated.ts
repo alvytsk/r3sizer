@@ -25,6 +25,8 @@ export type CrossingStatus = "found" | "not_found_in_range" | "not_attempted";
 
 export type SelectionMode = "polynomial_root" | "best_sample_within_budget" | "least_bad_sample" | "budget_unreachable";
 
+export type SelectionPolicy = "gamut_only" | "hybrid" | "composite_only";
+
 export type FallbackReason = "fit_failed" | "fit_unstable" | "root_out_of_range" | "metric_non_monotonic" | "budget_too_strict_for_content" | "direct_search_configured";
 
 export type MetricComponent = "gamut_excursion" | "halo_ringing" | "edge_overshoot" | "texture_flattening";
@@ -85,6 +87,10 @@ artifact_metric: ArtifactMetric,
  * Weights for the composite diagnostic metric. Default: [1.0, 0.3, 0.3, 0.1].
  */
 metric_weights: MetricWeights, 
+/**
+ * How the solver ranks fallback candidates. Default: `GamutOnly`.
+ */
+selection_policy: SelectionPolicy, 
 /**
  * Verbosity level for serialized diagnostics.
  */
@@ -230,7 +236,11 @@ export type RegionCoverage = { total_pixels: number, flat: number, textured: num
 
 export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_metric: number, } | { "outcome": "passed_after_backoff", iterations: number, final_scale: number, measured_metric: number, } | { "outcome": "failed_budget_exceeded", iterations: number, best_scale: number, best_metric: number, };
 
-export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, target_artifact_ratio: number, 
+export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, 
+/**
+ * Which selection policy was used for fallback ranking.
+ */
+selection_policy: SelectionPolicy, target_artifact_ratio: number, 
 /**
  * Artifact ratio of the downscaled image before any sharpening is applied.
  */
@@ -413,11 +423,11 @@ normalization_scale?: number | null,
  */
 out_of_range_fraction?: number | null, };
 
-export type RecommendationKind = "switch_to_content_adaptive" | "lower_strong_edge_gain" | "raise_artifact_budget" | "switch_to_lightness" | "widen_probe_range" | "lower_sigma";
+export type RecommendationKind = "switch_to_content_adaptive" | "lower_strong_edge_gain" | "raise_artifact_budget" | "switch_to_lightness" | "widen_probe_range" | "lower_sigma" | "switch_to_hybrid";
 
 export type Severity = "info" | "suggestion" | "warning";
 
-export type ParamPatch = { sharpen_strategy?: SharpenStrategy | null, target_artifact_ratio?: number | null, sharpen_mode?: SharpenMode | null, probe_strengths?: ProbeConfig | null, sharpen_sigma?: number | null, };
+export type ParamPatch = { sharpen_strategy?: SharpenStrategy | null, target_artifact_ratio?: number | null, sharpen_mode?: SharpenMode | null, probe_strengths?: ProbeConfig | null, sharpen_sigma?: number | null, selection_policy?: SelectionPolicy | null, };
 
 export type Recommendation = { kind: RecommendationKind, severity: Severity, 
 /**
@@ -490,6 +500,7 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
     "edge_overshoot": 0.3,
     "texture_flattening": 0.1
   },
+  "selection_policy": "gamut_only",
   "diagnostics_level": "summary",
   "sharpen_strategy": {
     "strategy": "uniform"

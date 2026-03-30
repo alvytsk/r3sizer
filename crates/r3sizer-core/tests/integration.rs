@@ -1,8 +1,8 @@
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel, FallbackReason,
-    FitStrategy, GainTable, ImageSize, LinearRgbImage, MetricComponent, MetricMode, ProbeConfig,
-    SelectionMode, SharpenMode, SharpenStrategy,
+    FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage, MetricComponent, MetricMode,
+    ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode, SharpenMode, SharpenStrategy,
     process_auto_sharp_downscale,
 };
 
@@ -668,4 +668,209 @@ fn content_adaptive_tight_budget_triggers_backoff_or_failure() {
             assert!(*iterations > 0);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SelectionPolicy tests
+// ---------------------------------------------------------------------------
+
+use r3sizer_core::SelectionPolicy;
+
+#[test]
+fn gamut_only_policy_identical_to_default() {
+    let src = gradient_image(64, 64);
+    let params_default = default_params(16, 16);
+    let params_explicit = AutoSharpParams {
+        selection_policy: SelectionPolicy::GamutOnly,
+        ..default_params(16, 16)
+    };
+    let out_default = process_auto_sharp_downscale(&src, &params_default).unwrap();
+    let out_explicit = process_auto_sharp_downscale(&src, &params_explicit).unwrap();
+    assert_eq!(
+        out_default.diagnostics.selected_strength,
+        out_explicit.diagnostics.selected_strength,
+        "GamutOnly must be identical to default behavior"
+    );
+    assert_eq!(out_default.image.pixels(), out_explicit.image.pixels());
+}
+
+#[test]
+fn hybrid_policy_respects_gamut_budget() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+
+    // If selection was BestSampleWithinBudget, selected probe must be within gamut budget.
+    if d.selection_mode == SelectionMode::BestSampleWithinBudget {
+        let selected = d.probe_samples.iter()
+            .find(|s| (s.strength - d.selected_strength).abs() < 1e-6)
+            .expect("selected strength must correspond to a probe sample");
+        assert!(
+            selected.metric_value <= d.target_artifact_ratio,
+            "Hybrid must not select an out-of-budget sample when in-budget exists: metric_value={} > target={}",
+            selected.metric_value, d.target_artifact_ratio,
+        );
+    }
+}
+
+#[test]
+fn hybrid_policy_produces_valid_result() {
+    let src = checkerboard(32, 32);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        ..default_params(8, 8)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 8);
+    assert_eq!(out.image.height(), 8);
+    for &v in out.image.pixels() {
+        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1]");
+    }
+}
+
+#[test]
+fn hybrid_diagnostics_include_selection_policy() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::Hybrid,
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::Hybrid);
+
+    let json = serde_json::to_string_pretty(&out.diagnostics).expect("serialize");
+    assert!(json.contains("\"selection_policy\""));
+    assert!(json.contains("\"hybrid\""));
+    let deser: AutoSharpDiagnostics = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(deser.selection_policy, SelectionPolicy::Hybrid);
+}
+
+#[test]
+fn gamut_only_diagnostics_include_selection_policy() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::GamutOnly);
+
+    let json = serde_json::to_string_pretty(&out.diagnostics).expect("serialize");
+    assert!(json.contains("\"selection_policy\""));
+}
+
+#[test]
+fn composite_only_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        selection_policy: SelectionPolicy::CompositeOnly,
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::CompositeOnly);
+}
+
+// ---------------------------------------------------------------------------
+// Content-adaptive resize (step 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn uniform_resize_strategy_produces_valid_result() {
+    let src = gradient_image(64, 64);
+    for kernel in [ResizeKernel::Lanczos3, ResizeKernel::CatmullRom, ResizeKernel::Gaussian, ResizeKernel::MitchellNetravali] {
+        let params = AutoSharpParams {
+            resize_strategy: Some(ResizeStrategy::Uniform { kernel }),
+            ..default_params(16, 16)
+        };
+        let out = process_auto_sharp_downscale(&src, &params).unwrap();
+        assert_eq!(out.image.width(), 16);
+        assert_eq!(out.image.height(), 16);
+        let diag = out.diagnostics.resize_strategy_diagnostics
+            .expect("resize_strategy_diagnostics should be Some for explicit strategy");
+        assert_eq!(diag.kernels_used, vec![kernel]);
+        let total: u32 = diag.per_kernel_pixel_count.values().sum();
+        assert_eq!(total, 16 * 16);
+    }
+}
+
+#[test]
+fn content_adaptive_resize_happy_path() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+
+    assert_eq!(out.image.width(), 16);
+    assert_eq!(out.image.height(), 16);
+    for &v in out.image.pixels() {
+        assert!(v.is_finite(), "pixel must be finite");
+    }
+
+    let diag = out.diagnostics.resize_strategy_diagnostics
+        .expect("resize_strategy_diagnostics should be Some for content-adaptive");
+    assert!(!diag.kernels_used.is_empty());
+    let total: u32 = diag.per_kernel_pixel_count.values().sum();
+    assert_eq!(total, 16 * 16, "per_kernel_pixel_count must sum to target pixel count");
+}
+
+#[test]
+fn content_adaptive_resize_deterministic() {
+    let src = gradient_image(64, 64);
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(),
+        }),
+        ..default_params(16, 16)
+    };
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out1.image.pixels(), out2.image.pixels());
+    assert_eq!(
+        out1.diagnostics.selected_strength,
+        out2.diagnostics.selected_strength,
+    );
+}
+
+#[test]
+fn content_adaptive_resize_step_edge_uses_multiple_kernels() {
+    // Step edge has mixed flat + edge regions, so the adaptive path should
+    // use more than one kernel when flat and edge kernels differ (default table).
+    let w = 64_u32;
+    let h = 32_u32;
+    let mut data = vec![0.0_f32; (w * h * 3) as usize];
+    for y in 0..h {
+        for x in (w / 2)..w {
+            let idx = ((y * w + x) * 3) as usize;
+            data[idx] = 1.0;
+            data[idx + 1] = 1.0;
+            data[idx + 2] = 1.0;
+        }
+    }
+    let src = LinearRgbImage::new(w, h, data).unwrap();
+    let params = AutoSharpParams {
+        resize_strategy: Some(ResizeStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            kernel_table: KernelTable::default(), // flat=Gaussian, edge=Lanczos3
+        }),
+        ..default_params(16, 8)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let diag = out.diagnostics.resize_strategy_diagnostics.unwrap();
+    // With a step edge, at least two distinct kernels should be used.
+    assert!(
+        diag.kernels_used.len() >= 2,
+        "expected ≥2 kernels for step-edge image, got {:?}",
+        diag.kernels_used
+    );
 }

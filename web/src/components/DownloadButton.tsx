@@ -1,9 +1,7 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
-import { useProcessorStore } from "@/stores/processor-store";
-
-type ExportFormat = "jpeg" | "png" | "webp";
+import { useProcessorStore, type ExportFormat } from "@/stores/processor-store";
 
 const FORMAT_EXT: Record<ExportFormat, string> = {
   jpeg: "jpg",
@@ -29,8 +27,10 @@ export function DownloadButton() {
   const outputWidth = useProcessorStore((s) => s.outputWidth);
   const outputHeight = useProcessorStore((s) => s.outputHeight);
   const inputFile = useProcessorStore((s) => s.inputFile);
-  const [format, setFormat] = useState<ExportFormat>("jpeg");
-  const [quality, setQuality] = useState(90);
+  const format = useProcessorStore((s) => s.exportFormat);
+  const quality = useProcessorStore((s) => s.exportQuality);
+  const setFormat = useProcessorStore((s) => s.setExportFormat);
+  const setQuality = useProcessorStore((s) => s.setExportQuality);
 
   const handleDownload = useCallback(() => {
     if (!outputRgbaData) return;

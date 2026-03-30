@@ -40,7 +40,7 @@ pub use types::{
     MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbeSample, ProbeConfig,
     ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage, RegionMap,
     Recommendation, RecommendationKind, Severity, ParamPatch,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
+    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode, SelectionPolicy,
     SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };

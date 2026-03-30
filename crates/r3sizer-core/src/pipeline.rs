@@ -23,7 +23,7 @@ use crate::{
     metrics::channel_clipping_ratio,
     resize::downscale,
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
-    solve::{find_sharpness, find_sharpness_direct},
+    solve::{find_sharpness_with_policy, find_sharpness_direct_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
     MetricMode, MetricWeights, ProbeSample, ProcessOutput, RegionCoverage,
@@ -210,21 +210,27 @@ pub fn process_auto_sharp_downscale_with_progress(
     let t0 = Instant::now();
     let (solve_result, fit_status, fit_coefficients, fit_quality) = match params.fit_strategy {
         FitStrategy::DirectSearch => {
-            let result = find_sharpness_direct(&probe_samples, params.target_artifact_ratio)?;
+            let result = find_sharpness_direct_with_policy(
+                &probe_samples,
+                params.target_artifact_ratio,
+                params.selection_policy,
+            )?;
             (result, FitStatus::Skipped, None, None)
         }
 
         FitStrategy::Cubic => {
             match fit_cubic_with_quality(&fit_data) {
                 Ok((poly, quality)) => {
-                    let result =
-                        find_sharpness(&poly, p0, s_min, s_max, &probe_samples)?;
+                    let result = find_sharpness_with_policy(
+                        &poly, p0, s_min, s_max, &probe_samples, params.selection_policy,
+                    )?;
                     (result, FitStatus::Success, Some(poly), Some(quality))
                 }
                 Err(fit_err) => {
-                    let result = find_sharpness_direct(
+                    let result = find_sharpness_direct_with_policy(
                         &probe_samples,
                         params.target_artifact_ratio,
+                        params.selection_policy,
                     )?;
                     (
                         result,
@@ -459,6 +465,7 @@ pub fn process_auto_sharp_downscale_with_progress(
         sharpen_mode: params.sharpen_mode,
         metric_mode: params.metric_mode,
         artifact_metric: params.artifact_metric,
+        selection_policy: params.selection_policy,
         target_artifact_ratio: params.target_artifact_ratio,
         baseline_artifact_ratio,
         probe_samples,
@@ -640,9 +647,10 @@ fn loo_stability(
 
         if let Ok(poly) = fit_cubic(&subset) {
             // Find the largest root in range for this refit.
-            if let Ok(result) = find_sharpness(
+            if let Ok(result) = find_sharpness_with_policy(
                 &poly, p0, s_min, s_max,
                 &[], // empty samples — force polynomial-only path or no fallback
+                crate::SelectionPolicy::GamutOnly, // LOO only checks polynomial root stability
             ) {
                 if matches!(result.selection_mode, SelectionMode::PolynomialRoot) {
                     let loo_s = result.selected_strength as f64;

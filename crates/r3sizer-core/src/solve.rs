@@ -19,7 +19,7 @@
 ///    (least-bad option).
 use std::f64::consts::PI;
 
-use crate::{CoreError, CrossingStatus, CubicPolynomial, ProbeSample, SelectionMode};
+use crate::{CoreError, CrossingStatus, CubicPolynomial, ProbeSample, SelectionMode, SelectionPolicy};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -36,7 +36,7 @@ pub struct SolveResult {
 /// Find the optimal sharpening strength.
 ///
 /// Attempts algebraic root finding on `poly`, then falls back to direct
-/// sample search if no in-range root exists.
+/// sample search if no in-range root exists.  Uses `GamutOnly` ranking.
 ///
 /// Never panics and never returns `Err` unless `probe_samples` is empty and
 /// the polynomial path also fails.
@@ -47,10 +47,33 @@ pub fn find_sharpness(
     s_max: f64,
     probe_samples: &[ProbeSample],
 ) -> Result<SolveResult, CoreError> {
-    // --- Attempt algebraic root finding ---
+    find_sharpness_with_policy(poly, target_p0, s_min, s_max, probe_samples, SelectionPolicy::GamutOnly)
+}
+
+/// Direct sample search (no polynomial). Uses `GamutOnly` ranking.
+pub fn find_sharpness_direct(
+    probe_samples: &[ProbeSample],
+    target_p0: f32,
+) -> Result<SolveResult, CoreError> {
+    find_sharpness_direct_with_policy(probe_samples, target_p0, SelectionPolicy::GamutOnly)
+}
+
+/// Find the optimal sharpening strength with policy-aware fallback.
+///
+/// Algebraic root finding uses gamut excursion regardless of policy.
+/// The policy only affects how fallback candidates are ranked when no
+/// polynomial root is available.
+pub fn find_sharpness_with_policy(
+    poly: &CubicPolynomial,
+    target_p0: f64,
+    s_min: f64,
+    s_max: f64,
+    probe_samples: &[ProbeSample],
+    policy: SelectionPolicy,
+) -> Result<SolveResult, CoreError> {
+    // --- Attempt algebraic root finding (policy-independent) ---
     match roots_in_range(poly, target_p0, s_min, s_max) {
         Ok(roots) if !roots.is_empty() => {
-            // Pick the largest root (maximise sharpness within artifact budget).
             let s_star = roots.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             return Ok(SolveResult {
                 selected_strength: s_star as f32,
@@ -58,24 +81,24 @@ pub fn find_sharpness(
                 crossing_status: CrossingStatus::Found,
             });
         }
-        Ok(_) => {
-            // Roots found but none are in range -- fall through to sampling.
-        }
-        Err(_) => {
-            // Degenerate polynomial (linear/constant); fall through to sampling.
-        }
+        Ok(_) => {}
+        Err(_) => {}
     }
 
-    // --- Fallback: best result from probe samples ---
-    fallback_from_samples(probe_samples, target_p0 as f32)
+    // --- Fallback: policy-aware selection from probe samples ---
+    fallback_from_samples(probe_samples, target_p0 as f32, policy)
 }
 
-/// Direct sample search (no polynomial). Used when fit is skipped or fails.
-pub fn find_sharpness_direct(
+/// Direct sample search with policy-aware ranking.
+///
+/// - `GamutOnly`: ranks by metric_value (existing behavior).
+/// - `Hybrid` / `CompositeOnly`: ranks by composite_score from breakdown.
+pub fn find_sharpness_direct_with_policy(
     probe_samples: &[ProbeSample],
     target_p0: f32,
+    policy: SelectionPolicy,
 ) -> Result<SolveResult, CoreError> {
-    fallback_from_samples(probe_samples, target_p0)
+    fallback_from_samples(probe_samples, target_p0, policy)
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +212,7 @@ fn cbrt(x: f64) -> f64 {
 fn fallback_from_samples(
     samples: &[ProbeSample],
     p0: f32,
+    policy: SelectionPolicy,
 ) -> Result<SolveResult, CoreError> {
     if samples.is_empty() {
         return Err(CoreError::NoValidRoot {
@@ -196,13 +220,10 @@ fn fallback_from_samples(
         });
     }
 
-    // Best case: pick largest strength with metric_value <= P0.
     let qualifying: Vec<&ProbeSample> =
         samples.iter().filter(|s| s.metric_value <= p0).collect();
 
-    if let Some(best) = qualifying.iter().max_by(|a, b| {
-        a.strength.partial_cmp(&b.strength).unwrap()
-    }) {
+    if let Some(best) = select_best_qualifying(&qualifying, policy) {
         return Ok(SolveResult {
             selected_strength: best.strength,
             selection_mode: SelectionMode::BestSampleWithinBudget,
@@ -210,17 +231,88 @@ fn fallback_from_samples(
         });
     }
 
-    // Worst case: all samples exceed P0 -- pick the one with the smallest metric_value.
-    let least_bad = samples
-        .iter()
-        .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
-        .unwrap(); // safe: samples non-empty
+    // All samples exceed budget — pick least bad.
+    let least_bad = select_least_bad(samples, policy);
 
     Ok(SolveResult {
         selected_strength: least_bad.strength,
         selection_mode: SelectionMode::LeastBadSample,
         crossing_status: CrossingStatus::NotFoundInRange,
     })
+}
+
+/// Among qualifying samples, select the best one per policy.
+fn select_best_qualifying<'a>(
+    qualifying: &[&'a ProbeSample],
+    policy: SelectionPolicy,
+) -> Option<&'a ProbeSample> {
+    if qualifying.is_empty() {
+        return None;
+    }
+    match policy {
+        SelectionPolicy::GamutOnly => {
+            // Maximize strength (current behavior).
+            qualifying.iter().max_by(|a, b| {
+                a.strength.partial_cmp(&b.strength).unwrap()
+            }).copied()
+        }
+        SelectionPolicy::Hybrid | SelectionPolicy::CompositeOnly => {
+            // Minimize composite score (best perceptual quality).
+            // Fall back to max-strength ranking if no breakdowns available.
+            let has_composites = qualifying.iter().any(|s| s.breakdown.is_some());
+            if has_composites {
+                qualifying.iter().min_by(|a, b| {
+                    let ca = composite_score_of(a);
+                    let cb = composite_score_of(b);
+                    ca.partial_cmp(&cb).unwrap()
+                }).copied()
+            } else {
+                qualifying.iter().max_by(|a, b| {
+                    a.strength.partial_cmp(&b.strength).unwrap()
+                }).copied()
+            }
+        }
+    }
+}
+
+/// Among all samples (budget exceeded), select the least bad per policy.
+fn select_least_bad(
+    samples: &[ProbeSample],
+    policy: SelectionPolicy,
+) -> &ProbeSample {
+    match policy {
+        SelectionPolicy::GamutOnly => {
+            // Minimize gamut metric_value (current behavior).
+            samples.iter()
+                .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
+                .unwrap()
+        }
+        SelectionPolicy::Hybrid | SelectionPolicy::CompositeOnly => {
+            // Minimize composite score.
+            let has_composites = samples.iter().any(|s| s.breakdown.is_some());
+            if has_composites {
+                samples.iter()
+                    .min_by(|a, b| {
+                        let ca = composite_score_of(a);
+                        let cb = composite_score_of(b);
+                        ca.partial_cmp(&cb).unwrap()
+                    })
+                    .unwrap()
+            } else {
+                samples.iter()
+                    .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
+                    .unwrap()
+            }
+        }
+    }
+}
+
+/// Extract composite score from a sample, falling back to metric_value.
+#[inline]
+fn composite_score_of(sample: &ProbeSample) -> f32 {
+    sample.breakdown.as_ref()
+        .map(|b| b.composite_score)
+        .unwrap_or(sample.metric_value)
 }
 
 // ---------------------------------------------------------------------------
@@ -336,5 +428,120 @@ mod tests {
         let result = find_sharpness_direct(&samples, 0.015).unwrap();
         assert_abs_diff_eq!(result.selected_strength, 1.0_f32, epsilon = 1e-5);
         assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
+    }
+
+    // -----------------------------------------------------------------------
+    // SelectionPolicy tests
+    // -----------------------------------------------------------------------
+
+    use crate::{MetricBreakdown, MetricComponent, SelectionPolicy};
+    use std::collections::BTreeMap;
+
+    fn make_sample_with_composite(
+        strength: f32,
+        metric_value: f32,
+        composite_score: f32,
+    ) -> ProbeSample {
+        let mut components = BTreeMap::new();
+        components.insert(MetricComponent::GamutExcursion, metric_value);
+        components.insert(MetricComponent::HaloRinging, 0.0);
+        components.insert(MetricComponent::EdgeOvershoot, 0.0);
+        components.insert(MetricComponent::TextureFlattening, 0.0);
+        #[allow(deprecated)]
+        let breakdown = MetricBreakdown {
+            components,
+            selected_metric: MetricComponent::GamutExcursion,
+            selection_score: metric_value,
+            composite_score,
+            aggregate: metric_value,
+        };
+        ProbeSample {
+            strength,
+            artifact_ratio: metric_value,
+            metric_value,
+            breakdown: Some(breakdown),
+        }
+    }
+
+    #[test]
+    fn gamut_only_fallback_picks_max_strength_within_budget() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.0005, 0.01),
+            make_sample_with_composite(2.0, 0.0008, 0.05),
+            make_sample_with_composite(3.0, 0.005, 0.10),
+        ];
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
+        assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn hybrid_fallback_picks_best_composite_within_budget() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.0005, 0.01),
+            make_sample_with_composite(2.0, 0.0008, 0.05),
+            make_sample_with_composite(3.0, 0.005, 0.10),
+        ];
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
+        assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn hybrid_never_picks_out_of_budget_when_in_budget_exists() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.0008, 0.09),
+            make_sample_with_composite(2.0, 0.005, 0.001),
+        ];
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
+        assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn hybrid_least_bad_uses_composite_not_gamut() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.005, 0.08),
+            make_sample_with_composite(2.0, 0.010, 0.02),
+            make_sample_with_composite(3.0, 0.020, 0.05),
+        ];
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::LeastBadSample);
+        assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn gamut_only_least_bad_uses_gamut_metric() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.005, 0.08),
+            make_sample_with_composite(2.0, 0.010, 0.02),
+            make_sample_with_composite(3.0, 0.020, 0.05),
+        ];
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::LeastBadSample);
+        assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn hybrid_with_no_breakdown_falls_back_to_gamut_ranking() {
+        let samples = make_samples(
+            &[1.0, 2.0, 3.0],
+            &[0.0005, 0.0008, 0.005],
+        );
+        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
+        assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
+    }
+
+    #[test]
+    fn composite_only_behaves_like_hybrid() {
+        let samples = vec![
+            make_sample_with_composite(1.0, 0.0005, 0.01),
+            make_sample_with_composite(2.0, 0.0008, 0.05),
+        ];
+        let result_composite = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::CompositeOnly).unwrap();
+        let result_hybrid = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(result_composite.selected_strength, result_hybrid.selected_strength);
+        assert_eq!(result_composite.selection_mode, result_hybrid.selection_mode);
     }
 }
