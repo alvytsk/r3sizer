@@ -23,6 +23,7 @@ pub mod sharpen;
 pub mod solve;
 pub mod types;
 
+pub mod base_quality;
 pub mod color_space;
 pub mod resize_strategy;
 pub mod chroma_guard;
@@ -32,7 +33,7 @@ pub mod recommendations;
 // Re-export the complete public surface.
 pub use pipeline::{process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress};
 pub use types::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
     ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,

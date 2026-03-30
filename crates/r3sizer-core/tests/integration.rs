@@ -1,9 +1,9 @@
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel, FallbackReason,
-    FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage, MetricComponent, MetricMode,
-    ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode, SharpenMode, SharpenStrategy,
-    process_auto_sharp_downscale,
+    ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel,
+    FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage,
+    MetricComponent, MetricMode, ProbeConfig, ResizeKernel, ResizeStrategy, SelectionMode,
+    SharpenMode, SharpenStrategy, process_auto_sharp_downscale,
 };
 
 // ---------------------------------------------------------------------------
@@ -887,4 +887,82 @@ fn two_pass_validation_rejects_bad_params() {
         ..base.clone()
     };
     assert!(p.validate().is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Step 4 — Base resize quality tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn base_resize_quality_present_and_finite() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let bq = out.diagnostics.base_resize_quality
+        .expect("base_resize_quality should always be present");
+    assert!(bq.edge_retention.is_finite(), "edge_retention must be finite");
+    assert!(bq.texture_retention.is_finite(), "texture_retention must be finite");
+    assert!(bq.ringing_score.is_finite(), "ringing_score must be finite");
+    assert!(bq.envelope_scale.is_finite(), "envelope_scale must be finite");
+    assert!(bq.ringing_score >= 0.0, "ringing_score must be non-negative");
+    assert!(bq.envelope_scale >= 0.65 && bq.envelope_scale <= 1.0,
+        "envelope_scale must be in [0.65, 1.0], got {}", bq.envelope_scale);
+}
+
+#[test]
+fn effective_target_never_above_requested() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+    assert!(
+        d.effective_target_artifact_ratio <= d.target_artifact_ratio + 1e-9,
+        "effective {} must not exceed requested {}",
+        d.effective_target_artifact_ratio, d.target_artifact_ratio,
+    );
+    assert!(
+        d.effective_target_artifact_ratio >= d.target_artifact_ratio * 0.65 - 1e-9,
+        "effective {} must be >= requested * 0.65 = {}",
+        d.effective_target_artifact_ratio, d.target_artifact_ratio * 0.65,
+    );
+}
+
+#[test]
+fn envelope_formula_consistent() {
+    let src = gradient_image(64, 64);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let d = &out.diagnostics;
+    let bq = d.base_resize_quality.unwrap();
+    let expected = d.target_artifact_ratio * bq.envelope_scale;
+    assert!(
+        (d.effective_target_artifact_ratio - expected).abs() < 1e-9,
+        "effective {} != target {} * envelope_scale {}",
+        d.effective_target_artifact_ratio, d.target_artifact_ratio, bq.envelope_scale,
+    );
+}
+
+#[test]
+fn smooth_image_minimal_ringing() {
+    // A solid or smooth image should have ~zero ringing.
+    let src = solid_image(64, 64, 0.5);
+    let params = default_params(16, 16);
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let bq = out.diagnostics.base_resize_quality.unwrap();
+    assert_eq!(bq.ringing_score, 0.0, "solid image should have zero ringing");
+    assert!((bq.envelope_scale - 1.0).abs() < 1e-6, "no ringing → envelope_scale == 1.0");
+}
+
+#[test]
+fn base_resize_quality_deterministic() {
+    let src = checkerboard(32, 32);
+    let params = default_params(8, 8);
+    let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
+    let bq1 = out1.diagnostics.base_resize_quality.unwrap();
+    let bq2 = out2.diagnostics.base_resize_quality.unwrap();
+    assert_eq!(bq1.ringing_score, bq2.ringing_score);
+    assert_eq!(bq1.edge_retention, bq2.edge_retention);
+    assert_eq!(bq1.texture_retention, bq2.texture_retention);
+    assert_eq!(bq1.envelope_scale, bq2.envelope_scale);
 }

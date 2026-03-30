@@ -246,7 +246,11 @@ ingress_us?: number | null,
 /**
  * Evaluator execution time (None when not configured).
  */
-evaluator_us?: number | null, };
+evaluator_us?: number | null, 
+/**
+ * Base resize quality scoring time (step 4).
+ */
+base_quality_us?: number | null, };
 
 export type RegionCoverage = { total_pixels: number, flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, flat_fraction: number, textured_fraction: number, strong_edge_fraction: number, microtexture_fraction: number, risky_halo_zone_fraction: number, };
 
@@ -277,6 +281,31 @@ dense_min: number,
  * Dense window upper bound selected after coarse bracket search.
  */
 dense_max: number, };
+
+export type BaseResizeQuality = { 
+/**
+ * Fraction of source Sobel edge energy preserved in the resized image.
+ * Scale-independent per-pixel energy ratio; higher is better.
+ * Diagnostic only in v1 — does not affect solver budget.
+ */
+edge_retention: number, 
+/**
+ * Fraction of source local texture variance preserved in the resized image.
+ * Computed via 5×5 window mean variance ratio; higher is better.
+ * Diagnostic only in v1 — does not affect solver budget.
+ */
+texture_retention: number, 
+/**
+ * Fraction of near-edge pixels showing sign-flip oscillation (ringing proxy).
+ * Higher is worse.  Active in v1: drives `envelope_scale`.
+ */
+ringing_score: number, 
+/**
+ * Budget multiplier applied to `target_artifact_ratio` before probing:
+ * `effective_p0 = target_artifact_ratio × envelope_scale`.
+ * Derived as `clamp(1.0 − 2.0 × ringing_score, 0.65, 1.0)`.
+ */
+envelope_scale: number, };
 
 export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, target_artifact_ratio: number, 
 /**
@@ -354,7 +383,17 @@ recommendations?: Array<Recommendation>,
 /**
  * Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
  */
-probe_pass_diagnostics?: ProbePassDiagnostics | null, };
+probe_pass_diagnostics?: ProbePassDiagnostics | null, 
+/**
+ * Quality assessment of the base resized image before sharpening.
+ */
+base_resize_quality?: BaseResizeQuality | null, 
+/**
+ * Effective target artifact ratio after applying the ringing-aware envelope.
+ * `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
+ * Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
+ */
+effective_target_artifact_ratio: number, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 

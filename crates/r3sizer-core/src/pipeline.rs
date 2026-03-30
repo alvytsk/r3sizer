@@ -104,6 +104,14 @@ pub fn process_auto_sharp_downscale_with_progress(
     let resize_us = t0.elapsed().as_micros() as u64;
 
     // -------------------------------------------------------------------
+    // 2.5. Base resize quality scoring (step 4)
+    // -------------------------------------------------------------------
+    let t0 = Instant::now();
+    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled);
+    let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
+    let base_quality_us = t0.elapsed().as_micros() as u64;
+
+    // -------------------------------------------------------------------
     // 3. Optional contrast leveling
     // -------------------------------------------------------------------
     let t0 = Instant::now();
@@ -178,7 +186,7 @@ pub fn process_auto_sharp_downscale_with_progress(
             run_two_pass_probing(
                 *coarse_count, *coarse_min, *coarse_max,
                 *dense_count, *window_margin,
-                params.target_artifact_ratio,
+                effective_p0,
                 &base, base_luminance.as_deref(),
                 params.sharpen_mode, params.metric_mode, params.artifact_metric,
                 baseline_artifact_ratio, &kernel, &params.metric_weights, metric_override,
@@ -208,7 +216,7 @@ pub fn process_auto_sharp_downscale_with_progress(
     // -------------------------------------------------------------------
     let s_min = probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05);
     let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
-    let p0 = params.target_artifact_ratio as f64;
+    let p0 = effective_p0 as f64;
 
     on_stage("fitting");
 
@@ -228,7 +236,7 @@ pub fn process_auto_sharp_downscale_with_progress(
     let t0 = Instant::now();
     let (solve_result, fit_status, fit_coefficients, fit_quality) = match params.fit_strategy {
         FitStrategy::DirectSearch => {
-            let result = find_sharpness_direct(&probe_samples, params.target_artifact_ratio)?;
+            let result = find_sharpness_direct(&probe_samples, effective_p0)?;
             (result, FitStatus::Skipped, None, None)
         }
 
@@ -242,7 +250,7 @@ pub fn process_auto_sharp_downscale_with_progress(
                 Err(fit_err) => {
                     let result = find_sharpness_direct(
                         &probe_samples,
-                        params.target_artifact_ratio,
+                        effective_p0,
                     )?;
                     (
                         result,
@@ -294,7 +302,7 @@ pub fn process_auto_sharp_downscale_with_progress(
     // Budget reachability
     // -------------------------------------------------------------------
     let budget_reachable_baseline = match params.metric_mode {
-        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= params.target_artifact_ratio,
+        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= effective_p0,
         MetricMode::RelativeToBase => true, // by construction, relative starts at 0
     };
     let budget_reachable = budget_reachable_baseline
@@ -355,7 +363,7 @@ pub fn process_auto_sharp_downscale_with_progress(
                     selected_strength,
                     gm,
                     params.sharpen_sigma,
-                    params.target_artifact_ratio,
+                    effective_p0,
                     params.artifact_metric,
                     params.metric_mode,
                     baseline_artifact_ratio,
@@ -509,6 +517,7 @@ pub fn process_auto_sharp_downscale_with_progress(
             adaptive_validation_us,
             ingress_us: _ingress_us,
             evaluator_us: _evaluator_us,
+            base_quality_us: Some(base_quality_us),
         },
         input_ingress: _input_ingress_diag,
         resize_strategy_diagnostics: _resize_strategy_diag,
@@ -516,6 +525,8 @@ pub fn process_auto_sharp_downscale_with_progress(
         evaluator_result: _evaluator_result,
         recommendations: Vec::new(),
         probe_pass_diagnostics,
+        base_resize_quality: Some(base_resize_quality),
+        effective_target_artifact_ratio: effective_p0,
     };
 
     diagnostics.recommendations =

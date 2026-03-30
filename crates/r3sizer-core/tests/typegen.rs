@@ -12,7 +12,7 @@ use ts_rs::{Config, TS};
 #[allow(deprecated)] // MetricBreakdown.aggregate
 use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
+    BaseResizeQuality, ChromaGuardDiagnostics, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
@@ -79,6 +79,7 @@ fn export_typescript_bindings() {
         RegionCoverage::decl(&cfg),
         AdaptiveValidationOutcome::decl(&cfg),
         ProbePassDiagnostics::decl(&cfg),
+        BaseResizeQuality::decl(&cfg),
         AutoSharpDiagnostics::decl(&cfg),
     ];
 

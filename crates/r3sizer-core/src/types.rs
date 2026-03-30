@@ -288,6 +288,31 @@ pub struct ProbePassDiagnostics {
     pub dense_max: f32,
 }
 
+/// Quality assessment of the resized image before any sharpening is applied.
+///
+/// Computed in the pipeline immediately after downscaling, using both the source
+/// and resized images.  In v1 only `ringing_score` is active (drives
+/// `envelope_scale`); `edge_retention` and `texture_retention` are diagnostic.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct BaseResizeQuality {
+    /// Fraction of source Sobel edge energy preserved in the resized image.
+    /// Scale-independent per-pixel energy ratio; higher is better.
+    /// Diagnostic only in v1 — does not affect solver budget.
+    pub edge_retention: f32,
+    /// Fraction of source local texture variance preserved in the resized image.
+    /// Computed via 5×5 window mean variance ratio; higher is better.
+    /// Diagnostic only in v1 — does not affect solver budget.
+    pub texture_retention: f32,
+    /// Fraction of near-edge pixels showing sign-flip oscillation (ringing proxy).
+    /// Higher is worse.  Active in v1: drives `envelope_scale`.
+    pub ringing_score: f32,
+    /// Budget multiplier applied to `target_artifact_ratio` before probing:
+    /// `effective_p0 = target_artifact_ratio × envelope_scale`.
+    /// Derived as `clamp(1.0 − 2.0 × ringing_score, 0.65, 1.0)`.
+    pub envelope_scale: f32,
+}
+
 /// Polynomial fit strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
@@ -521,6 +546,9 @@ pub struct StageTiming {
     /// Evaluator execution time (None when not configured).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_us: Option<u64>,
+    /// Base resize quality scoring time (step 4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_quality_us: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,6 +1079,16 @@ pub struct AutoSharpDiagnostics {
     /// Coarse/dense pass diagnostics. Present only when `ProbeConfig::TwoPass` was used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_pass_diagnostics: Option<ProbePassDiagnostics>,
+
+    // --- Base resize quality (step 4) ---
+    /// Quality assessment of the base resized image before sharpening.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_resize_quality: Option<BaseResizeQuality>,
+    /// Effective target artifact ratio after applying the ringing-aware envelope.
+    /// `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
+    /// Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
+    #[serde(default)]
+    pub effective_target_artifact_ratio: f32,
 }
 
 /// Return type of the top-level pipeline function.
