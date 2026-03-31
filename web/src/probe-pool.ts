@@ -210,6 +210,14 @@ function runProbeOnWorker(
   });
 }
 
+/** Clear cached base data in all probe workers (e.g. when switching images). */
+export function resetBaseCache(): void {
+  for (const w of pool) {
+    w.postMessage({ type: "clear_base" } as ProbeWorkerRequest);
+  }
+  workersHaveBase = false;
+}
+
 /** Terminate all probe workers. */
 export function destroyProbePool(): void {
   for (const w of pool) w.terminate();

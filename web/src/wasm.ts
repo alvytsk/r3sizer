@@ -1,7 +1,7 @@
 import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/types/wasm-types";
 import type { BaseData } from "./probe-pool";
-import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData } from "./probe-pool";
+import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData, resetBaseCache } from "./probe-pool";
 import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
 
 let worker: Worker | null = null;
@@ -111,6 +111,19 @@ ensureWorker().catch(() => {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+/**
+ * Clear all WASM caches (input image, prepared base, probe worker base data).
+ *
+ * Call this when switching to a new image to prevent stale data from being
+ * reused.  The next `prepareImage` / `prepareBaseImage` calls will rebuild
+ * the caches from scratch.
+ */
+export async function clearAllCaches(): Promise<void> {
+  await ensureWorker();
+  worker!.postMessage({ type: "clear_cache" } as WorkerRequest);
+  resetBaseCache();
+}
 
 export async function processImageAsync(
   rgbaData: Uint8Array,
