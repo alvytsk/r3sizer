@@ -37,6 +37,7 @@ pub fn prepare_image(
 /// is cached and reused by the next `process_image` call, cutting ~1.5 s of
 /// perceived processing time from the "Process" button click.
 ///
+/// If the cached base already matches the given params, this is a fast no-op.
 /// If the user changes target dimensions or strategy, call this again.
 #[wasm_bindgen]
 pub fn prepare_base(
@@ -47,6 +48,15 @@ pub fn prepare_base(
 ) -> Result<(), JsValue> {
     let params: AutoSharpParams = serde_json::from_str(params_json)
         .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+
+    // Fast path: cached base already matches these params — skip re-preparation.
+    let already_cached = CACHED_BASE.with(|c| {
+        c.borrow().as_ref().is_some_and(|b| b.matches_params(&params))
+    });
+    if already_cached {
+        post_progress("base_ready");
+        return Ok(());
+    }
 
     let input = get_or_convert_input(srgb_rgba_data, width, height)?;
 

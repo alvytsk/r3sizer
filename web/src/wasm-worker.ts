@@ -74,13 +74,13 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
 
   if (msg.type === "prepare_base") {
     if (!ready) return;
-    const { rgbaData, width, height, paramsJson } = msg;
+    const { id, rgbaData, width, height, paramsJson } = msg;
     try {
       prepare_base(rgbaData!, width!, height!, paramsJson!);
     } catch {
       // Non-fatal — process_image falls back to full pipeline.
     }
-    (self as unknown as Worker).postMessage({ type: "base_prepared" } as WorkerResponse);
+    (self as unknown as Worker).postMessage({ type: "base_prepared", id } as WorkerResponse);
     return;
   }
 

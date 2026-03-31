@@ -59,8 +59,8 @@ function ensureWorker(): Promise<void> {
             return;
           }
 
-          // Ignore fire-and-forget acknowledgements.
-          if (data.type === "prepared" || data.type === "base_prepared") return;
+          // Ignore fire-and-forget acknowledgements (prepare_image only).
+          if (data.type === "prepared") return;
 
           // Resolve pending calls.
           if (data.id != null) {
@@ -77,6 +77,8 @@ function ensureWorker(): Promise<void> {
               cb.resolve(data.strengthsJson ?? "[]");
             } else if (data.type === "dense_result") {
               cb.resolve(data.denseResult ?? null);
+            } else if (data.type === "base_prepared") {
+              cb.resolve(undefined);
             }
           }
         };
@@ -160,13 +162,14 @@ export async function prepareImage(
  * Process with parallel probing via the probe worker pool.
  *
  * Supports all probe configs including TwoPass (two rounds of parallel probing):
- *   1. Resolve initial strengths via Rust (coarse for TwoPass, all for Explicit/Range)
- *   2. Fan out to probe pool
- *   3. For TwoPass: resolve dense window, run second round in parallel
- *   4. Merge samples, send to main worker for fit + sharpen
+ *   1. Ensure base is prepared with current params
+ *   2. Resolve initial strengths via Rust (coarse for TwoPass, all for Explicit/Range)
+ *   3. Fan out to probe pool
+ *   4. For TwoPass: resolve dense window, run second round in parallel
+ *   5. Merge samples, send to main worker for fit + sharpen
  *
- * Falls back to single-worker `processImageAsync` if pool is unavailable
- * or base data is not cached.
+ * Falls back to single-worker `processImageAsync` if pool is unavailable,
+ * base preparation fails, or any step in the parallel path errors.
  */
 export async function processImageParallel(
   rgbaData: Uint8Array,
@@ -180,33 +183,60 @@ export async function processImageParallel(
     return processImageAsync(rgbaData, width, height, paramsJson);
   }
 
-  // Step 1: Get base data from main worker.
+  try {
+    return await runParallelPipeline(rgbaData, width, height, paramsJson);
+  } catch {
+    // Parallel path failed (stale cache, pool error, etc.) — fall back.
+    return processImageAsync(rgbaData, width, height, paramsJson);
+  }
+}
+
+/** Inner parallel pipeline — throws on any failure so caller can fall back. */
+async function runParallelPipeline(
+  rgbaData: Uint8Array,
+  width: number,
+  height: number,
+  paramsJson: string,
+): Promise<ProcessResult> {
+  // Step 1: Ensure base is prepared with the CURRENT params.
+  // This is a no-op if the cached base already matches (Rust-side check),
+  // but refreshes it when params changed since the last prepareBaseImage call.
+  progressCallback?.("preparing");
+  await callWorker<void>({
+    type: "prepare_base",
+    rgbaData,
+    width,
+    height,
+    paramsJson,
+  });
+
+  // Step 2: Get base data from main worker.
   const baseData = await getBaseData();
   if (!baseData) {
-    return processImageAsync(rgbaData, width, height, paramsJson);
+    throw new Error("base data unavailable after prepare_base");
   }
 
   // Distribute base data to probe workers (cached for subsequent rounds).
   await distributeBaseData(baseData);
 
-  // Step 2: Resolve initial strengths via Rust (works for all configs).
+  // Step 3: Resolve initial strengths via Rust (works for all configs).
   const initialStrengthsJson = await callWorker<string>({
     type: "resolve_initial_strengths",
     paramsJson,
   });
   const initialStrengths: number[] = JSON.parse(initialStrengthsJson);
   if (initialStrengths.length === 0) {
-    return processImageAsync(rgbaData, width, height, paramsJson);
+    throw new Error("no probe strengths resolved");
   }
 
-  // Step 3: Run initial probes in parallel.
+  // Step 4: Run initial probes in parallel.
   progressCallback?.("probing");
   const t0 = performance.now();
   const { samplesJson: initialSamplesJson } = await runProbesParallel(
     initialStrengths, paramsJson,
   );
 
-  // Step 4: For TwoPass, resolve dense window and run second round.
+  // Step 5: For TwoPass, resolve dense window and run second round.
   let finalSamplesJson = initialSamplesJson;
   let passDiagnosticsJson = "";
   const denseResultStr = await callWorker<string | null>({
@@ -237,7 +267,7 @@ export async function processImageParallel(
   }
   const probingMs = performance.now() - t0;
 
-  // Step 5: Send all probes to main worker for fit + sharpen.
+  // Step 6: Send all probes to main worker for fit + sharpen.
   progressCallback?.("fitting");
   return callWorker<ProcessResult>({
     type: "process_from_probes",
@@ -265,9 +295,9 @@ function callWorker<T>(msg: Omit<WorkerRequest, "id">): Promise<T> {
 /**
  * Pre-compute the base image (resize + classify + baseline + evaluator).
  *
- * Fire-and-forget: runs in the worker while the user adjusts params.
- * The next `processImageAsync` call skips ~1.5 s of base preparation
- * when the cached base dimensions match.
+ * Returns a promise that resolves when the base is cached in the worker.
+ * Can be called fire-and-forget (`.catch(() => {})`) at load time, or
+ * awaited before processing to ensure the base is fresh.
  */
 export async function prepareBaseImage(
   rgbaData: Uint8Array,
@@ -276,11 +306,11 @@ export async function prepareBaseImage(
   paramsJson: string
 ): Promise<void> {
   await ensureWorker();
-  worker!.postMessage({
+  return callWorker<void>({
     type: "prepare_base",
     rgbaData,
     width,
     height,
     paramsJson,
-  } as WorkerRequest);
+  });
 }
