@@ -83,6 +83,12 @@ pub struct Cli {
     #[arg(long, value_name = "NAME")]
     pub preset: Option<String>,
 
+    /// Performance-quality tradeoff: fast (fewer probes, uniform sharpen),
+    /// balanced (default), quality (more probes, full adaptive pipeline).
+    /// Applied after --preset and before any explicit overrides.
+    #[arg(long, value_name = "MODE")]
+    pub mode: Option<PipelineModeArg>,
+
     /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only" (experimental).
     #[arg(long, default_value = "gamut-only")]
     pub selection_policy: SelectionPolicyArg,
@@ -192,6 +198,23 @@ impl From<SelectionPolicyArg> for r3sizer_core::SelectionPolicy {
             SelectionPolicyArg::GamutOnly => r3sizer_core::SelectionPolicy::GamutOnly,
             SelectionPolicyArg::Hybrid => r3sizer_core::SelectionPolicy::Hybrid,
             SelectionPolicyArg::CompositeOnly => r3sizer_core::SelectionPolicy::CompositeOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum PipelineModeArg {
+    Fast,
+    Balanced,
+    Quality,
+}
+
+impl From<PipelineModeArg> for r3sizer_core::PipelineMode {
+    fn from(val: PipelineModeArg) -> Self {
+        match val {
+            PipelineModeArg::Fast => r3sizer_core::PipelineMode::Fast,
+            PipelineModeArg::Balanced => r3sizer_core::PipelineMode::Balanced,
+            PipelineModeArg::Quality => r3sizer_core::PipelineMode::Quality,
         }
     }
 }

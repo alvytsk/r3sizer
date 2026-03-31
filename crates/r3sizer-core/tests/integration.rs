@@ -2,8 +2,8 @@ use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ChromaRegionFactors, ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel,
     ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable,
-    LinearRgbImage, MetricComponent, MetricMode, ProbeConfig, ResizeKernel, ResizeStrategy,
-    SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
+    LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig, ResizeKernel,
+    ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
     process_auto_sharp_downscale,
 };
 
@@ -1200,4 +1200,127 @@ fn saturation_guard_tightens_for_saturated_pixels() {
     assert!(eff_mean < eff_max || eff_mean == eff_max,
         "mean should be <= max");
     assert!(eff_mean.is_finite());
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline modes (fast / balanced / quality)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fast_mode_produces_valid_result() {
+    let src = gradient_image(160, 120);
+    let params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Fast),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 80);
+    assert_eq!(out.image.height(), 60);
+    assert!(out.diagnostics.selected_strength > 0.0);
+}
+
+#[test]
+fn quality_mode_produces_valid_result() {
+    let src = gradient_image(160, 120);
+    let params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Quality),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 80);
+    assert_eq!(out.image.height(), 60);
+    assert!(out.diagnostics.selected_strength > 0.0);
+}
+
+#[test]
+fn fast_mode_has_fewer_probes_than_quality() {
+    let src = gradient_image(160, 120);
+    let fast_params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Fast),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+    let quality_params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Quality),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+
+    let fast_out = process_auto_sharp_downscale(&src, &fast_params).unwrap();
+    let quality_out = process_auto_sharp_downscale(&src, &quality_params).unwrap();
+
+    assert!(
+        fast_out.diagnostics.probe_samples.len() < quality_out.diagnostics.probe_samples.len(),
+        "fast should have fewer probes: {} vs {}",
+        fast_out.diagnostics.probe_samples.len(),
+        quality_out.diagnostics.probe_samples.len(),
+    );
+}
+
+#[test]
+fn fast_mode_uses_uniform_strategy() {
+    let params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Fast),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+    // After resolving, sharpen_strategy should be Uniform
+    assert!(
+        matches!(params.sharpen_strategy, SharpenStrategy::Uniform),
+        "fast mode should use uniform strategy, got {:?}", params.sharpen_strategy,
+    );
+    // Chroma guard should be disabled
+    assert!(params.experimental_sharpen_mode.is_none(), "fast mode should disable chroma guard");
+    // Evaluator should be disabled
+    assert!(params.evaluator_config.is_none(), "fast mode should disable evaluator");
+}
+
+#[test]
+fn quality_mode_ensures_adaptive_strategy() {
+    // Even if we start from a Uniform base, quality mode should upgrade to adaptive
+    let params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Quality),
+        sharpen_strategy: SharpenStrategy::Uniform,
+        experimental_sharpen_mode: None,
+        evaluator_config: None,
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+    assert!(
+        matches!(params.sharpen_strategy, SharpenStrategy::ContentAdaptive { .. }),
+        "quality mode should ensure adaptive strategy",
+    );
+    assert!(params.experimental_sharpen_mode.is_some(), "quality mode should enable chroma guard");
+    assert!(params.evaluator_config.is_some(), "quality mode should enable evaluator");
+}
+
+#[test]
+fn balanced_mode_preserves_defaults() {
+    let default = AutoSharpParams::photo(80, 60);
+    let resolved = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Balanced),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+
+    // Balanced should not change any fields (it's a no-op)
+    assert_eq!(
+        format!("{:?}", default.probe_strengths),
+        format!("{:?}", resolved.probe_strengths),
+    );
+    assert_eq!(
+        format!("{:?}", default.sharpen_strategy),
+        format!("{:?}", resolved.sharpen_strategy),
+    );
+}
+
+#[test]
+fn mode_preserves_p0_and_sigma() {
+    let custom_p0 = 0.005;
+    let custom_sigma = 1.5;
+    for mode in [PipelineMode::Fast, PipelineMode::Balanced, PipelineMode::Quality] {
+        let params = AutoSharpParams {
+            pipeline_mode: Some(mode),
+            target_artifact_ratio: custom_p0,
+            sharpen_sigma: custom_sigma,
+            ..AutoSharpParams::photo(80, 60)
+        }.resolved();
+        assert_eq!(params.target_artifact_ratio, custom_p0, "{mode:?} should preserve P0");
+        assert_eq!(params.sharpen_sigma, custom_sigma, "{mode:?} should preserve sigma");
+    }
 }

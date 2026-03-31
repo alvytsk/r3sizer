@@ -5,6 +5,13 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use r3sizer_core::{AutoSharpParams, LinearRgbImage, process_auto_sharp_downscale_with_progress};
 
+/// Deserialize params JSON and apply `pipeline_mode` overrides if set.
+fn parse_params(json: &str) -> Result<AutoSharpParams, JsValue> {
+    serde_json::from_str::<AutoSharpParams>(json)
+        .map(|p| p.resolved())
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))
+}
+
 // ---------------------------------------------------------------------------
 // Cached linear image — avoids re-converting sRGB→linear on every process call.
 // ---------------------------------------------------------------------------
@@ -46,8 +53,7 @@ pub fn prepare_base(
     height: u32,
     params_json: &str,
 ) -> Result<(), JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
 
     // Fast path: cached base already matches these params — skip re-preparation.
     let already_cached = CACHED_BASE.with(|c| {
@@ -177,8 +183,7 @@ pub fn process_image(
     height: u32,
     params_json: &str,
 ) -> Result<JsValue, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
 
     let input = get_or_convert_input(srgb_rgba_data, width, height)?;
 
@@ -255,8 +260,7 @@ pub fn probe_batch(
     params_json: &str,
     baseline: f32,
 ) -> Result<String, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
     let strengths: Vec<f32> = serde_json::from_str(strengths_json)
         .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
 
@@ -277,8 +281,7 @@ pub fn probe_batch(
 /// For Lightness mode: W×H floats.  For RGB mode: W×H×3 floats.
 #[wasm_bindgen]
 pub fn compute_probe_detail(params_json: &str) -> Result<js_sys::Float32Array, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
 
     CACHED_BASE.with(|c| {
         let cache = c.borrow();
@@ -309,8 +312,7 @@ pub fn probe_batch_with_detail(
     params_json: &str,
     baseline: f32,
 ) -> Result<String, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
     let strengths: Vec<f32> = serde_json::from_str(strengths_json)
         .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
 
@@ -335,8 +337,7 @@ pub fn process_from_probes(
     probing_us: u32,
     pass_diagnostics_json: &str,
 ) -> Result<JsValue, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
     let probe_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(probes_json)
         .map_err(|e| JsValue::from_str(&format!("invalid probes JSON: {e}")))?;
     let pass_diagnostics: Option<r3sizer_core::ProbePassDiagnostics> =
@@ -375,8 +376,7 @@ pub fn process_from_probes(
 /// Returns a JSON array of f32.
 #[wasm_bindgen]
 pub fn resolve_initial_strengths(params_json: &str) -> Result<String, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
     let strengths = r3sizer_core::resolve_initial_strengths(&params)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     serde_json::to_string(&strengths)
@@ -393,8 +393,7 @@ pub fn resolve_dense_strengths(
     params_json: &str,
     effective_p0: f32,
 ) -> Result<JsValue, JsValue> {
-    let params: AutoSharpParams = serde_json::from_str(params_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let params = parse_params(params_json)?;
     let coarse_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(coarse_samples_json)
         .map_err(|e| JsValue::from_str(&format!("invalid samples JSON: {e}")))?;
 

@@ -358,6 +358,106 @@ pub enum ClampPolicy {
     Normalize,
 }
 
+/// Runtime performance-quality tradeoff mode.
+///
+/// Each mode adjusts probe budgets, adaptive complexity, and diagnostic depth.
+/// `Balanced` matches the current default behaviour.
+///
+/// Apply with [`PipelineMode::apply`] **before** passing params to the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineMode {
+    /// Minimal probing, uniform sharpening, no chroma guard, no evaluator.
+    /// Best latency, slight quality trade-off on complex images.
+    Fast,
+    /// Current default — content-adaptive sharpening, two-pass probing,
+    /// chroma guard, heuristic evaluator.
+    Balanced,
+    /// Extended probing, wider dense window, full diagnostics.
+    /// Best quality, higher latency.
+    Quality,
+}
+
+impl PipelineMode {
+    /// Override the speed-sensitive fields of `params` for this mode.
+    ///
+    /// Preserves user-chosen P0, sigma, target dimensions, metric, and sharpen
+    /// mode — only changes how much work the pipeline does.
+    pub fn apply(self, params: &mut AutoSharpParams) {
+        match self {
+            PipelineMode::Fast => {
+                // Fewer probes
+                match params.probe_strengths {
+                    ProbeConfig::TwoPass {
+                        ref mut coarse_count,
+                        ref mut dense_count,
+                        ref mut window_margin,
+                        ..
+                    } => {
+                        *coarse_count = 4;
+                        *dense_count = 2;
+                        *window_margin = 0.3;
+                    }
+                    ProbeConfig::Range { ref mut count, .. } => {
+                        *count = (*count).min(5);
+                    }
+                    ProbeConfig::Explicit(_) => {} // user-supplied, leave alone
+                }
+                // Skip content-adaptive classification + gain map
+                params.sharpen_strategy = SharpenStrategy::Uniform;
+                // Skip chroma guard
+                params.experimental_sharpen_mode = None;
+                // Skip evaluator
+                params.evaluator_config = None;
+            }
+            PipelineMode::Balanced => {
+                // Current defaults — no overrides needed.
+            }
+            PipelineMode::Quality => {
+                // More probes, wider dense window
+                match params.probe_strengths {
+                    ProbeConfig::TwoPass {
+                        ref mut coarse_count,
+                        ref mut dense_count,
+                        ref mut window_margin,
+                        ..
+                    } => {
+                        *coarse_count = 9;
+                        *dense_count = 6;
+                        *window_margin = 0.7;
+                    }
+                    ProbeConfig::Range { ref mut count, .. } => {
+                        *count = (*count).max(9);
+                    }
+                    ProbeConfig::Explicit(_) => {} // user-supplied, leave alone
+                }
+                // Ensure full adaptive pipeline
+                if matches!(params.sharpen_strategy, SharpenStrategy::Uniform) {
+                    params.sharpen_strategy = SharpenStrategy::ContentAdaptive {
+                        classification: ClassificationParams::default(),
+                        gain_table: GainTable::v03_default(),
+                        max_backoff_iterations: 6,
+                        backoff_scale_factor: 0.8,
+                    };
+                }
+                // Ensure chroma guard is on
+                if params.experimental_sharpen_mode.is_none() {
+                    params.experimental_sharpen_mode = Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                        max_chroma_shift: 0.25,
+                        chroma_region_factors: Some(ChromaRegionFactors::default()),
+                        saturation_guard: Some(SaturationGuardParams::default()),
+                    });
+                }
+                // Ensure evaluator is on
+                if params.evaluator_config.is_none() {
+                    params.evaluator_config = Some(EvaluatorConfig::Heuristic);
+                }
+            }
+        }
+    }
+}
+
 /// All parameters controlling the auto-sharpness downscale pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
@@ -413,6 +513,14 @@ pub struct AutoSharpParams {
     /// Quality evaluator configuration. Default: `None` (disabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_config: Option<EvaluatorConfig>,
+
+    // --- Runtime mode ---
+
+    /// Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
+    /// called automatically during [`AutoSharpParams::validate`], overriding
+    /// the speed-sensitive fields before pipeline execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_mode: Option<PipelineMode>,
 }
 
 impl Default for AutoSharpParams {
@@ -455,6 +563,7 @@ impl Default for AutoSharpParams {
             }),
             evaluation_color_space: None,
             evaluator_config: Some(EvaluatorConfig::Heuristic),
+            pipeline_mode: None,
         }
     }
 }
@@ -486,6 +595,20 @@ impl AutoSharpParams {
             },
             ..Self::default()
         }
+    }
+
+    /// Apply [`pipeline_mode`] overrides (if set) and return the resolved params.
+    ///
+    /// Call this before passing params to the pipeline:
+    /// ```ignore
+    /// let params = AutoSharpParams { pipeline_mode: Some(PipelineMode::Fast), .. }.resolved();
+    /// prepare_base(&input, &params, &on_stage)?;
+    /// ```
+    pub fn resolved(mut self) -> Self {
+        if let Some(mode) = self.pipeline_mode.take() {
+            mode.apply(&mut self);
+        }
+        self
     }
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.

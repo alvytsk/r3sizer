@@ -17,7 +17,7 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ParamPatch, ProbeConfig, ProbePassDiagnostics, ProbeSample,
+    MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample,
     QualityEvaluation, Recommendation, RecommendationKind, RegionClass, RegionCoverage,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
     SelectionPolicy, SaturationGuardParams, Severity, SharpenMode, SharpenStrategy, StageTiming,
@@ -67,6 +67,7 @@ fn export_typescript_bindings() {
         ClassificationParams::decl(&cfg),
         ProbeConfig::decl(&cfg),
         SharpenStrategy::decl(&cfg),
+        PipelineMode::decl(&cfg),
         AutoSharpParams::decl(&cfg),
         // ── Fit / solve results ─────────────────────────────────────────
         CubicPolynomial::decl(&cfg),

@@ -27,11 +27,17 @@ pub fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u3
 
 /// Build pipeline params from CLI args + resolved dimensions.
 /// If `--preset` is set, uses the named preset; CLI flags override where specified.
+/// If `--mode` is set, applies the performance-quality mode after preset/manual config.
 pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSharpParams {
+    let pipeline_mode = args.mode.map(r3sizer_core::PipelineMode::from);
+
     // If a preset is specified, start from its configuration.
     if let Some(ref name) = args.preset {
         match crate::presets::preset_params(name, target_width, target_height) {
-            Ok(params) => return params,
+            Ok(mut params) => {
+                params.pipeline_mode = pipeline_mode;
+                return params.resolved();
+            }
             Err(e) => {
                 eprintln!("Warning: {e}; falling back to manual configuration");
             }
@@ -60,7 +66,7 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         MetricWeights::default()
     };
 
-    AutoSharpParams {
+    let params = AutoSharpParams {
         target_width,
         target_height,
         probe_strengths,
@@ -75,9 +81,11 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         metric_weights,
         diagnostics_level: args.diagnostics_level.into(),
         selection_policy: args.selection_policy.into(),
+        pipeline_mode,
         // Inherit sharpen_strategy, chroma guard, and evaluator from default (Photo).
         ..Default::default()
-    }
+    };
+    params.resolved()
 }
 
 pub fn run(args: &Cli) -> Result<()> {

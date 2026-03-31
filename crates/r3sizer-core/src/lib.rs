@@ -44,7 +44,7 @@ pub use types::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbePassDiagnostics,
+    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, PipelineMode, ProbePassDiagnostics,
     ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
     RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,

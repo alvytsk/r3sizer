@@ -75,6 +75,8 @@ max_backoff_iterations: number,
  */
 backoff_scale_factor: number, };
 
+export type PipelineMode = "fast" | "balanced" | "quality";
+
 export type AutoSharpParams = { target_width: number, target_height: number, 
 /**
  * How to select sharpening probe strengths.
@@ -140,7 +142,13 @@ evaluation_color_space?: EvaluationColorSpace | null,
 /**
  * Quality evaluator configuration. Default: `None` (disabled).
  */
-evaluator_config?: EvaluatorConfig | null, };
+evaluator_config?: EvaluatorConfig | null, 
+/**
+ * Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
+ * called automatically during [`AutoSharpParams::validate`], overriding
+ * the speed-sensitive fields before pipeline execution.
+ */
+pipeline_mode?: PipelineMode | null, };
 
 export type CubicPolynomial = { a: number, b: number, c: number, d: number, };
 
