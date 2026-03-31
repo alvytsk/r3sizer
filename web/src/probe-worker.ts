@@ -7,7 +7,7 @@
  * Base image data is sent once via `set_base` and cached for the duration of
  * the processing cycle, avoiding redundant structured clones per batch.
  */
-import { initSync, probe_batch } from "./wasm-pkg/r3sizer_wasm";
+import { initSync, probe_batch, probe_batch_with_detail } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 
@@ -18,6 +18,7 @@ let cachedBase: {
   width: number;
   height: number;
   baseline: number;
+  detail?: Float32Array;
 } | null = null;
 
 export interface ProbeWorkerRequest {
@@ -26,6 +27,7 @@ export interface ProbeWorkerRequest {
   id?: number;
   basePixels?: Float32Array;
   luminance?: Float32Array;
+  detail?: Float32Array;
   width?: number;
   height?: number;
   strengths?: number[];
@@ -56,13 +58,14 @@ self.onmessage = (e: MessageEvent<ProbeWorkerRequest>) => {
   }
 
   if (msg.type === "set_base") {
-    const { id, basePixels, luminance, width, height, baseline } = msg;
+    const { id, basePixels, luminance, width, height, baseline, detail } = msg;
     cachedBase = {
       pixels: basePixels!,
       luminance: luminance!,
       width: width!,
       height: height!,
       baseline: baseline!,
+      detail,
     };
     (self as unknown as Worker).postMessage({ type: "base_cached", id } as ProbeWorkerResponse);
     return;
@@ -74,15 +77,27 @@ self.onmessage = (e: MessageEvent<ProbeWorkerRequest>) => {
       if (!ready) throw new Error("WASM not initialized");
       if (!cachedBase) throw new Error("No base data — call set_base first");
 
-      const samplesJson = probe_batch(
-        cachedBase.pixels,
-        cachedBase.width,
-        cachedBase.height,
-        cachedBase.luminance,
-        JSON.stringify(strengths),
-        paramsJson!,
-        cachedBase.baseline,
-      );
+      // Use precomputed detail when available (skips Gaussian blur entirely).
+      const samplesJson = cachedBase.detail
+        ? probe_batch_with_detail(
+            cachedBase.pixels,
+            cachedBase.width,
+            cachedBase.height,
+            cachedBase.luminance,
+            cachedBase.detail,
+            JSON.stringify(strengths),
+            paramsJson!,
+            cachedBase.baseline,
+          )
+        : probe_batch(
+            cachedBase.pixels,
+            cachedBase.width,
+            cachedBase.height,
+            cachedBase.luminance,
+            JSON.stringify(strengths),
+            paramsJson!,
+            cachedBase.baseline,
+          );
 
       const resp: ProbeWorkerResponse = { type: "probe_result", id, samplesJson };
       (self as unknown as Worker).postMessage(resp);

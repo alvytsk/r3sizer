@@ -623,6 +623,43 @@ export function ParameterPanel() {
             );
           })}
         </div>
+        {/* Speed mode */}
+        <div className="grid grid-cols-3 gap-1">
+          {(["fast", "balanced", "quality"] as const).map((mode) => {
+            const current = params.pipeline_mode ?? "balanced";
+            const active = current === mode;
+            const meta = {
+              fast: { label: "Fast", desc: "minimal probing" },
+              balanced: { label: "Balanced", desc: "default" },
+              quality: { label: "Quality", desc: "extended probing" },
+            }[mode];
+            return (
+              <button
+                key={mode}
+                type="button"
+                className={[
+                  "rounded-md px-2 py-1.5 text-center transition-all duration-150",
+                  "border font-mono",
+                  active
+                    ? "border-primary/40 bg-primary/[0.08] ring-1 ring-primary/20"
+                    : "border-border/30 bg-card/30 hover:border-border/50 hover:bg-card/60",
+                ].join(" ")}
+                onClick={() => {
+                  updateParams({
+                    pipeline_mode: mode === "balanced" ? null : mode,
+                  });
+                }}
+              >
+                <span className={`text-[10px] font-semibold ${active ? "text-primary" : "text-foreground/70"}`}>
+                  {meta.label}
+                </span>
+                <span className={`block text-[9px] ${active ? "text-primary/50" : "text-muted-foreground/30"}`}>
+                  {meta.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
         {/* Active config summary */}
         <div className="rounded-md border border-border/20 bg-surface/50 px-2.5 py-2">
           <div className="flex items-baseline gap-2 mb-1.5">

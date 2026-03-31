@@ -299,7 +299,7 @@ impl ProbeConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ProbePassDiagnostics {
-    /// Number of probes fired in the coarse pass.
+    /// Configured coarse probe count (may differ from `coarse_probes_used` if early-stopped).
     pub coarse_count: usize,
     /// Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
     pub coarse_min: f32,
@@ -311,6 +311,14 @@ pub struct ProbePassDiagnostics {
     pub dense_min: f32,
     /// Dense window upper bound selected after coarse bracket search.
     pub dense_max: f32,
+    /// Actual number of coarse probes evaluated (< `coarse_count` when early-stopped).
+    ///
+    /// `None` means all configured coarse probes ran (no early stop).
+    /// Only populated by the internal sequential two-pass path.  The WASM
+    /// parallel probe-pool path runs all coarse probes in parallel and does
+    /// not support early stopping, so this field is always `None` there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coarse_probes_used: Option<usize>,
 }
 
 /// Quality assessment of the resized image before any sharpening is applied.
@@ -356,6 +364,106 @@ pub enum ClampPolicy {
     Clamp,
     /// Rescale entire image by its global maximum.
     Normalize,
+}
+
+/// Runtime performance-quality tradeoff mode.
+///
+/// Each mode adjusts probe budgets, adaptive complexity, and diagnostic depth.
+/// `Balanced` matches the current default behaviour.
+///
+/// Apply with [`PipelineMode::apply`] **before** passing params to the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineMode {
+    /// Minimal probing, uniform sharpening, no chroma guard, no evaluator.
+    /// Best latency, slight quality trade-off on complex images.
+    Fast,
+    /// Current default — content-adaptive sharpening, two-pass probing,
+    /// chroma guard, heuristic evaluator.
+    Balanced,
+    /// Extended probing, wider dense window, full diagnostics.
+    /// Best quality, higher latency.
+    Quality,
+}
+
+impl PipelineMode {
+    /// Override the speed-sensitive fields of `params` for this mode.
+    ///
+    /// Preserves user-chosen P0, sigma, target dimensions, metric, and sharpen
+    /// mode — only changes how much work the pipeline does.
+    pub fn apply(self, params: &mut AutoSharpParams) {
+        match self {
+            PipelineMode::Fast => {
+                // Fewer probes
+                match params.probe_strengths {
+                    ProbeConfig::TwoPass {
+                        ref mut coarse_count,
+                        ref mut dense_count,
+                        ref mut window_margin,
+                        ..
+                    } => {
+                        *coarse_count = 4;
+                        *dense_count = 2;
+                        *window_margin = 0.3;
+                    }
+                    ProbeConfig::Range { ref mut count, .. } => {
+                        *count = (*count).min(5);
+                    }
+                    ProbeConfig::Explicit(_) => {} // user-supplied, leave alone
+                }
+                // Skip content-adaptive classification + gain map
+                params.sharpen_strategy = SharpenStrategy::Uniform;
+                // Skip chroma guard
+                params.experimental_sharpen_mode = None;
+                // Skip evaluator
+                params.evaluator_config = None;
+            }
+            PipelineMode::Balanced => {
+                // Current defaults — no overrides needed.
+            }
+            PipelineMode::Quality => {
+                // More probes, wider dense window
+                match params.probe_strengths {
+                    ProbeConfig::TwoPass {
+                        ref mut coarse_count,
+                        ref mut dense_count,
+                        ref mut window_margin,
+                        ..
+                    } => {
+                        *coarse_count = 9;
+                        *dense_count = 6;
+                        *window_margin = 0.7;
+                    }
+                    ProbeConfig::Range { ref mut count, .. } => {
+                        *count = (*count).max(9);
+                    }
+                    ProbeConfig::Explicit(_) => {} // user-supplied, leave alone
+                }
+                // Ensure full adaptive pipeline
+                if matches!(params.sharpen_strategy, SharpenStrategy::Uniform) {
+                    params.sharpen_strategy = SharpenStrategy::ContentAdaptive {
+                        classification: ClassificationParams::default(),
+                        gain_table: GainTable::v03_default(),
+                        max_backoff_iterations: 6,
+                        backoff_scale_factor: 0.8,
+                    };
+                }
+                // Ensure chroma guard is on
+                if params.experimental_sharpen_mode.is_none() {
+                    params.experimental_sharpen_mode = Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                        max_chroma_shift: 0.25,
+                        chroma_region_factors: Some(ChromaRegionFactors::default()),
+                        saturation_guard: Some(SaturationGuardParams::default()),
+                    });
+                }
+                // Ensure evaluator is on
+                if params.evaluator_config.is_none() {
+                    params.evaluator_config = Some(EvaluatorConfig::Heuristic);
+                }
+            }
+        }
+    }
 }
 
 /// All parameters controlling the auto-sharpness downscale pipeline.
@@ -413,6 +521,14 @@ pub struct AutoSharpParams {
     /// Quality evaluator configuration. Default: `None` (disabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_config: Option<EvaluatorConfig>,
+
+    // --- Runtime mode ---
+
+    /// Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
+    /// called automatically during [`AutoSharpParams::validate`], overriding
+    /// the speed-sensitive fields before pipeline execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_mode: Option<PipelineMode>,
 }
 
 impl Default for AutoSharpParams {
@@ -455,6 +571,7 @@ impl Default for AutoSharpParams {
             }),
             evaluation_color_space: None,
             evaluator_config: Some(EvaluatorConfig::Heuristic),
+            pipeline_mode: None,
         }
     }
 }
@@ -486,6 +603,20 @@ impl AutoSharpParams {
             },
             ..Self::default()
         }
+    }
+
+    /// Apply [`pipeline_mode`] overrides (if set) and return the resolved params.
+    ///
+    /// Call this before passing params to the pipeline:
+    /// ```ignore
+    /// let params = AutoSharpParams { pipeline_mode: Some(PipelineMode::Fast), .. }.resolved();
+    /// prepare_base(&input, &params, &on_stage)?;
+    /// ```
+    pub fn resolved(mut self) -> Self {
+        if let Some(mode) = self.pipeline_mode.take() {
+            mode.apply(&mut self);
+        }
+        self
     }
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.
@@ -1162,6 +1293,13 @@ pub struct AutoSharpDiagnostics {
     /// Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
     #[serde(default)]
     pub effective_target_artifact_ratio: f32,
+
+    // --- Performance optimisation flags ---
+
+    /// Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
+    /// Active for shrink ratios above ~3×.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub used_staged_shrink: bool,
 }
 
 /// Return type of the top-level pipeline function.

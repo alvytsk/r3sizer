@@ -75,6 +75,8 @@ max_backoff_iterations: number,
  */
 backoff_scale_factor: number, };
 
+export type PipelineMode = "fast" | "balanced" | "quality";
+
 export type AutoSharpParams = { target_width: number, target_height: number, 
 /**
  * How to select sharpening probe strengths.
@@ -140,7 +142,13 @@ evaluation_color_space?: EvaluationColorSpace | null,
 /**
  * Quality evaluator configuration. Default: `None` (disabled).
  */
-evaluator_config?: EvaluatorConfig | null, };
+evaluator_config?: EvaluatorConfig | null, 
+/**
+ * Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
+ * called automatically during [`AutoSharpParams::validate`], overriding
+ * the speed-sensitive fields before pipeline execution.
+ */
+pipeline_mode?: PipelineMode | null, };
 
 export type CubicPolynomial = { a: number, b: number, c: number, d: number, };
 
@@ -264,7 +272,7 @@ export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_m
 
 export type ProbePassDiagnostics = { 
 /**
- * Number of probes fired in the coarse pass.
+ * Configured coarse probe count (may differ from `coarse_probes_used` if early-stopped).
  */
 coarse_count: number, 
 /**
@@ -286,7 +294,11 @@ dense_min: number,
 /**
  * Dense window upper bound selected after coarse bracket search.
  */
-dense_max: number, };
+dense_max: number, 
+/**
+ * Actual number of coarse probes evaluated (< `coarse_count` when early-stopped).
+ */
+coarse_probes_used?: number | null, };
 
 export type BaseResizeQuality = { 
 /**
@@ -403,7 +415,12 @@ base_resize_quality?: BaseResizeQuality | null,
  * `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
  * Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
  */
-effective_target_artifact_ratio: number, };
+effective_target_artifact_ratio: number, 
+/**
+ * Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
+ * Active for shrink ratios above ~3×.
+ */
+used_staged_shrink?: boolean, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 

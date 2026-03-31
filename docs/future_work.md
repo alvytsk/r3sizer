@@ -21,6 +21,12 @@ The following items from the original roadmap are now implemented:
 - **Parallel probing in WASM (v0.6)** — probe worker pool (up to 6 workers), TwoPass two-round parallel probing, base data caching in workers.
 - **Two calibrated presets (v0.6)** — Photo (P0=0.003, range [0.003, 1.0]) and Precision (P0=0.001, range [0.003, 0.5]).
 - **CLI sweep mode** — batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+- **Detail precomputation (v0.7)** — `D = input - blur(input)` computed once per probe phase; each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `compute_probe_detail` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
+- **Staged shrink (v0.7)** — for shrink ratios >= 3x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
+- **Pipeline modes (v0.7)** — `PipelineMode` enum (Fast / Balanced / Quality) controls probe budget, adaptive complexity, chroma guard, and evaluator. Applied via `AutoSharpParams::resolved()`.
+- **Early stopping (v0.7)** — coarse probing exits after 3+ probes when a P0 crossing bracket is found, saving remaining probes.
+- **fast_image_resize (v0.7)** — Lanczos3 downscaling via `fast_image_resize` crate with SSE4.1/AVX2 SIMD on x86-64 (~3.5x faster than `image` crate).
+- **Base quality fast path (v0.7)** — source-side Sobel/variance diagnostics skipped in non-Full diagnostics mode (~40x faster).
 
 ---
 
@@ -70,21 +76,31 @@ choices.  Use sweep mode across diverse image corpora to validate and tune.
 
 ## Performance optimisations
 
-### SIMD for inner loops
-`metrics::artifact_ratio`, `sharpen::gaussian_blur`, and
-`sharpen::gaussian_blur_single_channel` are the hot paths.
-Both operate on flat `&[f32]` slices -- well-suited for auto-vectorisation or
-explicit SIMD via `std::simd` (once stabilised) or `wide`.
+### ~~SIMD for resize~~ (done)
+Resize now uses `fast_image_resize` with SSE4.1/AVX2 on x86-64.
 
 ### ~~Parallel probing~~ (done)
-Probes now run in parallel via `rayon::par_iter` when the `parallel` feature is
-enabled (default).  The Gaussian kernel and luminance buffer are shared read-only
-across threads.
+Probes run in parallel via `rayon::par_iter` (native) or a Web Worker pool (WASM).
 
-### Further parallelism
-The Gaussian blur inner loops (`sharpen.rs`) could benefit from per-row
-parallelism or explicit SIMD.  The current bottleneck for large images is the
-separable blur, not the probe dispatch.
+### ~~Detail precomputation~~ (done)
+Blur computed once per probe phase, not per probe. Workers receive precomputed detail.
+
+### ~~Staged shrink~~ (done)
+Bilinear pre-reduce for large shrink ratios (>= 3x).
+
+### SIMD for Gaussian blur
+`sharpen::gaussian_blur` and `gaussian_blur_single_channel` are hand-rolled
+separable passes on flat `&[f32]`.  After detail precomputation, the blur runs
+only once per probe phase (not per probe), so the ROI is reduced — but for
+large images it remains the single most expensive operation.  Candidates:
+explicit SIMD via `std::simd` (once stabilised), or delegation to
+`fast_image_resize`'s internal blur if exposed.
+
+### Tile-based probing
+Evaluate probes on representative tiles instead of the full output image.
+Would reduce per-probe `reconstruct_rgb` and `compute_selection_metric` cost
+from O(W*H) to O(tile_count * tile_size^2).  Risk: tile metrics may diverge
+from full-image behavior on unusual images.
 
 ---
 

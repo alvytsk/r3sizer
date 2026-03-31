@@ -39,6 +39,7 @@ export type {
   ClassificationParams,
   ProbeConfig,
   SharpenStrategy,
+  PipelineMode,
   AutoSharpParams,
   CubicPolynomial,
   FitQuality,

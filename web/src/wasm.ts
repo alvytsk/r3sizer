@@ -94,6 +94,8 @@ function ensureWorker(): Promise<void> {
               cb.resolve(data.result as ProcessResult);
             } else if (data.type === "base_data") {
               cb.resolve(data.baseData ?? null);
+            } else if (data.type === "detail") {
+              cb.resolve(data.detailData ?? null);
             } else if (data.type === "strengths") {
               cb.resolve(data.strengthsJson ?? "[]");
             } else if (data.type === "dense_result") {
@@ -244,13 +246,21 @@ async function runParallelPipeline(
     paramsJson,
   });
 
-  // Step 2: Get base data from main worker.
-  const baseData = await getBaseData();
+  // Step 2: Get base data and precomputed detail from main worker.
+  const [baseData, detail] = await Promise.all([
+    getBaseData(),
+    callWorker<Float32Array | null>({ type: "compute_detail", paramsJson }),
+  ]);
   if (!baseData) {
     throw new Error("base data unavailable after prepare_base");
   }
 
-  // Distribute base data to probe workers (cached for subsequent rounds).
+  // Include detail in base data so workers skip the Gaussian blur.
+  if (detail) {
+    baseData.detail = detail;
+  }
+
+  // Distribute base data + detail to probe workers (cached for subsequent rounds).
   await distributeBaseData(baseData);
 
   // Step 3: Resolve initial strengths via Rust (works for all configs).

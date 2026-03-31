@@ -34,7 +34,8 @@ pub mod recommendations;
 pub use pipeline::{
     PreparedBase, prepare_base, process_from_prepared, process_from_prepared_with_probes,
     resolve_initial_strengths, resolve_dense_strengths,
-    run_probes_standalone, process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
+    run_probes_standalone, run_probes_from_detail, compute_probe_detail,
+    process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
 };
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
@@ -43,7 +44,7 @@ pub use types::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ProbePassDiagnostics,
+    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, PipelineMode, ProbePassDiagnostics,
     ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
     RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
     ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
