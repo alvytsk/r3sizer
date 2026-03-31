@@ -2,14 +2,14 @@
 ///
 /// **Engineering note:** The exact downscale kernel used in the original papers
 /// is not confirmed from available sources.  This implementation uses Lanczos3
-/// resampling (via the `image` crate) as a high-quality, well-documented
-/// standard.  If the paper-exact kernel is identified in the future, only this
-/// module needs to change.
+/// resampling via `fast_image_resize` (SIMD-accelerated on x86-64) as a
+/// high-quality, well-documented standard.  If the paper-exact kernel is
+/// identified in the future, only this module needs to change.
 ///
 /// Resize is performed on the raw f32 linear pixel buffer.  No gamma correction
 /// is applied here; callers are responsible for ensuring the image is already in
 /// linear light before calling [`downscale`].
-use image::{imageops, ImageBuffer, Rgb};
+use fast_image_resize as fir;
 
 use crate::{CoreError, LinearRgbImage, ImageSize};
 
@@ -19,9 +19,9 @@ const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
 /// Downscale `src` to `target` size using Lanczos3 resampling.
 ///
 /// For shrink ratios above [`STAGED_SHRINK_THRESHOLD`] a two-stage path is
-/// used: a fast bilinear (Triangle) pre-reduce brings the image to ~2× the
-/// target, then a final Lanczos3 pass produces the output.  This follows the
-/// same principle as libvips' `gap` parameter.
+/// used: a fast bilinear pre-reduce brings the image to ~2× the target, then a
+/// final Lanczos3 pass produces the output.  This follows the same principle as
+/// libvips' `gap` parameter.
 ///
 /// Returns a clone-sized result; `src` is not mutated.
 /// Returns `Err` if `target` has a zero dimension.
@@ -44,34 +44,72 @@ pub fn downscale_with_info(
         return Ok((src.clone(), false));
     }
 
-    let buf: ImageBuffer<Rgb<f32>, Vec<f32>> = ImageBuffer::from_raw(
-        src.width(),
-        src.height(),
-        src.pixels().to_vec(),
-    )
-    .ok_or_else(|| CoreError::InvalidParams("failed to wrap buffer as ImageBuffer".into()))?;
-
     let shrink_x = src.width() as f64 / target.width as f64;
     let shrink_y = src.height() as f64 / target.height as f64;
     let max_shrink = shrink_x.max(shrink_y);
 
     if max_shrink >= STAGED_SHRINK_THRESHOLD {
-        // Two-stage: fast pre-reduce to ~2× target, then final Lanczos3.
-        // Pre-factor leaves the intermediate at roughly 2× the final target
-        // so the Lanczos3 pass has enough support for high quality.
+        // Two-stage: fast bilinear pre-reduce to ~2× target, then Lanczos3.
         let pre_factor = (max_shrink / 2.0).floor().max(1.0);
         let pre_w = ((src.width() as f64 / pre_factor).round() as u32).max(target.width);
         let pre_h = ((src.height() as f64 / pre_factor).round() as u32).max(target.height);
 
-        let pre = imageops::resize(&buf, pre_w, pre_h, imageops::FilterType::Triangle);
-        let resized = imageops::resize(&pre, target.width, target.height, imageops::FilterType::Lanczos3);
-        let data: Vec<f32> = resized.into_raw();
-        Ok((LinearRgbImage::new(target.width, target.height, data)?, true))
+        let pre = fir_resize(src, pre_w, pre_h, fir::ResizeAlg::Convolution(fir::FilterType::Bilinear))?;
+        let out = fir_resize(&pre, target.width, target.height, fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3))?;
+        Ok((out, true))
     } else {
-        let resized = imageops::resize(&buf, target.width, target.height, imageops::FilterType::Lanczos3);
-        let data: Vec<f32> = resized.into_raw();
-        Ok((LinearRgbImage::new(target.width, target.height, data)?, false))
+        let out = fir_resize(src, target.width, target.height, fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3))?;
+        Ok((out, false))
     }
+}
+
+/// Resize a `LinearRgbImage` using `fast_image_resize`.
+fn fir_resize(
+    src: &LinearRgbImage,
+    dst_w: u32,
+    dst_h: u32,
+    alg: fir::ResizeAlg,
+) -> Result<LinearRgbImage, CoreError> {
+    let src_bytes = f32_slice_as_bytes(src.pixels());
+    let src_image = fir::images::ImageRef::new(
+        src.width(),
+        src.height(),
+        src_bytes,
+        fir::PixelType::F32x3,
+    ).map_err(|e| CoreError::InvalidParams(format!("fir source image: {e}")))?;
+
+    let mut dst_image = fir::images::Image::new(dst_w, dst_h, fir::PixelType::F32x3);
+
+    let mut resizer = fir::Resizer::new();
+    resizer.resize(&src_image, &mut dst_image, Some(&fir::ResizeOptions::new().resize_alg(alg)))
+        .map_err(|e| CoreError::InvalidParams(format!("fir resize: {e}")))?;
+
+    let dst_floats = bytes_vec_to_f32_vec(dst_image.into_vec());
+    LinearRgbImage::new(dst_w, dst_h, dst_floats)
+}
+
+/// View `&[f32]` as `&[u8]` without copying.
+fn f32_slice_as_bytes(floats: &[f32]) -> &[u8] {
+    let ptr = floats.as_ptr() as *const u8;
+    let len = std::mem::size_of_val(floats);
+    // SAFETY: f32 has no invalid bit patterns for reading as bytes.
+    // The lifetime is tied to `floats`.
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+}
+
+/// Convert a `Vec<u8>` (from fir output) to `Vec<f32>` without element-wise copy.
+fn bytes_vec_to_f32_vec(bytes: Vec<u8>) -> Vec<f32> {
+    let byte_len = bytes.len();
+    assert_eq!(byte_len % 4, 0, "buffer length not a multiple of 4");
+    let float_len = byte_len / 4;
+    let ptr = bytes.as_ptr();
+    assert_eq!(ptr as usize % std::mem::align_of::<f32>(), 0, "buffer not f32-aligned");
+    // SAFETY: fir allocates aligned buffers for F32x3. We verified alignment and length.
+    // We consume `bytes` (forget prevents drop) and reconstruct as Vec<f32>.
+    let float_ptr = ptr as *mut f32;
+    let cap = bytes.capacity() / 4;
+    std::mem::forget(bytes);
+    unsafe { Vec::from_raw_parts(float_ptr, float_len, cap) }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,23 +217,22 @@ mod tests {
     #[test]
     fn staged_shrink_matches_direct_approximately() {
         // Staged shrink should produce similar (but not identical) results
-        // compared to a pure Lanczos3 downscale.
+        // compared to a single-pass Lanczos3 downscale.
         let src = gradient_image(400, 300);
         let target = ImageSize { width: 80, height: 60 };
 
         let (staged_out, did_stage) = downscale_with_info(&src, target).unwrap();
         assert!(did_stage);
 
-        // Direct Lanczos3 for comparison
-        let buf: ImageBuffer<Rgb<f32>, Vec<f32>> = ImageBuffer::from_raw(
-            src.width(), src.height(), src.pixels().to_vec(),
+        // Direct single-pass Lanczos3 for comparison.
+        let direct = fir_resize(
+            &src, target.width, target.height,
+            fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
         ).unwrap();
-        let direct = imageops::resize(&buf, 80, 60, imageops::FilterType::Lanczos3);
-        let direct_data: Vec<f32> = direct.into_raw();
 
         // Should be close — the pre-reduce is bilinear so there will be
         // minor differences, but on a smooth gradient they should be small.
-        let max_diff: f32 = staged_out.pixels().iter().zip(direct_data.iter())
+        let max_diff: f32 = staged_out.pixels().iter().zip(direct.pixels().iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
         assert!(max_diff < 0.05, "staged shrink diverges too much from direct: max_diff={max_diff}");

@@ -14,6 +14,7 @@ typegen      = ["ts-rs"]
 thiserror = { workspace = true }
 serde     = { workspace = true }
 image     = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+fast_image_resize = { workspace = true }
 rayon     = { version = "1", optional = true }
 web-time  = { workspace = true }
 ts-rs     = { workspace = true, optional = true }

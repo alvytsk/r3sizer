@@ -214,22 +214,44 @@ fn local_variance_mean(luma: &[f32], w: usize, h: usize) -> f32 {
 
 /// Score the quality of a downscaled image relative to its source.
 ///
-/// Computes [`BaseResizeQuality`] containing edge/texture retention (diagnostic),
-/// ringing score (active), and the derived [`envelope_scale`][BaseResizeQuality::envelope_scale]
-/// multiplier.
+/// Computes [`BaseResizeQuality`] containing ringing score (active) and the
+/// derived [`envelope_scale`][BaseResizeQuality::envelope_scale] multiplier.
 ///
-/// Both arguments should be in linear RGB space.  This function is O(W×H) for
-/// both images.
-pub fn score_base_resize(source: &LinearRgbImage, resized: &LinearRgbImage) -> BaseResizeQuality {
-    let src_luma = extract_luma(source);
+/// When `full_diagnostics` is true, also computes edge/texture retention
+/// (reference-aware, runs Sobel + local variance on the **source** image).
+/// These are diagnostic-only in v1 and do not affect the solver budget.
+/// Set to false in fast/balanced modes to skip the expensive source-side work.
+///
+/// Both arguments should be in linear RGB space.
+pub fn score_base_resize(
+    source: &LinearRgbImage,
+    resized: &LinearRgbImage,
+    full_diagnostics: bool,
+) -> BaseResizeQuality {
     let res_luma = extract_luma(resized);
-
-    let sw = source.width() as usize;
-    let sh = source.height() as usize;
     let rw = resized.width() as usize;
     let rh = resized.height() as usize;
 
-    // Edge retention: ratio of per-pixel Sobel energy (diagnostic only in v1).
+    // Ringing score: no-reference oscillation detector on the resized image.
+    // This is the only metric that drives the solver budget in v1.
+    let ringing_score = compute_ringing_score(&res_luma, rw, rh);
+    let envelope_scale = (1.0 - RINGING_K * ringing_score).clamp(MIN_ENVELOPE_SCALE, 1.0);
+
+    if !full_diagnostics {
+        return BaseResizeQuality {
+            edge_retention: 1.0,
+            texture_retention: 1.0,
+            ringing_score,
+            envelope_scale,
+        };
+    }
+
+    // Edge and texture retention: reference-aware, source-side computation.
+    // Diagnostic-only in v1 — expensive on large source images.
+    let src_luma = extract_luma(source);
+    let sw = source.width() as usize;
+    let sh = source.height() as usize;
+
     let src_edge = sobel_energy_mean(&src_luma, sw, sh);
     let res_edge = sobel_energy_mean(&res_luma, rw, rh);
     let edge_retention = if src_edge > 0.0 {
@@ -238,7 +260,6 @@ pub fn score_base_resize(source: &LinearRgbImage, resized: &LinearRgbImage) -> B
         1.0
     };
 
-    // Texture retention: ratio of mean local variance (diagnostic only in v1).
     let src_tex = local_variance_mean(&src_luma, sw, sh);
     let res_tex = local_variance_mean(&res_luma, rw, rh);
     let texture_retention = if src_tex > 0.0 {
@@ -246,12 +267,6 @@ pub fn score_base_resize(source: &LinearRgbImage, resized: &LinearRgbImage) -> B
     } else {
         1.0
     };
-
-    // Ringing score: no-reference oscillation detector on the resized image.
-    let ringing_score = compute_ringing_score(&res_luma, rw, rh);
-
-    // Envelope scale: only ringing_score drives the budget in v1.
-    let envelope_scale = (1.0 - RINGING_K * ringing_score).clamp(MIN_ENVELOPE_SCALE, 1.0);
 
     BaseResizeQuality { edge_retention, texture_retention, ringing_score, envelope_scale }
 }
@@ -326,10 +341,17 @@ mod tests {
         // Solid-color image should have zero ringing and envelope_scale == 1.0.
         let src = LinearRgbImage::new(32, 32, vec![0.5f32; 32 * 32 * 3]).unwrap();
         let res = LinearRgbImage::new(8, 8, vec![0.5f32; 8 * 8 * 3]).unwrap();
-        let bq = score_base_resize(&src, &res);
+        let bq = score_base_resize(&src, &res, true);
         assert_eq!(bq.ringing_score, 0.0);
         assert!((bq.envelope_scale - 1.0).abs() < 1e-6);
         assert!(bq.edge_retention.is_finite());
         assert!(bq.texture_retention.is_finite());
+
+        // Fast path (no source diagnostics) should still produce valid ringing/envelope.
+        let bq_fast = score_base_resize(&src, &res, false);
+        assert_eq!(bq_fast.ringing_score, 0.0);
+        assert!((bq_fast.envelope_scale - 1.0).abs() < 1e-6);
+        assert_eq!(bq_fast.edge_retention, 1.0);
+        assert_eq!(bq_fast.texture_retention, 1.0);
     }
 }

@@ -4,7 +4,7 @@ use r3sizer_core::{
     metrics::channel_clipping_ratio,
     sharpen::unsharp_mask,
     ArtifactMetric, AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode,
-    ProbeConfig, SharpenMode, process_auto_sharp_downscale,
+    PipelineMode, ProbeConfig, SharpenMode, process_auto_sharp_downscale,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -62,5 +62,50 @@ fn bench_channel_clipping_ratio(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_full_pipeline, bench_sharpen_only, bench_channel_clipping_ratio);
+fn bench_pipeline_modes(c: &mut Criterion) {
+    let src = synthetic_image(1920, 1080);
+
+    let mut group = c.benchmark_group("pipeline_mode_1080p_to_540p");
+    for (name, mode) in [
+        ("fast", PipelineMode::Fast),
+        ("balanced", PipelineMode::Balanced),
+        ("quality", PipelineMode::Quality),
+    ] {
+        let params = AutoSharpParams {
+            pipeline_mode: Some(mode),
+            ..AutoSharpParams::photo(960, 540)
+        }.resolved();
+
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                process_auto_sharp_downscale(&src, &params).unwrap();
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_staged_shrink(c: &mut Criterion) {
+    // 6× shrink ratio — triggers staged shrink
+    let src = synthetic_image(3840, 2160);
+    let params = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Fast),
+        ..AutoSharpParams::photo(640, 360)
+    }.resolved();
+
+    c.bench_function("pipeline_4k_to_360p_fast", |b| {
+        b.iter(|| {
+            process_auto_sharp_downscale(&src, &params).unwrap();
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_full_pipeline,
+    bench_sharpen_only,
+    bench_channel_clipping_ratio,
+    bench_pipeline_modes,
+    bench_staged_shrink,
+);
 criterion_main!(benches);

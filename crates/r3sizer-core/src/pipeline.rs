@@ -179,8 +179,11 @@ pub fn prepare_base(
     let resize_us = t0.elapsed().as_micros() as u64;
 
     // Base resize quality
+    // Source-side edge/texture retention is diagnostic-only — skip on non-Full
+    // diagnostics to avoid expensive Sobel + local-variance on the full source image.
     let t0 = Instant::now();
-    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled);
+    let full_base_diag = matches!(params.diagnostics_level, crate::DiagnosticsLevel::Full);
+    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled, full_base_diag);
     let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
     let base_quality_us = t0.elapsed().as_micros() as u64;
 
