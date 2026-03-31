@@ -8,6 +8,9 @@ import { ImagePreview } from "@/components/ImagePreview";
 import { ParameterPanel } from "@/components/ParameterPanel";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { useProcessorStore } from "@/stores/processor-store";
+import { motion, AnimatePresence } from "motion/react";
+import BlurText from "@/components/BlurText";
+import ShinyText from "@/components/ShinyText";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
@@ -117,6 +120,18 @@ export default function App() {
           <BookOpen className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">Algorithm</span>
         </Link>
+
+        <a
+          href="https://github.com/alvytsk/r3sizer"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ml-auto text-muted-foreground/60 hover:text-primary transition-colors"
+          title="View on GitHub"
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+        </a>
       </header>
 
       {/* Body: params sidebar | center | diagnostics sidebar */}
@@ -178,9 +193,18 @@ export default function App() {
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-[2px]">
               <div className="flex flex-col items-center gap-2.5">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                <span className="text-xs font-mono text-primary/80 tracking-wide">
-                  {processingStage || "starting..."}
-                </span>
+                <AnimatePresence mode="popLayout">
+                  <motion.span
+                    key={processingStage}
+                    initial={{ opacity: 0, filter: "blur(4px)", y: 4 }}
+                    animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+                    exit={{ opacity: 0, filter: "blur(4px)", y: -4 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="text-sm font-mono text-primary/80 tracking-wide"
+                  >
+                    {processingStage || "starting..."}
+                  </motion.span>
+                </AnimatePresence>
               </div>
             </div>
           )}
@@ -267,12 +291,30 @@ export default function App() {
                       <h2 className="font-mono text-3xl font-bold tracking-tight text-primary glow-amber-text">
                         r3sizer
                       </h2>
-                      <p className="text-sm text-muted-foreground max-w-xs">
-                        Precision downscaling with automatic sharpness optimization.
-                      </p>
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/25 bg-primary/[0.06] text-xs font-mono text-primary/80 tracking-wide">
-                        <Lock className="h-3 w-3" />
-                        Runs entirely in your browser
+                      <BlurText
+                        text="Precision downscaling with automatic sharpness optimization."
+                        className="text-sm text-muted-foreground max-w-xs justify-center"
+                        animateBy="words"
+                        direction="bottom"
+                        delay={80}
+                        stepDuration={0.4}
+                        animationFrom={{ filter: 'blur(12px)', opacity: 0, y: 12 }}
+                        animationTo={[
+                          { filter: 'blur(4px)', opacity: 0.4, y: -2 },
+                          { filter: 'blur(0px)', opacity: 1, y: 0 }
+                        ]}
+                        easing={[0.16, 1, 0.3, 1]}
+                      />
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/25 bg-primary/[0.06] text-xs font-mono tracking-wide">
+                        <Lock className="h-3 w-3 text-primary/80" />
+                        <ShinyText
+                          text="Runs entirely in your browser"
+                          speed={3.5}
+                          delay={1}
+                          color="oklch(0.64 0.015 80)"
+                          shineColor="oklch(0.88 0.14 80)"
+                          className="text-xs font-mono tracking-wide"
+                        />
                       </span>
                     </div>
                   </div>

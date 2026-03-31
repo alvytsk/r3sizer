@@ -347,7 +347,7 @@ export default function AlgorithmPage() {
 
           <div className="relative z-10 py-16 sm:py-20 max-w-xl">
             <div className="flex items-center gap-3 mb-5 animate-fade-up">
-              <Tag>v0.6</Tag>
+              <Tag>v0.7</Tag>
               <Tag>auto-sharpness</Tag>
             </div>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold text-foreground tracking-tight mb-5 animate-fade-up delay-100">
