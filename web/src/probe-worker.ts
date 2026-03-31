@@ -21,7 +21,7 @@ let cachedBase: {
 } | null = null;
 
 export interface ProbeWorkerRequest {
-  type: "init" | "set_base" | "probe";
+  type: "init" | "set_base" | "probe" | "clear_base";
   module?: WebAssembly.Module;
   id?: number;
   basePixels?: Float32Array;
@@ -47,6 +47,11 @@ self.onmessage = (e: MessageEvent<ProbeWorkerRequest>) => {
     initSync(msg.module!);
     ready = true;
     (self as unknown as Worker).postMessage({ type: "ready" } as ProbeWorkerResponse);
+    return;
+  }
+
+  if (msg.type === "clear_base") {
+    cachedBase = null;
     return;
   }
 

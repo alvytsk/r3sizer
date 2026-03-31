@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageParallel, prepareImage, prepareBaseImage, setProgressCallback } from "@/wasm";
+import { processImageParallel, prepareImage, prepareBaseImage, clearAllCaches, setProgressCallback } from "@/wasm";
 
 export type ExportFormat = "jpeg" | "png" | "webp";
 
@@ -143,6 +143,11 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       diagnostics: null,
       error: null,
     });
+
+    // Invalidate all WASM caches before preparing the new image.
+    // Without this, a same-dimension image would reuse stale cached pixels.
+    clearAllCaches()
+      .catch(() => {});
 
     // Pre-convert sRGB→linear in the background (fire-and-forget).
     prepareImage(rgbaData, width, height)

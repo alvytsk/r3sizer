@@ -10,7 +10,8 @@ export interface WorkerRequest {
   type:
     | "init" | "process" | "prepare" | "prepare_base"
     | "get_base_data" | "process_from_probes"
-    | "resolve_initial_strengths" | "resolve_dense_strengths";
+    | "resolve_initial_strengths" | "resolve_dense_strengths"
+    | "clear_cache";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -56,6 +57,11 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     initSync(msg.module!);
     ready = true;
     (self as unknown as Worker).postMessage({ type: "ready" } as WorkerResponse);
+    return;
+  }
+
+  if (msg.type === "clear_cache") {
+    if (ready) clear_cache();
     return;
   }
 
