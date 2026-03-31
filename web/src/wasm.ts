@@ -59,8 +59,8 @@ function ensureWorker(): Promise<void> {
             return;
           }
 
-          // Ignore "prepared" acknowledgement — fire-and-forget.
-          if (data.type === "prepared") return;
+          // Ignore fire-and-forget acknowledgements.
+          if (data.type === "prepared" || data.type === "base_prepared") return;
 
           if (data.type === "result" && data.id != null) {
             const cb = pending.get(data.id);
@@ -141,5 +141,28 @@ export async function prepareImage(
     rgbaData,
     width,
     height,
+  } as WorkerRequest);
+}
+
+/**
+ * Pre-compute the base image (resize + classify + baseline + evaluator).
+ *
+ * Fire-and-forget: runs in the worker while the user adjusts params.
+ * The next `processImageAsync` call skips ~1.5 s of base preparation
+ * when the cached base dimensions match.
+ */
+export async function prepareBaseImage(
+  rgbaData: Uint8Array,
+  width: number,
+  height: number,
+  paramsJson: string
+): Promise<void> {
+  await ensureWorker();
+  worker!.postMessage({
+    type: "prepare_base",
+    rgbaData,
+    width,
+    height,
+    paramsJson,
   } as WorkerRequest);
 }

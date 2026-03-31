@@ -31,7 +31,10 @@ pub mod evaluator;
 pub mod recommendations;
 
 // Re-export the complete public surface.
-pub use pipeline::{process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress};
+pub use pipeline::{
+    PreparedBase, prepare_base, process_from_prepared,
+    process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
+};
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
     ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,

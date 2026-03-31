@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageAsync, prepareImage, setProgressCallback } from "@/wasm";
+import { processImageAsync, prepareImage, prepareBaseImage, setProgressCallback } from "@/wasm";
 
 export type ExportFormat = "jpeg" | "png" | "webp";
 
@@ -145,7 +145,15 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     });
 
     // Pre-convert sRGB→linear in the background (fire-and-forget).
-    prepareImage(rgbaData, width, height).catch(() => {});
+    prepareImage(rgbaData, width, height)
+      .then(() => {
+        // After linear conversion, eagerly pre-compute the base image
+        // (resize + classify + baseline + evaluator) while user reviews params.
+        const s = get();
+        const paramsJson = JSON.stringify(s.params);
+        return prepareBaseImage(rgbaData, width, height, paramsJson);
+      })
+      .catch(() => {});
   },
 
   updateParams: (partial) => {

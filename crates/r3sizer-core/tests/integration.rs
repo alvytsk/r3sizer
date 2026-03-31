@@ -440,7 +440,10 @@ fn metric_breakdown_present_in_diagnostics() {
 }
 
 #[test]
-fn probe_samples_have_breakdown_in_full_mode() {
+fn probe_samples_have_no_breakdown_even_in_full_mode() {
+    // Probes always use the fast path (gamut-only) for performance.
+    // Per-probe breakdowns are not computed regardless of diagnostics_level.
+    // The full metric breakdown is only computed for the final image.
     let src = gradient_image(64, 64);
     let params = AutoSharpParams {
         diagnostics_level: DiagnosticsLevel::Full,
@@ -448,10 +451,10 @@ fn probe_samples_have_breakdown_in_full_mode() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for sample in &out.diagnostics.probe_samples {
-        let bd = sample.breakdown.as_ref().expect("each probe should have breakdown in Full mode");
-        assert!((bd.selection_score - sample.artifact_ratio).abs() < 1e-6,
-            "breakdown selection_score {} != artifact_ratio {}", bd.selection_score, sample.artifact_ratio);
+        assert!(sample.breakdown.is_none(), "probes should not have breakdown (fast path)");
     }
+    // But the final metric components should still be present.
+    assert!(out.diagnostics.metric_components.is_some());
 }
 
 #[test]
@@ -513,13 +516,9 @@ fn v02_components_are_finite_and_nonnegative() {
         assert!(value.is_finite(), "component value must be finite");
         assert!(value >= 0.0, "component value must be non-negative: {value}");
     }
-    for sample in &out.diagnostics.probe_samples {
-        let bd = sample.breakdown.as_ref().unwrap();
-        for (&_component, &value) in &bd.components {
-            assert!(value.is_finite(), "probe component value must be finite");
-            assert!(value >= 0.0, "probe component value must be non-negative: {value}");
-        }
-    }
+    // Per-probe breakdowns are no longer computed (fast probing path).
+    // Verify the final metric_components is complete instead.
+    assert_eq!(mc.components.len(), 4, "final breakdown should have all 4 components");
 }
 
 // ---------------------------------------------------------------------------
@@ -706,13 +705,17 @@ fn hybrid_policy_respects_gamut_budget() {
     let src = gradient_image(64, 64);
     let params = AutoSharpParams {
         selection_policy: SelectionPolicy::Hybrid,
-        diagnostics_level: DiagnosticsLevel::Full,
+        // Disable evaluator to prevent strength capping that could move the
+        // selected strength away from any probe sample.
+        evaluator_config: None,
         ..default_params(16, 16)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let d = &out.diagnostics;
 
     // If selection was BestSampleWithinBudget, selected probe must be within gamut budget.
+    // Without per-probe breakdowns, Hybrid falls back to gamut-only ranking (max strength),
+    // which still respects the gamut budget constraint.
     if d.selection_mode == SelectionMode::BestSampleWithinBudget {
         let selected = d.probe_samples.iter()
             .find(|s| (s.strength - d.selected_strength).abs() < 1e-6)

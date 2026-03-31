@@ -54,30 +54,60 @@ pub fn texture_flattening_score(
     (total_log_ratio / textured_count as f64) as f32
 }
 
-/// Compute local variance in 5x5 windows.
+/// Compute local variance in 5x5 windows using summed area tables.
 ///
+/// Uses integral images for O(1) per-pixel variance instead of O(25) naive scan.
 /// Returns a Vec of length `(width - 2*HALF_WIN) * (height - 2*HALF_WIN)`.
 fn local_variance(data: &[f32], width: usize, height: usize) -> Vec<f32> {
     let inner_w = width - 2 * HALF_WIN;
     let inner_h = height - 2 * HALF_WIN;
     let win_size = (2 * HALF_WIN + 1) * (2 * HALF_WIN + 1);
-    let inv_n = 1.0 / win_size as f32;
+    let inv_n: f64 = 1.0 / win_size as f64;
+
+    // Build summed area tables for sum and sum_sq.
+    // SAT is (height+1) × (width+1) with a zero-padded top row and left column.
+    let sat_w = width + 1;
+    let sat_h = height + 1;
+    let mut sat_sum = vec![0.0_f64; sat_w * sat_h];
+    let mut sat_sq = vec![0.0_f64; sat_w * sat_h];
+
+    for y in 0..height {
+        for x in 0..width {
+            let v = data[y * width + x] as f64;
+            let idx = (y + 1) * sat_w + (x + 1);
+            sat_sum[idx] = v
+                + sat_sum[y * sat_w + (x + 1)]
+                + sat_sum[(y + 1) * sat_w + x]
+                - sat_sum[y * sat_w + x];
+            sat_sq[idx] = v * v
+                + sat_sq[y * sat_w + (x + 1)]
+                + sat_sq[(y + 1) * sat_w + x]
+                - sat_sq[y * sat_w + x];
+        }
+    }
+
     let mut result = Vec::with_capacity(inner_w * inner_h);
 
     for cy in HALF_WIN..height - HALF_WIN {
         for cx in HALF_WIN..width - HALF_WIN {
-            let mut sum = 0.0_f32;
-            let mut sum_sq = 0.0_f32;
-            for wy in (cy - HALF_WIN)..=(cy + HALF_WIN) {
-                for wx in (cx - HALF_WIN)..=(cx + HALF_WIN) {
-                    let v = data[wy * width + wx];
-                    sum += v;
-                    sum_sq += v * v;
-                }
-            }
-            let mean = sum * inv_n;
-            let variance = (sum_sq * inv_n - mean * mean).max(0.0);
-            result.push(variance);
+            // Window corners in SAT coordinates (1-indexed, exclusive end).
+            let y0 = cy - HALF_WIN; // top row (inclusive in data)
+            let x0 = cx - HALF_WIN;
+            let y1 = cy + HALF_WIN + 1; // bottom row + 1
+            let x1 = cx + HALF_WIN + 1;
+
+            let s = sat_sum[y1 * sat_w + x1]
+                - sat_sum[y0 * sat_w + x1]
+                - sat_sum[y1 * sat_w + x0]
+                + sat_sum[y0 * sat_w + x0];
+            let sq = sat_sq[y1 * sat_w + x1]
+                - sat_sq[y0 * sat_w + x1]
+                - sat_sq[y1 * sat_w + x0]
+                + sat_sq[y0 * sat_w + x0];
+
+            let mean = s * inv_n;
+            let variance = (sq * inv_n - mean * mean).max(0.0);
+            result.push(variance as f32);
         }
     }
 
