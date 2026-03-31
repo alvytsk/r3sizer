@@ -181,10 +181,14 @@ export async function processImageParallel(
   }
 
   // Step 2: Resolve probe strengths and fan out to pool.
-  progressCallback?.("probing");
+  // TwoPass and other complex configs can't be resolved from JS — fall back.
   const params = JSON.parse(paramsJson);
   const strengths = resolveProbeStrengths(params);
+  if (strengths.length === 0) {
+    return processImageAsync(rgbaData, width, height, paramsJson);
+  }
 
+  progressCallback?.("probing");
   const { samplesJson, probingMs } = await runProbesParallel(baseData, strengths, paramsJson);
 
   // Step 3: Send probes to main worker for fit + sharpen.
@@ -220,24 +224,29 @@ function getBaseData(): Promise<BaseData | null> {
   });
 }
 
-/** Resolve probe strengths from params (mirrors Rust ProbeConfig::resolve). */
+/**
+ * Resolve probe strengths from params for the parallel probe pool.
+ *
+ * Serde serializes ProbeConfig variants as:
+ *   Explicit([...])      → {"explicit": [...]}
+ *   Range{...}           → {"range": {"min": ..., "max": ..., "count": ...}}
+ *   TwoPass{...}         → {"two_pass": {"coarse_count": ..., ...}}
+ *
+ * Returns [] for TwoPass (requires two-phase coordination in Rust)
+ * and for Range (would need to replicate linspace logic).
+ * The caller falls back to single-worker processing for these.
+ */
 function resolveProbeStrengths(params: Record<string, unknown>): number[] {
   const config = params.probe_strengths;
-  if (Array.isArray(config)) return config;
-  if (typeof config === "object" && config !== null) {
-    const c = config as Record<string, unknown>;
-    if (c.type === "two_pass" || c.TwoPass || c.coarse_count) {
-      // TwoPass — can't easily pre-resolve from JS.
-      // Fall back to single-worker for two-pass probing.
-      return [];
-    }
-    if (c.type === "explicit" || c.Explicit) {
-      const values = (c.values ?? c.Explicit) as number[];
-      return Array.isArray(values) ? values : [];
-    }
-  }
-  // Default: use a standard probe set.
-  return [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0];
+  if (!config || typeof config !== "object") return [];
+
+  const c = config as Record<string, unknown>;
+
+  // Explicit: {"explicit": [0.05, 0.1, ...]}
+  if (Array.isArray(c.explicit)) return c.explicit;
+
+  // TwoPass or Range — can't resolve from JS, fall back.
+  return [];
 }
 
 /**
