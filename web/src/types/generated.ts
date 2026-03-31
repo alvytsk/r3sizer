@@ -272,7 +272,7 @@ export type AdaptiveValidationOutcome = { "outcome": "passed_direct", measured_m
 
 export type ProbePassDiagnostics = { 
 /**
- * Number of probes fired in the coarse pass.
+ * Configured coarse probe count (may differ from `coarse_probes_used` if early-stopped).
  */
 coarse_count: number, 
 /**
@@ -294,7 +294,11 @@ dense_min: number,
 /**
  * Dense window upper bound selected after coarse bracket search.
  */
-dense_max: number, };
+dense_max: number, 
+/**
+ * Actual number of coarse probes evaluated (< `coarse_count` when early-stopped).
+ */
+coarse_probes_used?: number | null, };
 
 export type BaseResizeQuality = { 
 /**

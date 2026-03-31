@@ -299,7 +299,7 @@ impl ProbeConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ProbePassDiagnostics {
-    /// Number of probes fired in the coarse pass.
+    /// Configured coarse probe count (may differ from `coarse_probes_used` if early-stopped).
     pub coarse_count: usize,
     /// Coarse pass range lower bound (= `ProbeConfig::TwoPass::coarse_min`).
     pub coarse_min: f32,
@@ -311,6 +311,14 @@ pub struct ProbePassDiagnostics {
     pub dense_min: f32,
     /// Dense window upper bound selected after coarse bracket search.
     pub dense_max: f32,
+    /// Actual number of coarse probes evaluated (< `coarse_count` when early-stopped).
+    ///
+    /// `None` means all configured coarse probes ran (no early stop).
+    /// Only populated by the internal sequential two-pass path.  The WASM
+    /// parallel probe-pool path runs all coarse probes in parallel and does
+    /// not support early stopping, so this field is always `None` there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coarse_probes_used: Option<usize>,
 }
 
 /// Quality assessment of the resized image before any sharpening is applied.

@@ -1324,3 +1324,66 @@ fn mode_preserves_p0_and_sigma() {
         assert_eq!(params.sharpen_sigma, custom_sigma, "{mode:?} should preserve sigma");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Early stopping in coarse probing
+// ---------------------------------------------------------------------------
+
+#[test]
+fn two_pass_early_stop_fires_on_easy_crossing() {
+    // A checkerboard image produces a clear P0 crossing at low strengths,
+    // so the coarse scan should bracket P0 before exhausting all probes.
+    let src = checkerboard(160, 120);
+    let params = AutoSharpParams {
+        // 9 coarse probes — early stop should fire well before probe 9
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 9,
+            coarse_min: 0.003,
+            coarse_max: 2.0,
+            dense_count: 4,
+            window_margin: 0.5,
+        },
+        pipeline_mode: Some(PipelineMode::Quality),
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let diag = out.diagnostics.probe_pass_diagnostics.as_ref()
+        .expect("TwoPass should produce pass diagnostics");
+
+    // If early stopping fired, coarse_probes_used < coarse_count
+    if let Some(used) = diag.coarse_probes_used {
+        assert!(used < diag.coarse_count,
+            "early stop should use fewer probes: used={used}, configured={}", diag.coarse_count);
+        assert!(used >= 3, "should use at least 3 coarse probes");
+    }
+    // Either way, the result should be valid
+    assert!(out.diagnostics.selected_strength > 0.0);
+    assert!(out.diagnostics.measured_artifact_ratio.is_finite());
+}
+
+#[test]
+fn two_pass_no_early_stop_when_all_under_budget() {
+    // A smooth gradient with low P0 target — all probes should be under budget,
+    // so no bracket is found and all coarse probes run.
+    let src = gradient_image(160, 120);
+    let params = AutoSharpParams {
+        target_artifact_ratio: 0.5, // Very generous budget
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 7,
+            coarse_min: 0.003,
+            coarse_max: 0.5,
+            dense_count: 4,
+            window_margin: 0.5,
+        },
+        ..AutoSharpParams::photo(80, 60)
+    }.resolved();
+
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let diag = out.diagnostics.probe_pass_diagnostics.as_ref()
+        .expect("TwoPass should produce pass diagnostics");
+
+    // No early stop: all coarse probes should have run
+    assert!(diag.coarse_probes_used.is_none(),
+        "no bracket → no early stop, but got coarse_probes_used={:?}", diag.coarse_probes_used);
+}

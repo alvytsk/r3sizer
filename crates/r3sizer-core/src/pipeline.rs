@@ -347,6 +347,7 @@ pub fn resolve_dense_strengths(
                 dense_count: *dense_count,
                 dense_min: dense_lo,
                 dense_max: dense_hi,
+                coarse_probes_used: None,
             };
             Ok(Some((dense_strengths, diag)))
         }
@@ -424,63 +425,16 @@ pub fn run_probes_from_detail(
     baseline_artifact_ratio: f32,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
-    probe_strengths_from_detail(
-        strengths, &base, Some(base_luminance), detail,
-        params.sharpen_mode, params.metric_mode, params.artifact_metric,
-        baseline_artifact_ratio,
-    )
-}
-
-/// Probe loop using precomputed detail — no Gaussian blur, just apply + metric.
-#[allow(clippy::too_many_arguments)]
-fn probe_strengths_from_detail(
-    strengths: &[f32],
-    base: &LinearRgbImage,
-    base_luminance: Option<&[f32]>,
-    detail: &[f32],
-    sharpen_mode: SharpenMode,
-    metric_mode: MetricMode,
-    artifact_metric: ArtifactMetric,
-    baseline_artifact_ratio: f32,
-) -> Result<Vec<ProbeSample>, CoreError> {
-    use crate::sharpen;
-
-    let measure = |img: &LinearRgbImage| -> f32 {
-        crate::metrics::compute_selection_metric(img, artifact_metric)
-    };
-
-    let mut results = Vec::with_capacity(strengths.len());
-    match sharpen_mode {
-        SharpenMode::Lightness => {
-            let lum = base_luminance.expect("base_luminance required for Lightness mode");
-            let n = (base.width() as usize) * (base.height() as usize);
-            let mut scratch = vec![0.0f32; n];
-
-            for &s in strengths {
-                sharpen::apply_detail_single_channel_into(lum, detail, s, &mut scratch);
-                let image = color::reconstruct_rgb_from_lightness_with_luma(
-                    base, &scratch, Some(lum),
-                );
-                let p_total = measure(&image);
-                let metric_value =
-                    compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                results.push(ProbeSample {
-                    strength: s, artifact_ratio: p_total, metric_value, breakdown: None,
-                });
-            }
-        }
-        SharpenMode::Rgb => {
-            for &s in strengths {
-                let image = sharpen::apply_detail_rgb(base, detail, s);
-                let p_total = measure(&image);
-                let metric_value =
-                    compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                results.push(ProbeSample {
-                    strength: s, artifact_ratio: p_total, metric_value, breakdown: None,
-                });
-            }
-        }
-    }
+    let results = strengths
+        .iter()
+        .map(|&s| {
+            probe_one_from_detail(
+                &base, Some(base_luminance), detail,
+                params.sharpen_mode, s, params.artifact_metric,
+                baseline_artifact_ratio, params.metric_mode, None,
+            )
+        })
+        .collect();
     Ok(results)
 }
 
@@ -1423,8 +1377,25 @@ fn find_dense_window(
     }
 }
 
+/// Minimum coarse probes before early-stop is eligible.
+///
+/// We need enough points to locate a bracket.  3 probes gives at least
+/// 2 intervals to check, plus a data point on each side of the bracket.
+///
+/// **Monotonicity assumption:** the early-stop check looks for an upward P0
+/// crossing (`prev <= P0 && curr > P0`), which requires the metric to be
+/// roughly monotonically increasing with strength.  This holds for the
+/// unsharp-mask artifact ratio on well-behaved images.  On images with
+/// non-monotonic metric response, early stopping may miss a later bracket,
+/// but the dense pass still runs and the fit + solve recover gracefully.
+const MIN_COARSE_BEFORE_EARLY_STOP: usize = 3;
+
 /// Two-pass probing: coarse scan over `[coarse_min, coarse_max]`, then dense
 /// probing in a refined window around the estimated P0 crossing.
+///
+/// **Early stopping:** after the first [`MIN_COARSE_BEFORE_EARLY_STOP`] probes,
+/// the coarse scan exits as soon as a P0 crossing bracket is found, saving
+/// the remaining probes at the tail of the range.
 ///
 /// Returns all samples (coarse + dense, sorted by strength, near-duplicates
 /// removed) plus a `ProbePassDiagnostics` record.
@@ -1445,23 +1416,60 @@ fn run_two_pass_probing(
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
-    // Phase 1: coarse
+    use crate::sharpen;
+
     let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
-    let coarse_samples = probe_strengths(
-        &coarse_strengths, base, base_luminance, sharpen_mode, metric_mode,
-        artifact_metric, baseline_artifact_ratio, kernel, metric_override,
-    )?;
+
+    // Precompute detail once — shared by coarse and dense phases.
+    let detail = match sharpen_mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance required for Lightness mode");
+            sharpen::compute_detail_single_channel(
+                lum,
+                base.width() as usize,
+                base.height() as usize,
+                kernel,
+            )
+        }
+        SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
+    };
+
+    // Phase 1: coarse with early stopping
+    let mut coarse_samples = Vec::with_capacity(coarse_count);
+    for &s in &coarse_strengths {
+        let sample = probe_one_from_detail(
+            base, base_luminance, &detail, sharpen_mode,
+            s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
+        );
+        coarse_samples.push(sample);
+
+        // Early-stop: once we have enough probes and a P0 bracket, skip the rest.
+        if coarse_samples.len() >= MIN_COARSE_BEFORE_EARLY_STOP {
+            let n = coarse_samples.len();
+            let prev = coarse_samples[n - 2].metric_value;
+            let curr = coarse_samples[n - 1].metric_value;
+            if prev <= p0 && curr > p0 {
+                break;
+            }
+        }
+    }
+    let coarse_probes_used = coarse_samples.len();
 
     // Locate dense window from coarse results
     let (dense_lo, dense_hi) =
         find_dense_window(&coarse_samples, p0, coarse_min, coarse_max, window_margin);
 
-    // Phase 2: dense
+    // Phase 2: dense — reuse the precomputed detail
     let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
-    let dense_samples = probe_strengths(
-        &dense_strengths, base, base_luminance, sharpen_mode, metric_mode,
-        artifact_metric, baseline_artifact_ratio, kernel, metric_override,
-    )?;
+    let dense_samples: Vec<ProbeSample> = dense_strengths
+        .iter()
+        .map(|&s| {
+            probe_one_from_detail(
+                base, base_luminance, &detail, sharpen_mode,
+                s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
+            )
+        })
+        .collect();
 
     // Merge, sort, remove near-duplicates (within 1e-5 of each other)
     let mut all: Vec<ProbeSample> = coarse_samples;
@@ -1469,6 +1477,7 @@ fn run_two_pass_probing(
     all.sort_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal));
     all.dedup_by(|a, b| (a.strength - b.strength).abs() < 1e-5);
 
+    let early_stopped = coarse_probes_used < coarse_count;
     let diag = ProbePassDiagnostics {
         coarse_count,
         coarse_min,
@@ -1476,6 +1485,39 @@ fn run_two_pass_probing(
         dense_count,
         dense_min: dense_lo,
         dense_max: dense_hi,
+        coarse_probes_used: if early_stopped { Some(coarse_probes_used) } else { None },
     };
     Ok((all, Some(diag)))
+}
+
+/// Evaluate a single probe from precomputed detail.
+#[allow(clippy::too_many_arguments)]
+fn probe_one_from_detail(
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    detail: &[f32],
+    sharpen_mode: SharpenMode,
+    strength: f32,
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+    metric_mode: MetricMode,
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+) -> ProbeSample {
+    use crate::sharpen;
+
+    let image = match sharpen_mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance required for Lightness mode");
+            let sharpened_l = sharpen::apply_detail_single_channel(lum, detail, strength);
+            color::reconstruct_rgb_from_lightness_with_luma(base, &sharpened_l, Some(lum))
+        }
+        SharpenMode::Rgb => sharpen::apply_detail_rgb(base, detail, strength),
+    };
+
+    let p_total = match metric_override {
+        Some(f) => f(&image),
+        None => crate::metrics::compute_selection_metric(&image, artifact_metric),
+    };
+    let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+    ProbeSample { strength, artifact_ratio: p_total, metric_value, breakdown: None }
 }

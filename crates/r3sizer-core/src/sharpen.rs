@@ -395,33 +395,6 @@ pub fn unsharp_mask_single_channel_with_kernel(
     blurred
 }
 
-/// Like [`unsharp_mask_single_channel_with_kernel`] but uses pre-allocated
-/// scratch buffers to avoid allocation.
-///
-/// `scratch_a` and `scratch_b` must each have length >= `width * height`.
-/// Returns the sharpened data in `scratch_b` (borrows from the scratch).
-#[allow(dead_code)]
-pub(crate) fn unsharp_mask_single_channel_with_scratch<'a>(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    amount: f32,
-    kernel: &[f32],
-    scratch_a: &mut [f32],
-    scratch_b: &'a mut [f32],
-) -> &'a [f32] {
-    debug_assert_eq!(data.len(), width * height);
-    let n = width * height;
-    debug_assert!(scratch_a.len() >= n);
-    debug_assert!(scratch_b.len() >= n);
-
-    gaussian_blur_single_channel_into(data, width, height, kernel, scratch_a, scratch_b);
-    let amt_plus_1 = 1.0 + amount;
-    for (b, &s) in scratch_b[..n].iter_mut().zip(data.iter()) {
-        *b = amt_plus_1 * s - amount * *b;
-    }
-    &scratch_b[..n]
-}
 
 // ---------------------------------------------------------------------------
 // Adaptive sharpening (v0.3)
@@ -565,8 +538,11 @@ pub fn apply_detail_single_channel(input: &[f32], detail: &[f32], amount: f32) -
 
 /// Like [`apply_detail_single_channel`] but writes into a pre-allocated buffer.
 ///
-/// `out` must have length >= `input.len()`.
+/// `out` must have length >= `input.len()`.  `detail` must also be at least as
+/// long as `input`.
 pub fn apply_detail_single_channel_into(input: &[f32], detail: &[f32], amount: f32, out: &mut [f32]) {
+    debug_assert!(out.len() >= input.len(), "out buffer too short");
+    debug_assert!(detail.len() >= input.len(), "detail buffer too short");
     for ((o, &i), &d) in out.iter_mut().zip(input.iter()).zip(detail.iter()) {
         *o = i + amount * d;
     }
@@ -575,14 +551,21 @@ pub fn apply_detail_single_channel_into(input: &[f32], detail: &[f32], amount: f
 /// Apply precomputed RGB detail at a given strength: `out = src + amount * detail`.
 ///
 /// Equivalent to [`unsharp_mask_with_kernel`] but skips the Gaussian blur.
+///
+/// # Panics
+///
+/// Panics if `detail.len()` does not match `src` pixel count (W × H × 3).
 pub fn apply_detail_rgb(src: &LinearRgbImage, detail: &[f32], amount: f32) -> LinearRgbImage {
+    let n = src.pixels().len();
+    debug_assert_eq!(detail.len(), n, "detail length must match src pixel count");
     let data: Vec<f32> = src
         .pixels()
         .iter()
         .zip(detail.iter())
         .map(|(&s, &d)| s + amount * d)
         .collect();
-    LinearRgbImage::new(src.width(), src.height(), data).unwrap()
+    LinearRgbImage::new(src.width(), src.height(), data)
+        .expect("data length must match src dimensions")
 }
 
 // ---------------------------------------------------------------------------
