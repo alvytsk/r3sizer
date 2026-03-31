@@ -2,16 +2,25 @@
 
 ---
 
-## Recently completed (v0.1)
+## Recently completed (through v0.6)
 
 The following items from the original roadmap are now implemented:
 
-- **Fit quality reporting** — `FitQuality` struct with R², residual sum of squares, max residual, min pivot. Computed in `fit::fit_cubic_with_quality`.
-- **Solver robustness checks** — `RobustnessFlags` with monotonicity, quasi-monotonicity, R² threshold, condition number, LOO stability. Computed in `pipeline.rs`.
-- **Typed fallback reasons** — `FallbackReason` enum with 6 variants, priority-ordered. Replaces implicit fallback logic.
-- **Per-stage timing** — `StageTiming` with microsecond wall-clock times for all 8 pipeline stages.
-- **Composite metric scaffold** — `MetricBreakdown` with `MetricComponent` variants. Only `GamutExcursion` is active in v0.1; others are stubs for v0.2.
-- **CLI sweep mode** — `--sweep-dir`, `--sweep-output-dir`, `--sweep-summary` flags. Batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+- **Fit quality reporting** — `FitQuality` struct with R², residual sum of squares, max residual, min pivot.
+- **Solver robustness checks** — `RobustnessFlags` with monotonicity, quasi-monotonicity, R² threshold, condition number, LOO stability.
+- **Typed fallback reasons** — `FallbackReason` enum with 6 variants, priority-ordered.
+- **Per-stage timing** — `StageTiming` with microsecond wall-clock times for all pipeline stages.
+- **Composite metrics (v0.2)** — all four `MetricComponent` variants active: GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening. Configurable weights via `MetricWeights`.
+- **Selection policy (v0.2.1)** — `SelectionPolicy` enum: GamutOnly, Hybrid, CompositeOnly.
+- **Content-adaptive sharpening (v0.3)** — region classification (5 classes), per-pixel gain maps, adaptive backoff loop.
+- **Content-adaptive resize (v0.4)** — per-region kernel selection (Lanczos3, MitchellNetravali, CatmullRom, Gaussian).
+- **Chroma guard (v0.5)** — soft chroma clamping with context-aware thresholds, on by default.
+- **Quality evaluator (v0.5)** — heuristic feature extraction + advisory strength cap, on by default.
+- **Recommendations engine** — diagnostic-driven parameter suggestions (7 rules).
+- **Two-phase pipeline (v0.6)** — `prepare_base` / `process_from_prepared` split for interactive use. `PreparedBase` carries a `BaseParamsKey` fingerprint for safe cache reuse.
+- **Parallel probing in WASM (v0.6)** — probe worker pool (up to 6 workers), TwoPass two-round parallel probing, base data caching in workers.
+- **Two calibrated presets (v0.6)** — Photo (P0=0.003, range [0.003, 1.0]) and Precision (P0=0.001, range [0.003, 0.5]).
+- **CLI sweep mode** — batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
 
 ---
 
@@ -48,34 +57,10 @@ strengths (e.g. take the median or minimum).
 Once paper values are known, update the `AutoSharpParams::default()` constants
 in `types.rs`.  Current defaults are non-uniform, denser near zero.
 
-### Adaptive probe strategy
-Instead of a fixed probe list, consider a two-pass approach: coarse scan to
-find the approximate crossing region, then dense probing near the crossing.
-This would reduce the number of expensive sharpen+measure operations.
-
-### Composite metric components (v0.2) — COMPLETED
-
-All four `MetricComponent` variants are now active and fully implemented:
-1. `GamutExcursion` — fraction of channel values outside [0, 1]
-2. `HaloRinging` — sign-alternating oscillations near strong edges
-3. `EdgeOvershoot` — sharpening exceeding local edge-strength proxy
-4. `TextureFlattening` — changes in fine-scale local variance
-
-Configurable weights are supported via `MetricWeights` (default: 1.0, 0.3, 0.3, 0.1).
-
-### Selection policy (v0.2.1)
-
-`SelectionPolicy` controls how fallback candidates are ranked:
-- `GamutOnly` (default): gamut excursion drives both fitting and fallback ranking.
-- `Hybrid`: gamut excursion is the hard safety constraint; composite score ranks
-  fallback candidates. Polynomial fitting still uses gamut excursion.
-- `CompositeOnly` (experimental): currently treated as Hybrid. Future work will
-  add composite-driven polynomial fitting with a separate `target_selection_score`.
-
-Next steps:
-1. Sweep-based comparison of GamutOnly vs Hybrid on a diverse corpus.
-2. Add `target_selection_score` parameter for CompositeOnly mode.
-3. Investigate composite-driven polynomial fitting (requires monotonicity analysis).
+### CompositeOnly selection policy
+`CompositeOnly` is currently treated as Hybrid. Future work:
+1. Add composite-driven polynomial fitting with a separate `target_selection_score`.
+2. Sweep-based comparison of GamutOnly vs Hybrid vs CompositeOnly on a diverse corpus.
 
 ### Robustness threshold tuning
 Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.5) are engineering
@@ -127,17 +112,10 @@ Suggested GUI features:
 
 ---
 
-## WASM / browser support
+## WASM / browser support — COMPLETED
 
-`r3sizer-core` has no platform-specific dependencies.  It can be compiled to
-WASM with `wasm-pack` to run the algorithm in the browser:
-
-```sh
-wasm-pack build crates/r3sizer-core --target web
-```
-
-The only dependency that may need attention is the `image` crate's `Lanczos3`
-resize (used in `resize.rs`), which is pure Rust and should compile fine.
+The web UI is live at https://alvytsk.github.io/r3sizer/ with full pipeline support,
+parallel probing via Web Worker pool, and two-phase caching for interactive use.
 
 ---
 

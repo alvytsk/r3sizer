@@ -38,26 +38,31 @@ cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --no
 
 Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer-cli`, and `r3sizer-core` ← `r3sizer-wasm`.
 
-**`r3sizer-core`** — all image processing logic, no I/O. This is the library meant to be reused in a future Tauri GUI or WASM build. Modules map 1:1 to pipeline stages:
+**`r3sizer-core`** — all image processing logic, no I/O. Reusable in CLI, WASM, and future Tauri GUI. Modules map 1:1 to pipeline stages:
 
-- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `SharpenModel`, `MetricMode`, `ArtifactMetric`, `Provenance`, `StageProvenance`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, etc.)
+- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `MetricMode`, `ArtifactMetric`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, `SharpenStrategy`, `ResizeStrategy`, `ProbeConfig`, etc.)
 - `color.rs` — sRGB ↔ linear RGB (IEC 61966-2-1), CIE Y luminance extraction, lightness-based RGB reconstruction
 - `resize.rs` — Lanczos3 downscale via `image` crate
+- `resize_strategy.rs` — content-adaptive resize (uniform or per-region kernel selection)
 - `sharpen.rs` — unsharp mask (3-channel RGB and single-channel luminance) with hand-rolled separable Gaussian; **deliberately no clamping** so out-of-range values exist for the metric
-- `paper_sharpen.rs` — scaffold for paper-style lightness sharpening operator; currently delegates to `sharpen.rs`
-- `metrics.rs` — `channel_clipping_ratio` (per-channel fraction outside [0,1]) and `pixel_out_of_gamut_ratio` (per-pixel fraction); selectable via `ArtifactMetric` enum; `compute_metric_breakdown` produces component-wise `MetricBreakdown` (v0.2 composite metric scaffold)
+- `metrics/` — sub-modules for gamut, halo, overshoot, texture, edges, composite; `channel_clipping_ratio` and `pixel_out_of_gamut_ratio` selectable via `ArtifactMetric`; `compute_metric_breakdown` produces component-wise `MetricBreakdown`
+- `classifier.rs` — Sobel gradient + local variance → 5-class region map (Flat, Textured, StrongEdge, Microtexture, RiskyHaloZone)
 - `fit.rs` — 4×4 Vandermonde normal equations solved by Gaussian elimination with partial pivoting, all in **f64**; `fit_cubic_with_quality` returns `FitQuality` (R², residuals, min pivot); `check_monotonicity` validates probe sample ordering
 - `solve.rs` — Cardano's formula for cubic roots + fallback to best probe sample; returns `SolveResult` with `SelectionMode` and `CrossingStatus`
 - `contrast.rs` — placeholder contrast leveling (percentile stretch); real formula unknown
-- `pipeline.rs` — orchestrates all stages; measures baseline, supports lightness/RGB sharpening and absolute/relative metric modes; dispatches on `SharpenModel` and `ArtifactMetric`; emits per-stage `Provenance` tags; computes `FitQuality`, `RobustnessFlags` (monotonicity + LOO stability), typed `FallbackReason`, per-stage `StageTiming`, and `MetricBreakdown` per probe; public entry point is `process_auto_sharp_downscale`
+- `chroma_guard.rs` — soft chroma clamping with context-aware thresholds per region
+- `base_quality.rs` — resize quality scoring (edge retention, texture retention, ringing)
+- `evaluator.rs` — heuristic quality evaluator (feature extraction + advisory strength cap)
+- `recommendations.rs` — diagnostic-driven parameter suggestions
+- `pipeline.rs` — orchestrates all stages in a **two-phase architecture**: `prepare_base` (resize, classify, baseline — cached as `PreparedBase`) and `process_from_prepared` (probing, fit, solve, sharpen). Also exposes `resolve_initial_strengths` and `resolve_dense_strengths` for JS-side TwoPass parallel probing. `PreparedBase` carries a `BaseParamsKey` fingerprint so cache reuse is safe across param changes. One-shot entry point `process_auto_sharp_downscale` remains for CLI use.
 
 **`r3sizer-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
 
 **`r3sizer-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
-**`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). Single entry point: `process_image(srgb_rgba_data, width, height, params_json) → JsValue`. Accepts sRGB RGBA u8 pixels (canvas `getImageData()`), returns a JS object with `imageData` (Uint8Array), `outputWidth`, `outputHeight`, and `diagnostics`. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion between RGBA u8 and `LinearRgbImage` is in `convert.rs`.
+**`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). WASM exports: `prepare_image` (sRGB→linear cache), `prepare_base` (resize+classify+baseline cache with params fingerprint fast-path), `process_image` (full pipeline), `get_base_data` (extract cached base for probe workers), `probe_batch` (run probes on raw base data), `process_from_probes` (finish pipeline with externally-collected probes), `resolve_initial_strengths` (coarse/all strengths for parallel probing), `resolve_dense_strengths` (TwoPass dense window from coarse results). Thread-local `RefCell` caching for input and `PreparedBase`. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion in `convert.rs`.
 
-**`web/`** — React 19 + Vite + Tailwind diagnostic UI. Communicates with `r3sizer-wasm` via a Web Worker (`wasm.ts` / `wasm-worker.ts`). State managed by Zustand (`processor-store.ts`). TypeScript types are auto-generated from Rust via `ts-rs` (see below).
+**`web/`** — React 19 + Vite + Tailwind diagnostic UI. Communicates with `r3sizer-wasm` via a main Web Worker (`wasm.ts` / `wasm-worker.ts`) and a **probe worker pool** (`probe-pool.ts` / `probe-worker.ts`) for parallel sharpening strength evaluation. The pool distributes probes across N workers (up to 6), supports TwoPass two-round probing, and caches base data in workers to avoid redundant structured clones. State managed by Zustand (`processor-store.ts`). TypeScript types are auto-generated from Rust via `ts-rs` (see below).
 
 ### TypeScript type generation (`ts-rs`)
 
@@ -78,19 +83,27 @@ The web UI is deployed to GitHub Pages at https://alvytsk.github.io/r3sizer/ via
 - **`contrast.rs` is a documented stub** — `ContrastLevelingParams::enabled = false` by default. The function signature and placement are fixed; only the body needs replacement once the paper formula is known.
 - **Robustness checks gate the polynomial root** — monotonicity, R² > 0.85, condition number (min pivot > 1e-8), and leave-one-out stability are checked after fitting. If any check fails, the pipeline falls back to direct search and records a typed `FallbackReason`.
 - **Per-stage timing is always collected** — `StageTiming` records microsecond-resolution wall-clock time for each pipeline stage. Zero overhead when unused (no allocation, just `Instant::now()`).
-- **Composite metric scaffold is in place** — `MetricBreakdown` with `MetricComponent` variants (GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening) is populated per probe. For v0.1, only GamutExcursion is active; others return 0.0. The `aggregate` field preserves backward compatibility with the scalar fitting path.
+- **All four composite metric components are active** — `MetricBreakdown` with `MetricComponent` variants (GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening) is populated per probe. The `aggregate` field preserves backward compatibility with the scalar fitting path. Configurable weights via `MetricWeights` (default: 1.0, 0.3, 0.3, 0.1).
+- **Two-phase pipeline for interactive use** — `prepare_base` computes resize + classify + baseline (~1.5s on 24MP) and caches as `PreparedBase`. `process_from_prepared` runs probing + fit + solve + sharpen (~0.5s). A `BaseParamsKey` fingerprint ensures the cache is only reused when all base-affecting params match.
+- **Parallel probing in WASM** — probe workers receive base data once via `set_base`, then run batches without re-sending pixels. TwoPass probing is supported: coarse round in parallel → resolve dense window in Rust → dense round in parallel → merge → fit+sharpen. Graceful fallback to single-worker on any failure.
+- **Content-adaptive sharpening is the default** — `SharpenStrategy::ContentAdaptive` classifies pixels into 5 regions and modulates sharpening strength via a per-pixel gain map. Backoff loop reduces strength if budget is exceeded.
+- **Chroma guard is on by default** — soft chroma clamping after lightness-based sharpening, with context-aware thresholds modulated by region class and saturation.
 - **TypeScript types are generated from Rust, not handwritten** — `ts-rs` with `serde-compat` reads `#[serde(...)]` attributes and produces matching TypeScript. The `typegen` feature flag keeps `ts-rs` out of production builds. Default constants are serialized from Rust `Default` impls so they stay in sync. `generated.ts` must be committed; the Docker build regenerates it to ensure freshness.
 
 ## Algorithm summary
 
-The core idea: select sharpening strength by constraining the fraction of channel values that fall outside [0,1] after sharpening (artifact ratio P) to a target threshold P0 (default 0.1%). A cubic P(s) is fitted to probe measurements, then solved for s*.
+The core idea: select sharpening strength by constraining the fraction of channel values that fall outside [0,1] after sharpening (artifact ratio P) to a target threshold P0 (default 0.3% for Photo preset). A cubic P(s) is fitted to probe measurements, then solved for s*.
 
 ```
-linearize → downscale → [contrast leveling] → measure baseline P(base) →
-extract luminance L → probe N strengths { sharpen L(s_i) → reconstruct RGB → measure P(s_i) } →
-compute metric_value per mode → fit cubic P_hat(s) (with quality metrics) →
-robustness checks (monotonicity, LOO) → solve P_hat(s*) = P0 →
-final sharpen(s*) → clamp → output
+linearize → downscale (with optional content-adaptive kernel) →
+[contrast leveling] → classify regions → measure baseline P(base) →
+extract luminance L → build gain map →
+probe N strengths (two-pass adaptive: coarse scan → dense refinement):
+  { sharpen L(s_i) × gain → reconstruct RGB → chroma guard → measure P(s_i) } →
+fit cubic P_hat(s) (with quality metrics) →
+robustness checks (monotonicity, LOO, R², condition) →
+solve P_hat(s*) = P0 → adaptive backoff if budget exceeded →
+final sharpen(s*) → chroma guard → clamp → output + recommendations
 ```
 
 See `docs/algorithm.md`, `docs/assumptions.md`, and `docs/future_work.md` for details on confirmed vs. approximated paper details and the Tauri integration path.

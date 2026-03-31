@@ -60,7 +60,7 @@ what is an engineering approximation or placeholder.
 | **R² threshold = 0.85 for fit acceptance** | Engineering choice — balances false rejection of good fits vs. accepting poor ones | Tune based on empirical data across image corpus |
 | **Min pivot threshold = 1e-8 for condition check** | Engineering choice — well below the 1e-14 singularity threshold, catches ill-conditioned systems | Adjust if false positives occur on valid data |
 | **LOO stability threshold = 0.5 (50% relative root change)** | Engineering choice — allows moderate sensitivity while catching catastrophic instability | Tune based on sweep-mode analysis of real images |
-| **Composite metric with single active component** | v0.2 scaffold — `MetricBreakdown` aggregates four components but only `GamutExcursion` is populated in v0.1 | Activate `HaloRinging`, `EdgeOvershoot`, `TextureFlattening` in v0.2 |
+| **Composite metric weights** | Engineering choice — `MetricWeights` defaults (1.0, 0.3, 0.3, 0.1) are tuned heuristically, not from paper | Tune via sweep-mode analysis across diverse image corpora |
 
 ---
 

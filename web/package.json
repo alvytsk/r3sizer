@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.6.0",
   "type": "module",
   "scripts": {
     "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg",

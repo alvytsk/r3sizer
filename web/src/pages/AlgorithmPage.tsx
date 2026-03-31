@@ -146,69 +146,81 @@ function MathBlock({ tex }: { tex: string }) {
 /* ---------- Hero SVG: the P(s) curve ---------- */
 
 function HeroCurve() {
-  // Stylized cubic P(s) crossing the threshold P₀
-  // Probe dots at measured positions along the curve
+  // Full-bleed P(s) curve behind the entire hero section.
+  // Wide viewBox + slice aspect ratio ensures the curve fills the hero
+  // regardless of container shape.  Elements are positioned so the lower
+  // (flat) portion sits behind the text and the dramatic ascending part
+  // occupies the right half.
   const probePoints = [
-    { x: 60, y: 285 },
-    { x: 95, y: 278 },
-    { x: 145, y: 260 },
-    { x: 210, y: 225 },
-    { x: 300, y: 165 },
-    { x: 385, y: 95 },
-    { x: 450, y: 35 },
+    { x: 200, y: 300 },
+    { x: 320, y: 288 },
+    { x: 460, y: 265 },
+    { x: 620, y: 225 },
+    { x: 790, y: 170 },
+    { x: 960, y: 100 },
+    { x: 1100, y: 35 },
   ];
 
   return (
     <svg
-      viewBox="0 0 520 320"
+      viewBox="0 0 1280 380"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className="absolute inset-0 w-full h-full"
-      preserveAspectRatio="xMidYMid meet"
+      preserveAspectRatio="xMidYMid slice"
       aria-hidden
     >
+      {/* Subtle grid for depth */}
+      {[100, 180, 260, 340].map(y => (
+        <line key={`h${y}`} x1="120" y1={y} x2="1200" y2={y} stroke="currentColor" strokeWidth="0.5" opacity="0.03" />
+      ))}
+      {[300, 500, 700, 900, 1100].map(x => (
+        <line key={`v${x}`} x1={x} y1="30" x2={x} y2="350" stroke="currentColor" strokeWidth="0.5" opacity="0.03" />
+      ))}
+
       {/* Axes */}
-      <line x1="40" y1="290" x2="490" y2="290" stroke="currentColor" strokeWidth="1" opacity="0.12" />
-      <line x1="40" y1="20" x2="40" y2="290" stroke="currentColor" strokeWidth="1" opacity="0.12" />
+      <line x1="160" y1="340" x2="1200" y2="340" stroke="currentColor" strokeWidth="1" opacity="0.07" />
+      <line x1="160" y1="25" x2="160" y2="340" stroke="currentColor" strokeWidth="1" opacity="0.07" />
 
       {/* Axis labels */}
-      <text x="495" y="294" fontSize="11" fontFamily="monospace" fill="currentColor" opacity="0.15">s</text>
-      <text x="28" y="18" fontSize="11" fontFamily="monospace" fill="currentColor" opacity="0.15">P</text>
+      <text x="1210" y="344" fontSize="12" fontFamily="monospace" fill="currentColor" opacity="0.09">s</text>
+      <text x="145" y="22" fontSize="12" fontFamily="monospace" fill="currentColor" opacity="0.09">P</text>
 
       {/* Threshold line P₀ */}
       <line
-        x1="40" y1="200" x2="490" y2="200"
-        stroke="oklch(0.78 0.16 75)" strokeWidth="1" strokeDasharray="6 4" opacity="0.35"
+        x1="160" y1="215" x2="1200" y2="215"
+        stroke="oklch(0.78 0.16 75)" strokeWidth="1" strokeDasharray="8 5" opacity="0.15"
       />
-      <text x="494" y="204" fontSize="9" fontFamily="monospace" fill="oklch(0.78 0.16 75)" opacity="0.5">P₀</text>
+      <text x="1208" y="219" fontSize="10" fontFamily="monospace" fill="oklch(0.78 0.16 75)" opacity="0.2">P₀</text>
+
+      {/* Fill under curve — very subtle */}
+      <path
+        d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20 L 1150 340 Z"
+        fill="oklch(0.78 0.16 75)" opacity="0.015"
+      />
 
       {/* The cubic curve */}
       <path
-        d="M 40 290 C 100 285, 180 270, 240 230 S 380 110, 470 20"
-        stroke="oklch(0.78 0.16 75)" strokeWidth="2" opacity="0.25" fill="none"
-      />
-
-      {/* Fill under curve to threshold */}
-      <path
-        d="M 40 290 C 100 285, 180 270, 240 230 S 380 110, 470 20 L 470 290 Z"
-        fill="oklch(0.78 0.16 75)" opacity="0.03"
+        d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20"
+        stroke="oklch(0.78 0.16 75)" strokeWidth="1.5" opacity="0.2" fill="none"
       />
 
       {/* s* vertical drop line */}
       <line
-        x1="270" y1="200" x2="270" y2="290"
-        stroke="oklch(0.78 0.16 75)" strokeWidth="1" strokeDasharray="3 3" opacity="0.3"
+        x1="700" y1="215" x2="700" y2="340"
+        stroke="oklch(0.78 0.16 75)" strokeWidth="1" strokeDasharray="3 3" opacity="0.12"
       />
-      <text x="264" y="303" fontSize="9" fontFamily="monospace" fill="oklch(0.78 0.16 75)" opacity="0.5">s*</text>
+      <text x="692" y="356" fontSize="10" fontFamily="monospace" fill="oklch(0.78 0.16 75)" opacity="0.2">s*</text>
 
-      {/* Intersection dot */}
-      <circle cx="270" cy="200" r="4" fill="oklch(0.78 0.16 75)" opacity="0.5" />
+      {/* Intersection dot with glow */}
+      <circle cx="700" cy="215" r="14" fill="oklch(0.78 0.16 75)" opacity="0.04" />
+      <circle cx="700" cy="215" r="4" fill="oklch(0.78 0.16 75)" opacity="0.4" />
 
       {/* Probe sample dots */}
       {probePoints.map((p, i) => (
         <circle
           key={i} cx={p.x} cy={p.y} r="2.5"
-          fill="currentColor" opacity="0.15"
+          fill="currentColor" opacity="0.1"
         />
       ))}
     </svg>
@@ -320,10 +332,10 @@ export default function AlgorithmPage() {
       {/* Hero with curve background */}
       <header className="relative overflow-hidden border-b border-border/30">
         <div className="max-w-6xl mx-auto px-6 relative">
-          {/* The P(s) curve — the differentiation anchor */}
+          {/* The P(s) curve — full-bleed atmospheric background */}
           <div
-            className="absolute right-0 top-0 w-[50%] h-full text-foreground opacity-70 hidden md:block"
-            style={{ maskImage: "linear-gradient(to right, transparent 0%, black 40%)", WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 40%)" }}
+            className="absolute inset-0 text-foreground hidden md:block pointer-events-none"
+            style={{ maskImage: "linear-gradient(to bottom, black 40%, transparent 95%)", WebkitMaskImage: "linear-gradient(to bottom, black 40%, transparent 95%)" }}
           >
             <HeroCurve />
           </div>
