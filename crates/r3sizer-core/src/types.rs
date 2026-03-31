@@ -928,7 +928,7 @@ impl Default for ClassificationParams {
 /// Orthogonal to [`SharpenMode`] (Rgb/Lightness).
 /// `SharpenStrategy` controls whether strength is applied uniformly or modulated
 /// per-pixel by a region-based gain map.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "strategy")]
 pub enum SharpenStrategy {
@@ -1273,7 +1273,7 @@ impl KernelTable {
 ///
 /// Orthogonal to [`SharpenStrategy`] — controls the resize stage, not sharpening.
 /// When the pipeline receives `None`, it falls back to the existing Lanczos3 path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case", tag = "strategy")]
 pub enum ResizeStrategy {

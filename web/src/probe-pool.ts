@@ -4,6 +4,9 @@
  * Distributes probe strengths across N Web Workers, each running its own WASM
  * instance. Falls back gracefully to single-worker processing if the pool
  * can't be initialized.
+ *
+ * Base image data is sent once via `distributeBaseData` and cached in each
+ * worker, avoiding redundant structured clones on every probe batch.
  */
 import type { ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
 
@@ -30,6 +33,8 @@ const DEFAULT_POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 6);
 let pool: Worker[] = [];
 let poolReady: Promise<void> | null = null;
 let nextProbeId = 0;
+/** Whether workers have current base data cached. */
+let workersHaveBase = false;
 
 /**
  * Initialize the probe pool with a pre-compiled WASM module.
@@ -46,6 +51,7 @@ export function initProbePool(
   poolReady = new Promise<void>((resolve, reject) => {
     let initialized = 0;
     const timeout = setTimeout(() => {
+      poolReady = null; // allow retry on next call
       reject(new Error("Probe pool init timed out"));
     }, 10_000);
 
@@ -67,6 +73,8 @@ export function initProbePool(
 
       w.onerror = () => {
         clearTimeout(timeout);
+        poolReady = null; // allow retry on next call
+        pool = []; // discard partially-initialized workers
         reject(new Error("Probe worker failed to load"));
       };
 
@@ -84,18 +92,58 @@ export function isProbePoolReady(): boolean {
 }
 
 /**
+ * Send base image data to all probe workers for caching.
+ *
+ * Call this once per processing cycle after `get_base_data()`.  Workers cache
+ * the data and reuse it across multiple `runProbesParallel` calls (e.g. coarse
+ * and dense rounds in TwoPass mode), eliminating redundant structured clones.
+ */
+export async function distributeBaseData(baseData: BaseData): Promise<void> {
+  if (!poolReady || pool.length === 0) {
+    throw new Error("Probe pool not initialized");
+  }
+  await poolReady;
+
+  const promises = pool.map((w) => {
+    return new Promise<void>((resolve) => {
+      const id = nextProbeId++;
+      const handler = (e: MessageEvent<ProbeWorkerResponse>) => {
+        if (e.data.type !== "base_cached" || e.data.id !== id) return;
+        w.removeEventListener("message", handler);
+        resolve();
+      };
+      w.addEventListener("message", handler);
+      w.postMessage({
+        type: "set_base",
+        id,
+        basePixels: baseData.basePixels,
+        luminance: baseData.luminance,
+        width: baseData.width,
+        height: baseData.height,
+        baseline: baseData.baseline,
+      } as ProbeWorkerRequest);
+    });
+  });
+
+  await Promise.all(promises);
+  workersHaveBase = true;
+}
+
+/**
  * Run probes in parallel across the pool.
  *
- * Splits `strengths` into chunks, sends each chunk to a worker with the base
- * image data, and merges the results.
+ * Workers must have base data cached via `distributeBaseData` before calling
+ * this.  Only strengths and params are sent per batch (no image data).
  */
 export async function runProbesParallel(
-  baseData: BaseData,
   strengths: number[],
   paramsJson: string,
 ): Promise<ProbePoolResult> {
   if (!poolReady || pool.length === 0) {
     throw new Error("Probe pool not initialized");
+  }
+  if (!workersHaveBase) {
+    throw new Error("Base data not distributed — call distributeBaseData first");
   }
   await poolReady;
 
@@ -105,7 +153,7 @@ export async function runProbesParallel(
 
   const promises = chunks.map((chunk, i) => {
     if (chunk.length === 0) return Promise.resolve("[]");
-    return runProbeOnWorker(pool[i], chunk, baseData, paramsJson);
+    return runProbeOnWorker(pool[i], chunk, paramsJson);
   });
 
   const results = await Promise.all(promises);
@@ -135,7 +183,6 @@ function splitStrengths(strengths: number[], n: number): number[][] {
 function runProbeOnWorker(
   worker: Worker,
   strengths: number[],
-  baseData: BaseData,
   paramsJson: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -156,13 +203,8 @@ function runProbeOnWorker(
     const msg: ProbeWorkerRequest = {
       type: "probe",
       id,
-      basePixels: baseData.basePixels,
-      luminance: baseData.luminance,
-      width: baseData.width,
-      height: baseData.height,
       strengths,
       paramsJson,
-      baseline: baseData.baseline,
     };
     worker.postMessage(msg);
   });
@@ -173,4 +215,5 @@ export function destroyProbePool(): void {
   for (const w of pool) w.terminate();
   pool = [];
   poolReady = null;
+  workersHaveBase = false;
 }

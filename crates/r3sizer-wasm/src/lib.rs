@@ -94,13 +94,15 @@ fn get_or_convert_input(
     }
 }
 
-/// Take the cached prepared base if target dimensions match the given params.
+/// Take the cached prepared base if all base-affecting params match.
+///
+/// Checks target dimensions, strategy, contrast, classification, color space,
+/// artifact metric, evaluator, and target artifact ratio — not just dimensions.
 fn take_matching_base(params: &AutoSharpParams) -> Option<r3sizer_core::PreparedBase> {
     CACHED_BASE.with(|c| {
         let cache = c.borrow();
         match cache.as_ref() {
-            Some(b) if b.target.width == params.target_width
-                    && b.target.height == params.target_height => {}
+            Some(b) if b.matches_params(params) => {}
             _ => return None,
         }
         drop(cache);
@@ -259,19 +261,26 @@ pub fn probe_batch(
 /// Finish processing using the cached PreparedBase and externally-collected probes.
 ///
 /// Call this in the main worker after collecting probe results from the pool.
+/// `pass_diagnostics_json` is optional JSON for `ProbePassDiagnostics` (from
+/// TwoPass resolution).  Pass an empty string or `"null"` to omit.
 #[wasm_bindgen]
 pub fn process_from_probes(
-    srgb_rgba_data: &[u8],
-    width: u32,
-    height: u32,
     params_json: &str,
     probes_json: &str,
     probing_us: u32,
+    pass_diagnostics_json: &str,
 ) -> Result<JsValue, JsValue> {
     let params: AutoSharpParams = serde_json::from_str(params_json)
         .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
     let probe_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(probes_json)
         .map_err(|e| JsValue::from_str(&format!("invalid probes JSON: {e}")))?;
+    let pass_diagnostics: Option<r3sizer_core::ProbePassDiagnostics> =
+        if pass_diagnostics_json.is_empty() || pass_diagnostics_json == "null" {
+            None
+        } else {
+            Some(serde_json::from_str(pass_diagnostics_json)
+                .map_err(|e| JsValue::from_str(&format!("invalid pass diagnostics JSON: {e}")))?)
+        };
 
     // Must have a cached PreparedBase.
     let cached_base = take_matching_base(&params);
@@ -279,15 +288,61 @@ pub fn process_from_probes(
         .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
 
     let output = r3sizer_core::process_from_prepared_with_probes(
-        prepared, &params, probe_samples, probing_us as u64, &post_progress,
+        prepared, &params, probe_samples, probing_us as u64, pass_diagnostics, &post_progress,
     ).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    // Re-cache input + base.
-    let input = get_or_convert_input(srgb_rgba_data, width, height)?;
-    CACHED_INPUT.with(|c| *c.borrow_mut() = Some(input));
+    // Re-cache base only (input is not needed for this path).
     if let Some(base) = cached_base {
         CACHED_BASE.with(|c| *c.borrow_mut() = Some(base));
     }
 
     serialize_output(output)
+}
+
+// ---------------------------------------------------------------------------
+// Probe strength resolution — for TwoPass parallel probing from JS
+// ---------------------------------------------------------------------------
+
+/// Resolve the initial (coarse) probe strengths for the current config.
+///
+/// For TwoPass, returns the coarse-pass linspace.
+/// For Explicit or Range, returns all strengths.
+/// Returns a JSON array of f32.
+#[wasm_bindgen]
+pub fn resolve_initial_strengths(params_json: &str) -> Result<String, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let strengths = r3sizer_core::resolve_initial_strengths(&params)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_json::to_string(&strengths)
+        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+}
+
+/// Resolve the dense (second-pass) probe strengths from coarse results.
+///
+/// Returns a JSON object `{ "strengths": [...], "diagnostics": {...} }` for
+/// TwoPass configs, or `null` for Explicit/Range (no second pass needed).
+#[wasm_bindgen]
+pub fn resolve_dense_strengths(
+    coarse_samples_json: &str,
+    params_json: &str,
+    effective_p0: f32,
+) -> Result<JsValue, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let coarse_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(coarse_samples_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid samples JSON: {e}")))?;
+
+    match r3sizer_core::resolve_dense_strengths(&coarse_samples, &params, effective_p0)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?
+    {
+        Some((strengths, diag)) => {
+            let result = serde_json::json!({
+                "strengths": strengths,
+                "diagnostics": diag,
+            });
+            Ok(JsValue::from_str(&result.to_string()))
+        }
+        None => Ok(JsValue::NULL),
+    }
 }

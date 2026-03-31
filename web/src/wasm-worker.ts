@@ -1,12 +1,16 @@
 import {
   initSync, process_image, prepare_image, prepare_base,
   get_base_data, process_from_probes, clear_cache,
+  resolve_initial_strengths, resolve_dense_strengths,
 } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 
 export interface WorkerRequest {
-  type: "init" | "process" | "prepare" | "prepare_base" | "get_base_data" | "process_from_probes";
+  type:
+    | "init" | "process" | "prepare" | "prepare_base"
+    | "get_base_data" | "process_from_probes"
+    | "resolve_initial_strengths" | "resolve_dense_strengths";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -15,10 +19,15 @@ export interface WorkerRequest {
   paramsJson?: string;
   probesJson?: string;
   probingUs?: number;
+  passDiagnosticsJson?: string;
+  coarseSamplesJson?: string;
+  effectiveP0?: number;
 }
 
 export interface WorkerResponse {
-  type: "ready" | "result" | "prepared" | "base_prepared" | "base_data" | "progress";
+  type:
+    | "ready" | "result" | "prepared" | "base_prepared"
+    | "base_data" | "progress" | "strengths" | "dense_result";
   id?: number;
   stage?: string;
   result?: {
@@ -35,6 +44,8 @@ export interface WorkerResponse {
     baseline: number;
     effectiveP0: number;
   } | null;
+  strengthsJson?: string;
+  denseResult?: string | null;
   error?: string;
 }
 
@@ -103,11 +114,13 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   }
 
   if (msg.type === "process_from_probes") {
-    const { id, rgbaData, width, height, paramsJson, probesJson, probingUs } = msg;
+    const { id, paramsJson, probesJson, probingUs, passDiagnosticsJson } = msg;
     try {
       if (!ready) throw new Error("WASM not initialized");
 
-      const result = process_from_probes(rgbaData!, width!, height!, paramsJson!, probesJson!, probingUs!);
+      const result = process_from_probes(
+        paramsJson!, probesJson!, probingUs!, passDiagnosticsJson ?? "",
+      );
       const resp: WorkerResponse = {
         type: "result",
         id,
@@ -123,6 +136,43 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       const resp: WorkerResponse = {
         type: "result",
         id,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      (self as unknown as Worker).postMessage(resp);
+    }
+    return;
+  }
+
+  if (msg.type === "resolve_initial_strengths") {
+    const { id, paramsJson } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const json = resolve_initial_strengths(paramsJson!);
+      const resp: WorkerResponse = { type: "strengths", id, strengthsJson: json };
+      (self as unknown as Worker).postMessage(resp);
+    } catch (err) {
+      const resp: WorkerResponse = {
+        type: "strengths", id,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      (self as unknown as Worker).postMessage(resp);
+    }
+    return;
+  }
+
+  if (msg.type === "resolve_dense_strengths") {
+    const { id, coarseSamplesJson, paramsJson, effectiveP0 } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const result = resolve_dense_strengths(coarseSamplesJson!, paramsJson!, effectiveP0!);
+      const resp: WorkerResponse = {
+        type: "dense_result", id,
+        denseResult: result != null ? result : null,
+      };
+      (self as unknown as Worker).postMessage(resp);
+    } catch (err) {
+      const resp: WorkerResponse = {
+        type: "dense_result", id,
         error: err instanceof Error ? err.message : String(err),
       };
       (self as unknown as Worker).postMessage(resp);

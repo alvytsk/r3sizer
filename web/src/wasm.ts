@@ -1,7 +1,7 @@
 import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/types/wasm-types";
 import type { BaseData } from "./probe-pool";
-import { initProbePool, isProbePoolReady, runProbesParallel } from "./probe-pool";
+import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData } from "./probe-pool";
 import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
 
 let worker: Worker | null = null;
@@ -62,7 +62,7 @@ function ensureWorker(): Promise<void> {
           // Ignore fire-and-forget acknowledgements.
           if (data.type === "prepared" || data.type === "base_prepared") return;
 
-          // Resolve pending calls (result or base_data).
+          // Resolve pending calls.
           if (data.id != null) {
             const cb = pending.get(data.id);
             if (!cb) return;
@@ -73,6 +73,10 @@ function ensureWorker(): Promise<void> {
               cb.resolve(data.result as ProcessResult);
             } else if (data.type === "base_data") {
               cb.resolve(data.baseData ?? null);
+            } else if (data.type === "strengths") {
+              cb.resolve(data.strengthsJson ?? "[]");
+            } else if (data.type === "dense_result") {
+              cb.resolve(data.denseResult ?? null);
             }
           }
         };
@@ -155,9 +159,11 @@ export async function prepareImage(
 /**
  * Process with parallel probing via the probe worker pool.
  *
- * 1. Gets cached base data from main worker
- * 2. Fans out probes to the pool
- * 3. Sends collected probes back to main worker for fit + sharpen
+ * Supports all probe configs including TwoPass (two rounds of parallel probing):
+ *   1. Resolve initial strengths via Rust (coarse for TwoPass, all for Explicit/Range)
+ *   2. Fan out to probe pool
+ *   3. For TwoPass: resolve dense window, run second round in parallel
+ *   4. Merge samples, send to main worker for fit + sharpen
  *
  * Falls back to single-worker `processImageAsync` if pool is unavailable
  * or base data is not cached.
@@ -180,73 +186,80 @@ export async function processImageParallel(
     return processImageAsync(rgbaData, width, height, paramsJson);
   }
 
-  // Step 2: Resolve probe strengths and fan out to pool.
-  // TwoPass and other complex configs can't be resolved from JS — fall back.
-  const params = JSON.parse(paramsJson);
-  const strengths = resolveProbeStrengths(params);
-  if (strengths.length === 0) {
+  // Distribute base data to probe workers (cached for subsequent rounds).
+  await distributeBaseData(baseData);
+
+  // Step 2: Resolve initial strengths via Rust (works for all configs).
+  const initialStrengthsJson = await callWorker<string>({
+    type: "resolve_initial_strengths",
+    paramsJson,
+  });
+  const initialStrengths: number[] = JSON.parse(initialStrengthsJson);
+  if (initialStrengths.length === 0) {
     return processImageAsync(rgbaData, width, height, paramsJson);
   }
 
+  // Step 3: Run initial probes in parallel.
   progressCallback?.("probing");
-  const { samplesJson, probingMs } = await runProbesParallel(baseData, strengths, paramsJson);
+  const t0 = performance.now();
+  const { samplesJson: initialSamplesJson } = await runProbesParallel(
+    initialStrengths, paramsJson,
+  );
 
-  // Step 3: Send probes to main worker for fit + sharpen.
+  // Step 4: For TwoPass, resolve dense window and run second round.
+  let finalSamplesJson = initialSamplesJson;
+  let passDiagnosticsJson = "";
+  const denseResultStr = await callWorker<string | null>({
+    type: "resolve_dense_strengths",
+    coarseSamplesJson: initialSamplesJson,
+    paramsJson,
+    effectiveP0: baseData.effectiveP0,
+  });
+
+  if (denseResultStr != null) {
+    const denseResult = JSON.parse(denseResultStr) as {
+      strengths: number[];
+      diagnostics: unknown;
+    };
+    if (denseResult.strengths.length > 0) {
+      const { samplesJson: denseSamplesJson } = await runProbesParallel(
+        denseResult.strengths, paramsJson,
+      );
+      // Merge coarse + dense, sort by strength, dedup.
+      const coarse = JSON.parse(initialSamplesJson) as Array<{ strength: number }>;
+      const dense = JSON.parse(denseSamplesJson) as Array<{ strength: number }>;
+      const merged = [...coarse, ...dense]
+        .sort((a, b) => a.strength - b.strength)
+        .filter((s, i, arr) => i === 0 || Math.abs(s.strength - arr[i - 1].strength) >= 1e-5);
+      finalSamplesJson = JSON.stringify(merged);
+    }
+    passDiagnosticsJson = JSON.stringify(denseResult.diagnostics);
+  }
+  const probingMs = performance.now() - t0;
+
+  // Step 5: Send all probes to main worker for fit + sharpen.
   progressCallback?.("fitting");
-  return new Promise((resolve, reject) => {
-    const id = nextId++;
-    pending.set(id, {
-      resolve,
-      reject,
-    });
-    worker!.postMessage({
-      type: "process_from_probes",
-      id,
-      rgbaData,
-      width,
-      height,
-      paramsJson,
-      probesJson: samplesJson,
-      probingUs: Math.round(probingMs * 1000),
-    } as WorkerRequest);
+  return callWorker<ProcessResult>({
+    type: "process_from_probes",
+    paramsJson,
+    probesJson: finalSamplesJson,
+    probingUs: Math.round(probingMs * 1000),
+    passDiagnosticsJson,
   });
 }
 
 /** Get cached base data from the main worker. */
 function getBaseData(): Promise<BaseData | null> {
-  return new Promise((resolve, reject) => {
-    const id = nextId++;
-    pending.set(id, {
-      resolve,
-      reject,
-    });
-    worker!.postMessage({ type: "get_base_data", id } as WorkerRequest);
-  });
+  return callWorker<BaseData | null>({ type: "get_base_data" });
 }
 
-/**
- * Resolve probe strengths from params for the parallel probe pool.
- *
- * Serde serializes ProbeConfig variants as:
- *   Explicit([...])      → {"explicit": [...]}
- *   Range{...}           → {"range": {"min": ..., "max": ..., "count": ...}}
- *   TwoPass{...}         → {"two_pass": {"coarse_count": ..., ...}}
- *
- * Returns [] for TwoPass (requires two-phase coordination in Rust)
- * and for Range (would need to replicate linspace logic).
- * The caller falls back to single-worker processing for these.
- */
-function resolveProbeStrengths(params: Record<string, unknown>): number[] {
-  const config = params.probe_strengths;
-  if (!config || typeof config !== "object") return [];
-
-  const c = config as Record<string, unknown>;
-
-  // Explicit: {"explicit": [0.05, 0.1, ...]}
-  if (Array.isArray(c.explicit)) return c.explicit;
-
-  // TwoPass or Range — can't resolve from JS, fall back.
-  return [];
+/** Send a request to the main worker and await its response. */
+function callWorker<T>(msg: Omit<WorkerRequest, "id">): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    worker!.postMessage({ ...msg, id } as WorkerRequest);
+  });
 }
 
 /**

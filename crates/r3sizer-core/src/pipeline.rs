@@ -37,6 +37,44 @@ struct SharpenResult {
 }
 
 // ---------------------------------------------------------------------------
+// Base params fingerprint — tracks which params affect PreparedBase
+// ---------------------------------------------------------------------------
+
+/// Subset of [`AutoSharpParams`] that determines the [`PreparedBase`] result.
+///
+/// Two params with equal keys produce identical base preparation output.
+/// Fields not listed here (e.g. `probe_strengths`, `metric_weights`,
+/// `sharpen_mode`) only affect the probing/fitting phase, not the base.
+#[derive(Debug, Clone, PartialEq)]
+struct BaseParamsKey {
+    target: ImageSize,
+    target_artifact_ratio: f32,
+    enable_contrast_leveling: bool,
+    sharpen_strategy: SharpenStrategy,
+    input_color_space: Option<crate::InputColorSpace>,
+    resize_strategy: Option<crate::ResizeStrategy>,
+    evaluation_color_space: Option<crate::EvaluationColorSpace>,
+    artifact_metric: ArtifactMetric,
+    evaluator_config: Option<crate::EvaluatorConfig>,
+}
+
+impl BaseParamsKey {
+    fn from_params(params: &AutoSharpParams) -> Self {
+        Self {
+            target: ImageSize { width: params.target_width, height: params.target_height },
+            target_artifact_ratio: params.target_artifact_ratio,
+            enable_contrast_leveling: params.enable_contrast_leveling,
+            sharpen_strategy: params.sharpen_strategy.clone(),
+            input_color_space: params.input_color_space,
+            resize_strategy: params.resize_strategy.clone(),
+            evaluation_color_space: params.evaluation_color_space,
+            artifact_metric: params.artifact_metric,
+            evaluator_config: params.evaluator_config,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Two-phase pipeline: prepare_base + process_from_prepared
 // ---------------------------------------------------------------------------
 
@@ -52,6 +90,8 @@ pub struct PreparedBase {
     pub(crate) input_size: ImageSize,
     /// Target dimensions this base was prepared for.
     pub target: ImageSize,
+    /// Fingerprint of the params that produced this base.
+    base_key: BaseParamsKey,
     pub(crate) base_luminance: Option<Vec<f32>>,
     pub(crate) gain_map: Option<crate::GainMap>,
     pub(crate) region_map: Option<crate::RegionMap>,
@@ -86,6 +126,14 @@ impl PreparedBase {
     pub fn baseline_artifact_ratio(&self) -> f32 { self.baseline_artifact_ratio }
     /// Effective P0 target (after envelope scaling).
     pub fn effective_p0(&self) -> f32 { self.effective_p0 }
+    /// Whether this prepared base is valid for the given params.
+    ///
+    /// Returns `false` if the params differ in any field that affects base
+    /// preparation (target dimensions, strategy, contrast, classification,
+    /// color space, artifact metric, evaluator, or target artifact ratio).
+    pub fn matches_params(&self, params: &AutoSharpParams) -> bool {
+        self.base_key == BaseParamsKey::from_params(params)
+    }
 }
 
 /// Pre-compute all pipeline stages that don't depend on sharpen/probe params.
@@ -191,10 +239,13 @@ pub fn prepare_base(
         None
     };
 
+    let base_key = BaseParamsKey::from_params(params);
+
     Ok(PreparedBase {
         base,
         input_size,
         target,
+        base_key,
         base_luminance,
         gain_map,
         region_map,
@@ -234,19 +285,71 @@ pub fn process_from_prepared(
 /// Use this when probes were computed in parallel across multiple workers.
 /// The `probing_us` field should reflect the wall-clock time of the parallel
 /// probing phase (not the sum of per-worker times).
+///
+/// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
+/// (useful for TwoPass parallel probing where JS resolved the dense window).
 pub fn process_from_prepared_with_probes(
     prepared: &PreparedBase,
     params: &AutoSharpParams,
     probe_samples: Vec<ProbeSample>,
     probing_us: u64,
+    pass_diagnostics: Option<ProbePassDiagnostics>,
     on_stage: &dyn Fn(&str),
 ) -> Result<ProcessOutput, CoreError> {
     let probe_result = ProbeResult {
         samples: probe_samples,
-        pass_diagnostics: None,
+        pass_diagnostics,
         probing_us,
     };
     finish_pipeline(prepared, params, probe_result, on_stage)
+}
+
+// ---------------------------------------------------------------------------
+// Probe strength resolution — for parallel probing from JS
+// ---------------------------------------------------------------------------
+
+/// Resolve the initial probe strengths for the current config.
+///
+/// For [`ProbeConfig::TwoPass`], returns the coarse-pass strengths (first phase).
+/// For [`ProbeConfig::Explicit`] or [`ProbeConfig::Range`], returns all strengths.
+pub fn resolve_initial_strengths(params: &AutoSharpParams) -> Result<Vec<f32>, CoreError> {
+    match &params.probe_strengths {
+        ProbeConfig::TwoPass { coarse_count, coarse_min, coarse_max, .. } => {
+            Ok(linspace(*coarse_min, *coarse_max, *coarse_count))
+        }
+        other => other.resolve(),
+    }
+}
+
+/// Resolve the dense (second-pass) probe strengths from coarse results.
+///
+/// Only meaningful for [`ProbeConfig::TwoPass`].  Returns `Ok(None)` for other
+/// configs (no second pass needed).
+pub fn resolve_dense_strengths(
+    coarse_samples: &[ProbeSample],
+    params: &AutoSharpParams,
+    effective_p0: f32,
+) -> Result<Option<(Vec<f32>, ProbePassDiagnostics)>, CoreError> {
+    match &params.probe_strengths {
+        ProbeConfig::TwoPass {
+            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
+        } => {
+            let (dense_lo, dense_hi) = find_dense_window(
+                coarse_samples, effective_p0, *coarse_min, *coarse_max, *window_margin,
+            );
+            let dense_strengths = linspace(dense_lo, dense_hi, *dense_count);
+            let diag = ProbePassDiagnostics {
+                coarse_count: *coarse_count,
+                coarse_min: *coarse_min,
+                coarse_max: *coarse_max,
+                dense_count: *dense_count,
+                dense_min: dense_lo,
+                dense_max: dense_hi,
+            };
+            Ok(Some((dense_strengths, diag)))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Run probes against raw image data (for use in dedicated probe workers).
