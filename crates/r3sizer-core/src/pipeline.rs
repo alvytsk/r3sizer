@@ -179,11 +179,12 @@ pub fn prepare_base(
     let resize_us = t0.elapsed().as_micros() as u64;
 
     // Base resize quality
-    // Source-side edge/texture retention is diagnostic-only — skip on non-Full
-    // diagnostics to avoid expensive Sobel + local-variance on the full source image.
+    // Source-side edge/texture retention is diagnostic-only in v1 (not used by
+    // the solver or displayed in the web UI).  Always skip to avoid expensive
+    // O(W_src × H_src) Sobel + local-variance on the full source image.
+    // Ringing score (resized-image only, active) always runs.
     let t0 = Instant::now();
-    let full_base_diag = matches!(params.diagnostics_level, crate::DiagnosticsLevel::Full);
-    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled, full_base_diag);
+    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled, false);
     let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
     let base_quality_us = t0.elapsed().as_micros() as u64;
 
