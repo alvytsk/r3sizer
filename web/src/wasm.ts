@@ -24,11 +24,32 @@ export function setProgressCallback(cb: ((stage: string) => void) | null) {
 // Worker lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * Compile WASM with fallback: try compileStreaming first (requires correct
+ * MIME type), fall back to ArrayBuffer compilation when the server returns
+ * a wrong Content-Type (e.g. GitHub Pages CDN returning text/html).
+ */
+async function compileWasm(url: string): Promise<WebAssembly.Module> {
+  try {
+    return await WebAssembly.compileStreaming(fetch(url));
+  } catch (streamErr) {
+    // compileStreaming failed — MIME type mismatch or network error.
+    // Retry with ArrayBuffer compilation which ignores Content-Type.
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new Error(
+        `Failed to fetch WASM (${resp.status}): ${streamErr instanceof Error ? streamErr.message : streamErr}`,
+      );
+    }
+    return WebAssembly.compile(await resp.arrayBuffer());
+  }
+}
+
 function ensureWorker(): Promise<void> {
   if (workerReadyPromise) return workerReadyPromise;
 
   workerReadyPromise = new Promise<void>((resolveReady, rejectReady) => {
-    WebAssembly.compileStreaming(fetch(wasmUrl))
+    compileWasm(wasmUrl)
       .then((wasmModule) => {
         const w = new Worker(
           new URL("./wasm-worker.ts", import.meta.url),
