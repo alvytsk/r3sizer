@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageAsync, prepareImage, prepareBaseImage, setProgressCallback } from "@/wasm";
+import { processImageParallel, prepareImage, prepareBaseImage, setProgressCallback } from "@/wasm";
 
 export type ExportFormat = "jpeg" | "png" | "webp";
 
@@ -219,7 +219,9 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
 
     try {
       const paramsJson = JSON.stringify(state.params);
-      const result = await processImageAsync(
+      // Try parallel probing first (uses probe worker pool).
+      // Falls back to single-worker if pool unavailable or base not cached.
+      const result = await processImageParallel(
         state.inputRgbaData,
         state.inputWidth,
         state.inputHeight,

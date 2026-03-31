@@ -108,6 +108,28 @@ fn take_matching_base(params: &AutoSharpParams) -> Option<r3sizer_core::Prepared
     })
 }
 
+/// Encode a pipeline output as a JS object with imageData, dimensions, and diagnostics.
+fn serialize_output(output: r3sizer_core::ProcessOutput) -> Result<JsValue, JsValue> {
+    post_progress("encoding");
+
+    let out_width = output.image.width();
+    let out_height = output.image.height();
+    let rgba_bytes = convert::linear_to_rgba_u8(&output.image);
+
+    let result = js_sys::Object::new();
+    let image_data = js_sys::Uint8Array::from(rgba_bytes.as_slice());
+    js_sys::Reflect::set(&result, &"imageData".into(), &image_data)?;
+    js_sys::Reflect::set(&result, &"outputWidth".into(), &JsValue::from(out_width))?;
+    js_sys::Reflect::set(&result, &"outputHeight".into(), &JsValue::from(out_height))?;
+
+    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+    let diagnostics = serde::Serialize::serialize(&output.diagnostics, &serializer)
+        .map_err(|e| JsValue::from_str(&format!("diagnostics serialization failed: {e}")))?;
+    js_sys::Reflect::set(&result, &"diagnostics".into(), &diagnostics)?;
+
+    Ok(result.into())
+}
+
 fn post_progress(stage: &str) {
     let global = js_sys::global();
     if let Ok(func) = js_sys::Reflect::get(&global, &"postMessage".into()) {
@@ -169,23 +191,103 @@ pub fn process_image(
         CACHED_BASE.with(|c| *c.borrow_mut() = Some(base));
     }
 
-    post_progress("encoding");
+    serialize_output(output)
+}
 
-    let out_width = output.image.width();
-    let out_height = output.image.height();
-    let rgba_bytes = convert::linear_to_rgba_u8(&output.image);
+// ---------------------------------------------------------------------------
+// Parallel probing API — used by the probe worker pool
+// ---------------------------------------------------------------------------
 
-    let result = js_sys::Object::new();
+/// Extract cached base image data for sending to probe workers.
+///
+/// Returns a JS object with `basePixels` (Float32Array), `luminance` (Float32Array),
+/// `width`, `height`, `baseline`, `effectiveP0`, or null if no base is cached.
+#[wasm_bindgen]
+pub fn get_base_data() -> JsValue {
+    CACHED_BASE.with(|c| {
+        let cache = c.borrow();
+        let prepared = match cache.as_ref() {
+            Some(b) => b,
+            None => return JsValue::NULL,
+        };
 
-    let image_data = js_sys::Uint8Array::from(rgba_bytes.as_slice());
-    js_sys::Reflect::set(&result, &"imageData".into(), &image_data)?;
-    js_sys::Reflect::set(&result, &"outputWidth".into(), &JsValue::from(out_width))?;
-    js_sys::Reflect::set(&result, &"outputHeight".into(), &JsValue::from(out_height))?;
+        let result = js_sys::Object::new();
+        let base_px = js_sys::Float32Array::from(prepared.base_pixels());
+        let luma = match prepared.luminance() {
+            Some(l) => js_sys::Float32Array::from(l),
+            None => return JsValue::NULL,
+        };
 
-    let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-    let diagnostics = serde::Serialize::serialize(&output.diagnostics, &serializer)
-        .map_err(|e| JsValue::from_str(&format!("diagnostics serialization failed: {e}")))?;
-    js_sys::Reflect::set(&result, &"diagnostics".into(), &diagnostics)?;
+        let _ = js_sys::Reflect::set(&result, &"basePixels".into(), &base_px);
+        let _ = js_sys::Reflect::set(&result, &"luminance".into(), &luma);
+        let _ = js_sys::Reflect::set(&result, &"width".into(), &JsValue::from(prepared.base_width()));
+        let _ = js_sys::Reflect::set(&result, &"height".into(), &JsValue::from(prepared.base_height()));
+        let _ = js_sys::Reflect::set(&result, &"baseline".into(), &JsValue::from(prepared.baseline_artifact_ratio()));
+        let _ = js_sys::Reflect::set(&result, &"effectiveP0".into(), &JsValue::from(prepared.effective_p0()));
 
-    Ok(result.into())
+        result.into()
+    })
+}
+
+/// Run probes on raw base image data (for use in dedicated probe workers).
+///
+/// Each probe worker receives the base pixels + luminance via postMessage and
+/// calls this with its assigned strengths.  Returns a JSON array of ProbeSamples.
+#[wasm_bindgen]
+pub fn probe_batch(
+    base_pixels: &[f32],
+    width: u32,
+    height: u32,
+    luminance: &[f32],
+    strengths_json: &str,
+    params_json: &str,
+    baseline: f32,
+) -> Result<String, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let strengths: Vec<f32> = serde_json::from_str(strengths_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
+
+    let samples = r3sizer_core::run_probes_standalone(
+        base_pixels, width, height, luminance, &strengths, &params, baseline,
+    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    serde_json::to_string(&samples)
+        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+}
+
+/// Finish processing using the cached PreparedBase and externally-collected probes.
+///
+/// Call this in the main worker after collecting probe results from the pool.
+#[wasm_bindgen]
+pub fn process_from_probes(
+    srgb_rgba_data: &[u8],
+    width: u32,
+    height: u32,
+    params_json: &str,
+    probes_json: &str,
+    probing_us: u32,
+) -> Result<JsValue, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let probe_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(probes_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid probes JSON: {e}")))?;
+
+    // Must have a cached PreparedBase.
+    let cached_base = take_matching_base(&params);
+    let prepared = cached_base.as_ref()
+        .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
+
+    let output = r3sizer_core::process_from_prepared_with_probes(
+        prepared, &params, probe_samples, probing_us as u64, &post_progress,
+    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    // Re-cache input + base.
+    let input = get_or_convert_input(srgb_rgba_data, width, height)?;
+    CACHED_INPUT.with(|c| *c.borrow_mut() = Some(input));
+    if let Some(base) = cached_base {
+        CACHED_BASE.with(|c| *c.borrow_mut() = Some(base));
+    }
+
+    serialize_output(output)
 }

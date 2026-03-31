@@ -32,8 +32,8 @@ pub mod recommendations;
 
 // Re-export the complete public surface.
 pub use pipeline::{
-    PreparedBase, prepare_base, process_from_prepared,
-    process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
+    PreparedBase, prepare_base, process_from_prepared, process_from_prepared_with_probes,
+    run_probes_standalone, process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
 };
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
