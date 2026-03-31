@@ -1162,6 +1162,13 @@ pub struct AutoSharpDiagnostics {
     /// Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
     #[serde(default)]
     pub effective_target_artifact_ratio: f32,
+
+    // --- Performance optimisation flags ---
+
+    /// Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
+    /// Active for shrink ratios above ~3×.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub used_staged_shrink: bool,
 }
 
 /// Return type of the top-level pipeline function.

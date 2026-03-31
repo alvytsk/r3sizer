@@ -13,23 +13,37 @@ use image::{imageops, ImageBuffer, Rgb};
 
 use crate::{CoreError, LinearRgbImage, ImageSize};
 
+/// Minimum shrink ratio (max of X and Y) that triggers the two-stage path.
+const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
+
 /// Downscale `src` to `target` size using Lanczos3 resampling.
+///
+/// For shrink ratios above [`STAGED_SHRINK_THRESHOLD`] a two-stage path is
+/// used: a fast bilinear (Triangle) pre-reduce brings the image to ~2× the
+/// target, then a final Lanczos3 pass produces the output.  This follows the
+/// same principle as libvips' `gap` parameter.
 ///
 /// Returns a clone-sized result; `src` is not mutated.
 /// Returns `Err` if `target` has a zero dimension.
 pub fn downscale(src: &LinearRgbImage, target: ImageSize) -> Result<LinearRgbImage, CoreError> {
+    downscale_with_info(src, target).map(|(img, _)| img)
+}
+
+/// Like [`downscale`] but also returns `true` when the staged-shrink path was
+/// used (for diagnostics).
+pub fn downscale_with_info(
+    src: &LinearRgbImage,
+    target: ImageSize,
+) -> Result<(LinearRgbImage, bool), CoreError> {
     if target.width == 0 || target.height == 0 {
         return Err(CoreError::InvalidParams("target dimensions must be non-zero".into()));
     }
 
     // Fast path: no resize needed.
     if target.width == src.width() && target.height == src.height() {
-        return Ok(src.clone());
+        return Ok((src.clone(), false));
     }
 
-    // Wrap our flat Vec<f32> as an image::ImageBuffer<Rgb<f32>, Vec<f32>>.
-    // Layout compatibility: image::Rgb<f32> is [f32; 3] stored row-major,
-    // exactly matching LinearRgbImage's interleaved layout.
     let buf: ImageBuffer<Rgb<f32>, Vec<f32>> = ImageBuffer::from_raw(
         src.width(),
         src.height(),
@@ -37,10 +51,27 @@ pub fn downscale(src: &LinearRgbImage, target: ImageSize) -> Result<LinearRgbIma
     )
     .ok_or_else(|| CoreError::InvalidParams("failed to wrap buffer as ImageBuffer".into()))?;
 
-    let resized = imageops::resize(&buf, target.width, target.height, imageops::FilterType::Lanczos3);
+    let shrink_x = src.width() as f64 / target.width as f64;
+    let shrink_y = src.height() as f64 / target.height as f64;
+    let max_shrink = shrink_x.max(shrink_y);
 
-    let data: Vec<f32> = resized.into_raw();
-    LinearRgbImage::new(target.width, target.height, data)
+    if max_shrink >= STAGED_SHRINK_THRESHOLD {
+        // Two-stage: fast pre-reduce to ~2× target, then final Lanczos3.
+        // Pre-factor leaves the intermediate at roughly 2× the final target
+        // so the Lanczos3 pass has enough support for high quality.
+        let pre_factor = (max_shrink / 2.0).floor().max(1.0);
+        let pre_w = ((src.width() as f64 / pre_factor).round() as u32).max(target.width);
+        let pre_h = ((src.height() as f64 / pre_factor).round() as u32).max(target.height);
+
+        let pre = imageops::resize(&buf, pre_w, pre_h, imageops::FilterType::Triangle);
+        let resized = imageops::resize(&pre, target.width, target.height, imageops::FilterType::Lanczos3);
+        let data: Vec<f32> = resized.into_raw();
+        Ok((LinearRgbImage::new(target.width, target.height, data)?, true))
+    } else {
+        let resized = imageops::resize(&buf, target.width, target.height, imageops::FilterType::Lanczos3);
+        let data: Vec<f32> = resized.into_raw();
+        Ok((LinearRgbImage::new(target.width, target.height, data)?, false))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -111,5 +142,69 @@ mod tests {
         for &v in out.pixels() {
             assert!(v >= -0.01 && v <= 1.01, "out-of-range value: {v}");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Staged shrink tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn small_ratio_does_not_use_staged_shrink() {
+        let src = gradient_image(100, 80);
+        let (out, staged) = downscale_with_info(&src, ImageSize { width: 50, height: 40 }).unwrap();
+        assert_eq!(out.width(), 50);
+        assert_eq!(out.height(), 40);
+        assert!(!staged, "2× ratio should not trigger staged shrink");
+    }
+
+    #[test]
+    fn large_ratio_uses_staged_shrink() {
+        let src = gradient_image(400, 300);
+        let (out, staged) = downscale_with_info(&src, ImageSize { width: 80, height: 60 }).unwrap();
+        assert_eq!(out.width(), 80);
+        assert_eq!(out.height(), 60);
+        assert!(staged, "5× ratio should trigger staged shrink");
+    }
+
+    #[test]
+    fn staged_shrink_output_stays_in_range() {
+        let src = gradient_image(640, 480);
+        let (out, staged) = downscale_with_info(&src, ImageSize { width: 64, height: 48 }).unwrap();
+        assert!(staged, "10× ratio should trigger staged shrink");
+        for &v in out.pixels() {
+            assert!(v >= -0.02 && v <= 1.02, "out-of-range value from staged shrink: {v}");
+        }
+    }
+
+    #[test]
+    fn staged_shrink_matches_direct_approximately() {
+        // Staged shrink should produce similar (but not identical) results
+        // compared to a pure Lanczos3 downscale.
+        let src = gradient_image(400, 300);
+        let target = ImageSize { width: 80, height: 60 };
+
+        let (staged_out, did_stage) = downscale_with_info(&src, target).unwrap();
+        assert!(did_stage);
+
+        // Direct Lanczos3 for comparison
+        let buf: ImageBuffer<Rgb<f32>, Vec<f32>> = ImageBuffer::from_raw(
+            src.width(), src.height(), src.pixels().to_vec(),
+        ).unwrap();
+        let direct = imageops::resize(&buf, 80, 60, imageops::FilterType::Lanczos3);
+        let direct_data: Vec<f32> = direct.into_raw();
+
+        // Should be close — the pre-reduce is bilinear so there will be
+        // minor differences, but on a smooth gradient they should be small.
+        let max_diff: f32 = staged_out.pixels().iter().zip(direct_data.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_diff < 0.05, "staged shrink diverges too much from direct: max_diff={max_diff}");
+    }
+
+    #[test]
+    fn same_size_reports_no_staged_shrink() {
+        let src = gradient_image(16, 16);
+        let (_, staged) = downscale_with_info(&src, ImageSize { width: 16, height: 16 }).unwrap();
+        assert!(!staged);
     }
 }

@@ -268,6 +268,61 @@ pub fn probe_batch(
         .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
 }
 
+/// Compute the precomputed detail signal from the cached PreparedBase.
+///
+/// Returns the detail as a Float32Array.  The caller distributes this to probe
+/// workers so they can call [`probe_batch_with_detail`] and skip the Gaussian
+/// blur entirely (the dominant per-worker cost).
+///
+/// For Lightness mode: W×H floats.  For RGB mode: W×H×3 floats.
+#[wasm_bindgen]
+pub fn compute_probe_detail(params_json: &str) -> Result<js_sys::Float32Array, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+
+    CACHED_BASE.with(|c| {
+        let cache = c.borrow();
+        let prepared = cache.as_ref()
+            .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
+        let luma = prepared.luminance()
+            .ok_or_else(|| JsValue::from_str("luminance unavailable"))?;
+        let detail = r3sizer_core::compute_probe_detail(
+            prepared.base_pixels(), prepared.base_width(), prepared.base_height(),
+            luma, &params,
+        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(js_sys::Float32Array::from(detail.as_slice()))
+    })
+}
+
+/// Like [`probe_batch`] but uses a precomputed detail signal, skipping the
+/// Gaussian blur.  Call [`compute_probe_detail`] once in the main worker and
+/// send the result to probe workers alongside the base data.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn probe_batch_with_detail(
+    base_pixels: &[f32],
+    width: u32,
+    height: u32,
+    luminance: &[f32],
+    detail: &[f32],
+    strengths_json: &str,
+    params_json: &str,
+    baseline: f32,
+) -> Result<String, JsValue> {
+    let params: AutoSharpParams = serde_json::from_str(params_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid params JSON: {e}")))?;
+    let strengths: Vec<f32> = serde_json::from_str(strengths_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
+
+    let samples = r3sizer_core::run_probes_from_detail(
+        base_pixels, width, height, luminance, detail,
+        &strengths, &params, baseline,
+    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    serde_json::to_string(&samples)
+        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
+}
+
 /// Finish processing using the cached PreparedBase and externally-collected probes.
 ///
 /// Call this in the main worker after collecting probe results from the pool.

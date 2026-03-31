@@ -2,6 +2,7 @@ import {
   initSync, process_image, prepare_image, prepare_base,
   get_base_data, process_from_probes, clear_cache,
   resolve_initial_strengths, resolve_dense_strengths,
+  compute_probe_detail,
 } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
@@ -9,7 +10,7 @@ let ready = false;
 export interface WorkerRequest {
   type:
     | "init" | "process" | "prepare" | "prepare_base"
-    | "get_base_data" | "process_from_probes"
+    | "get_base_data" | "compute_detail" | "process_from_probes"
     | "resolve_initial_strengths" | "resolve_dense_strengths"
     | "clear_cache";
   module?: WebAssembly.Module;
@@ -28,7 +29,7 @@ export interface WorkerRequest {
 export interface WorkerResponse {
   type:
     | "ready" | "result" | "prepared" | "base_prepared"
-    | "base_data" | "progress" | "strengths" | "dense_result";
+    | "base_data" | "detail" | "progress" | "strengths" | "dense_result";
   id?: number;
   stage?: string;
   result?: {
@@ -45,6 +46,7 @@ export interface WorkerResponse {
     baseline: number;
     effectiveP0: number;
   } | null;
+  detailData?: Float32Array | null;
   strengthsJson?: string;
   denseResult?: string | null;
   error?: string;
@@ -112,6 +114,23 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       const resp: WorkerResponse = {
         type: "base_data",
         id,
+        error: err instanceof Error ? err.message : String(err),
+      };
+      (self as unknown as Worker).postMessage(resp);
+    }
+    return;
+  }
+
+  if (msg.type === "compute_detail") {
+    const { id, paramsJson } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const detail = compute_probe_detail(paramsJson!);
+      const resp: WorkerResponse = { type: "detail", id, detailData: detail };
+      (self as unknown as Worker).postMessage(resp);
+    } catch (err) {
+      const resp: WorkerResponse = {
+        type: "detail", id,
         error: err instanceof Error ? err.message : String(err),
       };
       (self as unknown as Worker).postMessage(resp);

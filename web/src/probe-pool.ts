@@ -18,6 +18,9 @@ export interface BaseData {
   height: number;
   baseline: number;
   effectiveP0: number;
+  /** Precomputed detail signal (D = input - blur(input)).
+   *  When present, probe workers skip the Gaussian blur entirely. */
+  detail?: Float32Array;
 }
 
 /** Result of a parallel probe batch. */
@@ -121,6 +124,7 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
         width: baseData.width,
         height: baseData.height,
         baseline: baseData.baseline,
+        detail: baseData.detail,
       } as ProbeWorkerRequest);
     });
   });

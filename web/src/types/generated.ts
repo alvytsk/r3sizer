@@ -403,7 +403,12 @@ base_resize_quality?: BaseResizeQuality | null,
  * `effective = target_artifact_ratio × base_resize_quality.envelope_scale`.
  * Equals `target_artifact_ratio` when `base_resize_quality` is `None`.
  */
-effective_target_artifact_ratio: number, };
+effective_target_artifact_ratio: number, 
+/**
+ * Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
+ * Active for shrink ratios above ~3×.
+ */
+used_staged_shrink?: boolean, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 

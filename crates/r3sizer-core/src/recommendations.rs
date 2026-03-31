@@ -590,6 +590,7 @@ mod tests {
             probe_pass_diagnostics: None,
             base_resize_quality: None,
             effective_target_artifact_ratio: 0.001,
+            used_staged_shrink: false,
         }
     }
 

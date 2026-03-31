@@ -400,7 +400,7 @@ pub fn unsharp_mask_single_channel_with_kernel(
 ///
 /// `scratch_a` and `scratch_b` must each have length >= `width * height`.
 /// Returns the sharpened data in `scratch_b` (borrows from the scratch).
-#[cfg_attr(feature = "parallel", allow(dead_code))]
+#[allow(dead_code)]
 pub(crate) fn unsharp_mask_single_channel_with_scratch<'a>(
     data: &[f32],
     width: usize,
@@ -514,6 +514,75 @@ pub fn adaptive_sharpen_rgb(
         .collect();
 
     LinearRgbImage::new(src.width(), src.height(), out)
+}
+
+// ---------------------------------------------------------------------------
+// Precomputed-detail API for probe-loop optimisation
+// ---------------------------------------------------------------------------
+//
+// The unsharp-mask formula is `out = input + s * (input - blur(input))`.
+// The detail signal `D = input - blur(input)` is independent of `s`, so we
+// compute it once and reuse it for every probe strength.  This collapses
+// probe cost from  N × (blur + apply)  to  1 × blur + N × apply,  where
+// the apply step is a trivial multiply-add.
+
+/// Compute the single-channel detail signal: `D = data - blur(data)`.
+///
+/// The returned buffer has the same length as `data` (`width × height`).
+pub fn compute_detail_single_channel(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+) -> Vec<f32> {
+    let blurred = gaussian_blur_single_channel(data, width, height, kernel);
+    data.iter().zip(blurred.iter()).map(|(&d, &b)| d - b).collect()
+}
+
+/// Compute the RGB detail signal: `D = src - blur(src)`.
+///
+/// Returns a flat `Vec<f32>` with `width × height × 3` elements.
+pub fn compute_detail_rgb(src: &LinearRgbImage, kernel: &[f32]) -> Vec<f32> {
+    let blurred = gaussian_blur(src, kernel);
+    src.pixels()
+        .iter()
+        .zip(blurred.pixels().iter())
+        .map(|(&s, &b)| s - b)
+        .collect()
+}
+
+/// Apply precomputed detail at a given strength: `out = input + amount * detail`.
+///
+/// Equivalent to [`unsharp_mask_single_channel_with_kernel`] but skips the
+/// Gaussian blur (already factored into `detail`).
+pub fn apply_detail_single_channel(input: &[f32], detail: &[f32], amount: f32) -> Vec<f32> {
+    input
+        .iter()
+        .zip(detail.iter())
+        .map(|(&i, &d)| i + amount * d)
+        .collect()
+}
+
+/// Like [`apply_detail_single_channel`] but writes into a pre-allocated buffer.
+///
+/// `out` must have length >= `input.len()`.
+pub fn apply_detail_single_channel_into(input: &[f32], detail: &[f32], amount: f32, out: &mut [f32]) {
+    for ((o, &i), &d) in out.iter_mut().zip(input.iter()).zip(detail.iter()) {
+        *o = i + amount * d;
+    }
+}
+
+/// Apply precomputed RGB detail at a given strength: `out = src + amount * detail`.
+///
+/// Equivalent to [`unsharp_mask_with_kernel`] but skips the Gaussian blur.
+pub fn apply_detail_rgb(src: &LinearRgbImage, detail: &[f32], amount: f32) -> LinearRgbImage {
+    let data: Vec<f32> = src
+        .pixels()
+        .iter()
+        .zip(detail.iter())
+        .map(|(&s, &d)| s + amount * d)
+        .collect();
+    LinearRgbImage::new(src.width(), src.height(), data).unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -677,5 +746,83 @@ mod tests {
         let out = adaptive_sharpen_rgb(&src, 1.0, &gain_map, 1.0).unwrap();
         assert_eq!(out.width(), 16);
         assert_eq!(out.height(), 12);
+    }
+
+    // -----------------------------------------------------------------------
+    // Detail precomputation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detail_single_channel_matches_usm() {
+        // Applying precomputed detail at strength s must produce the same
+        // result as the one-shot unsharp_mask_single_channel_with_kernel.
+        let src = gradient(16, 16);
+        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+            .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
+            .collect();
+        let kernel = gaussian_kernel(1.0);
+        let strength = 1.5;
+
+        let expected = unsharp_mask_single_channel_with_kernel(&luma, 16, 16, strength, &kernel);
+        let detail = compute_detail_single_channel(&luma, 16, 16, &kernel);
+        let actual = apply_detail_single_channel(&luma, &detail, strength);
+
+        for (a, b) in expected.iter().zip(actual.iter()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-5);
+        }
+    }
+
+    #[test]
+    fn detail_rgb_matches_usm() {
+        let src = gradient(16, 16);
+        let kernel = gaussian_kernel(1.0);
+        let strength = 2.0;
+
+        let expected = unsharp_mask_with_kernel(&src, strength, &kernel);
+        let detail = compute_detail_rgb(&src, &kernel);
+        let actual = apply_detail_rgb(&src, &detail, strength);
+
+        for (a, b) in expected.pixels().iter().zip(actual.pixels().iter()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-5);
+        }
+    }
+
+    #[test]
+    fn detail_single_channel_into_matches() {
+        let src = gradient(16, 16);
+        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+            .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
+            .collect();
+        let kernel = gaussian_kernel(1.0);
+        let strength = 1.0;
+
+        let detail = compute_detail_single_channel(&luma, 16, 16, &kernel);
+        let expected = apply_detail_single_channel(&luma, &detail, strength);
+        let mut actual = vec![0.0f32; luma.len()];
+        apply_detail_single_channel_into(&luma, &detail, strength, &mut actual);
+
+        for (a, b) in expected.iter().zip(actual.iter()) {
+            assert_abs_diff_eq!(a, b, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn detail_reuse_multiple_strengths() {
+        // Verify that reusing detail for multiple strengths gives consistent
+        // results with independent USM calls.
+        let src = gradient(16, 16);
+        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+            .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
+            .collect();
+        let kernel = gaussian_kernel(1.0);
+        let detail = compute_detail_single_channel(&luma, 16, 16, &kernel);
+
+        for &s in &[0.1, 0.5, 1.0, 2.0, 5.0] {
+            let expected = unsharp_mask_single_channel_with_kernel(&luma, 16, 16, s, &kernel);
+            let actual = apply_detail_single_channel(&luma, &detail, s);
+            for (a, b) in expected.iter().zip(actual.iter()) {
+                assert_abs_diff_eq!(a, b, epsilon = 1e-5);
+            }
+        }
     }
 }

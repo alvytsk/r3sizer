@@ -21,7 +21,6 @@ use crate::{
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::{check_monotonicity, fit_cubic, fit_cubic_with_quality},
     metrics::channel_clipping_ratio,
-    resize::downscale,
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness_with_policy, find_sharpness_direct_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
@@ -111,6 +110,7 @@ pub struct PreparedBase {
     // Diagnostics
     pub(crate) input_ingress_diag: Option<crate::types::InputIngressDiagnostics>,
     pub(crate) resize_strategy_diag: Option<crate::ResizeStrategyDiagnostics>,
+    pub(crate) used_staged_shrink: bool,
 }
 
 impl PreparedBase {
@@ -167,12 +167,13 @@ pub fn prepare_base(
     // Resize
     on_stage("resizing");
     let t0 = Instant::now();
-    let (downscaled, resize_strategy_diag) = {
+    let (downscaled, resize_strategy_diag, used_staged_shrink) = {
         if let Some(ref strategy) = params.resize_strategy {
             let (img, diag) = crate::resize_strategy::downscale_with_strategy(&input, target, strategy)?;
-            (img, Some(diag))
+            (img, Some(diag), false)
         } else {
-            (downscale(&input, target)?, None)
+            let (img, staged) = crate::resize::downscale_with_info(&input, target)?;
+            (img, None, staged)
         }
     };
     let resize_us = t0.elapsed().as_micros() as u64;
@@ -263,6 +264,7 @@ pub fn prepare_base(
         ingress_us,
         input_ingress_diag,
         resize_strategy_diag,
+        used_staged_shrink,
     })
 }
 
@@ -372,6 +374,114 @@ pub fn run_probes_standalone(
         params.sharpen_mode, params.metric_mode, params.artifact_metric,
         baseline_artifact_ratio, &kernel, None,
     )
+}
+
+/// Compute the precomputed detail signal from a prepared base.
+///
+/// Returns `D = input - blur(input)` for the current sharpen mode:
+/// - **Lightness**: single-channel detail (W×H floats)
+/// - **RGB**: three-channel detail (W×H×3 floats)
+///
+/// The returned detail buffer can be sent to probe workers so they skip the
+/// Gaussian blur entirely, eliminating the dominant per-worker cost.
+pub fn compute_probe_detail(
+    base_pixels: &[f32],
+    width: u32,
+    height: u32,
+    base_luminance: &[f32],
+    params: &AutoSharpParams,
+) -> Result<Vec<f32>, CoreError> {
+    use crate::sharpen;
+    let kernel = make_kernel(params.sharpen_sigma)?;
+    let w = width as usize;
+    let h = height as usize;
+
+    match params.sharpen_mode {
+        SharpenMode::Lightness => {
+            Ok(sharpen::compute_detail_single_channel(base_luminance, w, h, &kernel))
+        }
+        SharpenMode::Rgb => {
+            let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
+            Ok(sharpen::compute_detail_rgb(&base, &kernel))
+        }
+    }
+}
+
+/// Like [`run_probes_standalone`] but uses a precomputed detail signal,
+/// skipping the Gaussian blur (the dominant cost per worker).
+///
+/// Call [`compute_probe_detail`] once in the main worker, distribute the
+/// result to probe workers, then call this function in each worker.
+#[allow(clippy::too_many_arguments)]
+pub fn run_probes_from_detail(
+    base_pixels: &[f32],
+    width: u32,
+    height: u32,
+    base_luminance: &[f32],
+    detail: &[f32],
+    strengths: &[f32],
+    params: &AutoSharpParams,
+    baseline_artifact_ratio: f32,
+) -> Result<Vec<ProbeSample>, CoreError> {
+    let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
+    probe_strengths_from_detail(
+        strengths, &base, Some(base_luminance), detail,
+        params.sharpen_mode, params.metric_mode, params.artifact_metric,
+        baseline_artifact_ratio,
+    )
+}
+
+/// Probe loop using precomputed detail — no Gaussian blur, just apply + metric.
+#[allow(clippy::too_many_arguments)]
+fn probe_strengths_from_detail(
+    strengths: &[f32],
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    detail: &[f32],
+    sharpen_mode: SharpenMode,
+    metric_mode: MetricMode,
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+) -> Result<Vec<ProbeSample>, CoreError> {
+    use crate::sharpen;
+
+    let measure = |img: &LinearRgbImage| -> f32 {
+        crate::metrics::compute_selection_metric(img, artifact_metric)
+    };
+
+    let mut results = Vec::with_capacity(strengths.len());
+    match sharpen_mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance required for Lightness mode");
+            let n = (base.width() as usize) * (base.height() as usize);
+            let mut scratch = vec![0.0f32; n];
+
+            for &s in strengths {
+                sharpen::apply_detail_single_channel_into(lum, detail, s, &mut scratch);
+                let image = color::reconstruct_rgb_from_lightness_with_luma(
+                    base, &scratch, Some(lum),
+                );
+                let p_total = measure(&image);
+                let metric_value =
+                    compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                results.push(ProbeSample {
+                    strength: s, artifact_ratio: p_total, metric_value, breakdown: None,
+                });
+            }
+        }
+        SharpenMode::Rgb => {
+            for &s in strengths {
+                let image = sharpen::apply_detail_rgb(base, detail, s);
+                let p_total = measure(&image);
+                let metric_value =
+                    compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                results.push(ProbeSample {
+                    strength: s, artifact_ratio: p_total, metric_value, breakdown: None,
+                });
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// Internal result of the probing phase.
@@ -724,6 +834,7 @@ fn finish_pipeline(
         probe_pass_diagnostics,
         base_resize_quality: Some(prepared.base_resize_quality),
         effective_target_artifact_ratio: effective_p0,
+        used_staged_shrink: prepared.used_staged_shrink,
     };
 
     diagnostics.recommendations =
@@ -796,10 +907,11 @@ fn sharpen_image(
 
 /// Run all probe strengths and collect `ProbeSample`s.
 ///
-/// Each probe allocates a temporary sharpened image (W × H × 3 × 4 bytes) plus
-/// an equally-sized blur buffer inside the Gaussian pass.  In sequential mode
-/// these are freed before the next probe starts; with the `parallel` feature
-/// up to `rayon::current_num_threads()` images exist simultaneously.
+/// **Optimisation:** the Gaussian blur (the dominant cost) is computed once to
+/// derive a detail signal `D = input - blur(input)`.  Each probe then applies
+/// `out = input + s × D` — a trivial multiply-add — instead of recomputing the
+/// full separable blur for every strength.  This collapses probe cost from
+/// `N × (blur + apply)` to `1 × blur + N × apply`.
 #[allow(clippy::too_many_arguments)]
 fn probe_strengths(
     strengths: &[f32],
@@ -812,78 +924,114 @@ fn probe_strengths(
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
 ) -> Result<Vec<ProbeSample>, CoreError> {
-    let probe_one = |&s: &f32| -> Result<ProbeSample, CoreError> {
-        let result = sharpen_image(base, base_luminance, sharpen_mode, s, kernel)?;
-        let p_total = match metric_override {
-            Some(f) => f(&result.image),
-            None => crate::metrics::compute_selection_metric(&result.image, artifact_metric),
-        };
-        let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-        Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: None })
+    use crate::sharpen;
+
+    let measure = |img: &LinearRgbImage| -> f32 {
+        match metric_override {
+            Some(f) => f(img),
+            None => crate::metrics::compute_selection_metric(img, artifact_metric),
+        }
     };
 
-    #[cfg(feature = "parallel")]
-    {
-        use rayon::prelude::*;
-        strengths.par_iter().map(probe_one).collect()
-    }
+    match sharpen_mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
+            let w = base.width() as usize;
+            let h = base.height() as usize;
 
-    // Sequential path (WASM): reuse scratch buffers across probes to avoid
-    // repeated allocation of the Gaussian blur intermediates.
-    #[cfg(not(feature = "parallel"))]
-    {
-        if matches!(sharpen_mode, SharpenMode::Lightness) {
-            probe_strengths_lightness_sequential(
-                strengths, base, base_luminance.unwrap(), artifact_metric,
-                baseline_artifact_ratio, metric_mode, kernel, metric_override,
-            )
-        } else {
-            strengths.iter().map(probe_one).collect()
+            // One blur — the expensive part.
+            let detail = sharpen::compute_detail_single_channel(lum, w, h, kernel);
+
+            #[cfg(feature = "parallel")]
+            {
+                use rayon::prelude::*;
+                strengths
+                    .par_iter()
+                    .map(|&s| {
+                        let sharpened_l = sharpen::apply_detail_single_channel(lum, &detail, s);
+                        let image = color::reconstruct_rgb_from_lightness_with_luma(
+                            base, &sharpened_l, Some(lum),
+                        );
+                        let p_total = measure(&image);
+                        let metric_value =
+                            compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                        Ok(ProbeSample {
+                            strength: s,
+                            artifact_ratio: p_total,
+                            metric_value,
+                            breakdown: None,
+                        })
+                    })
+                    .collect()
+            }
+
+            #[cfg(not(feature = "parallel"))]
+            {
+                let n = w * h;
+                let mut scratch = vec![0.0f32; n];
+                let mut results = Vec::with_capacity(strengths.len());
+                for &s in strengths {
+                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut scratch);
+                    let image = color::reconstruct_rgb_from_lightness_with_luma(
+                        base, &scratch, Some(lum),
+                    );
+                    let p_total = measure(&image);
+                    let metric_value =
+                        compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                    results.push(ProbeSample {
+                        strength: s,
+                        artifact_ratio: p_total,
+                        metric_value,
+                        breakdown: None,
+                    });
+                }
+                Ok(results)
+            }
+        }
+
+        SharpenMode::Rgb => {
+            // One blur — the expensive part.
+            let detail = sharpen::compute_detail_rgb(base, kernel);
+
+            #[cfg(feature = "parallel")]
+            {
+                use rayon::prelude::*;
+                strengths
+                    .par_iter()
+                    .map(|&s| {
+                        let image = sharpen::apply_detail_rgb(base, &detail, s);
+                        let p_total = measure(&image);
+                        let metric_value =
+                            compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                        Ok(ProbeSample {
+                            strength: s,
+                            artifact_ratio: p_total,
+                            metric_value,
+                            breakdown: None,
+                        })
+                    })
+                    .collect()
+            }
+
+            #[cfg(not(feature = "parallel"))]
+            {
+                let mut results = Vec::with_capacity(strengths.len());
+                for &s in strengths {
+                    let image = sharpen::apply_detail_rgb(base, &detail, s);
+                    let p_total = measure(&image);
+                    let metric_value =
+                        compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                    results.push(ProbeSample {
+                        strength: s,
+                        artifact_ratio: p_total,
+                        metric_value,
+                        breakdown: None,
+                    });
+                }
+                Ok(results)
+            }
         }
     }
-}
-
-/// Optimized sequential Lightness-mode probe loop with scratch buffer reuse.
-///
-/// Avoids 2 × N allocations of W×H floats by reusing blur scratch buffers.
-#[cfg(not(feature = "parallel"))]
-#[allow(clippy::too_many_arguments)]
-fn probe_strengths_lightness_sequential(
-    strengths: &[f32],
-    base: &LinearRgbImage,
-    base_luminance: &[f32],
-    artifact_metric: ArtifactMetric,
-    baseline_artifact_ratio: f32,
-    metric_mode: MetricMode,
-    kernel: &[f32],
-    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
-) -> Result<Vec<ProbeSample>, CoreError> {
-    use crate::sharpen::unsharp_mask_single_channel_with_scratch;
-
-    let w = base.width() as usize;
-    let h = base.height() as usize;
-    let n = w * h;
-
-    // Pre-allocate scratch buffers once for all probes.
-    let mut scratch_a = vec![0.0f32; n];
-    let mut scratch_b = vec![0.0f32; n];
-
-    let mut results = Vec::with_capacity(strengths.len());
-    for &s in strengths {
-        let sharpened_l = unsharp_mask_single_channel_with_scratch(
-            base_luminance, w, h, s, kernel, &mut scratch_a, &mut scratch_b,
-        );
-        let image = color::reconstruct_rgb_from_lightness_with_luma(
-            base, sharpened_l, Some(base_luminance),
-        );
-        let p_total = match metric_override {
-            Some(f) => f(&image),
-            None => crate::metrics::compute_selection_metric(&image, artifact_metric),
-        };
-        let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-        results.push(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: None });
-    }
-    Ok(results)
 }
 
 /// Compute the metric value used for fitting, based on the configured mode.
