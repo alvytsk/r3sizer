@@ -193,10 +193,30 @@ pub(crate) fn gaussian_blur_single_channel(
     height: usize,
     kernel: &[f32],
 ) -> Vec<f32> {
+    let n = width * height;
+    let mut horiz = vec![0.0f32; n];
+    let mut vert = vec![0.0f32; n];
+    gaussian_blur_single_channel_into(data, width, height, kernel, &mut horiz, &mut vert);
+    vert
+}
+
+/// Like [`gaussian_blur_single_channel`] but writes into pre-allocated scratch
+/// buffers, avoiding allocation when called repeatedly (e.g. probe loop).
+///
+/// `horiz` and `vert` must each have length >= `width * height`.
+/// On return, `vert` contains the blurred result.
+#[allow(clippy::needless_range_loop)]
+pub(crate) fn gaussian_blur_single_channel_into(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    kernel: &[f32],
+    horiz: &mut [f32],
+    vert: &mut [f32],
+) {
     let radius = kernel.len() / 2;
 
     // --- Horizontal pass ---
-    let mut horiz = vec![0.0f32; width * height];
     for y in 0..height {
         let row = &data[y * width..(y + 1) * width];
         let out_row = &mut horiz[y * width..(y + 1) * width];
@@ -233,8 +253,6 @@ pub(crate) fn gaussian_blur_single_channel(
     }
 
     // --- Vertical pass ---
-    let mut vert = vec![0.0f32; width * height];
-
     // Top edge
     for y in 0..radius.min(height) {
         let out_row = &mut vert[y * width..(y + 1) * width];
@@ -288,8 +306,6 @@ pub(crate) fn gaussian_blur_single_channel(
             }
         }
     }
-
-    vert
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +393,34 @@ pub fn unsharp_mask_single_channel_with_kernel(
         *b = amt_plus_1 * s - amount * *b;
     }
     blurred
+}
+
+/// Like [`unsharp_mask_single_channel_with_kernel`] but uses pre-allocated
+/// scratch buffers to avoid allocation.
+///
+/// `scratch_a` and `scratch_b` must each have length >= `width * height`.
+/// Returns the sharpened data in `scratch_b` (borrows from the scratch).
+#[cfg_attr(feature = "parallel", allow(dead_code))]
+pub(crate) fn unsharp_mask_single_channel_with_scratch<'a>(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    amount: f32,
+    kernel: &[f32],
+    scratch_a: &mut [f32],
+    scratch_b: &'a mut [f32],
+) -> &'a [f32] {
+    debug_assert_eq!(data.len(), width * height);
+    let n = width * height;
+    debug_assert!(scratch_a.len() >= n);
+    debug_assert!(scratch_b.len() >= n);
+
+    gaussian_blur_single_channel_into(data, width, height, kernel, scratch_a, scratch_b);
+    let amt_plus_1 = 1.0 + amount;
+    for (b, &s) in scratch_b[..n].iter_mut().zip(data.iter()) {
+        *b = amt_plus_1 * s - amount * *b;
+    }
+    &scratch_b[..n]
 }
 
 // ---------------------------------------------------------------------------

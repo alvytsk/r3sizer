@@ -26,7 +26,7 @@ use crate::{
     solve::{find_sharpness_with_policy, find_sharpness_direct_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
+    MetricMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
     RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
     StageTiming, CoreError,
 };
@@ -34,9 +34,702 @@ use crate::{
 /// Pipeline-internal result of a sharpening step.
 struct SharpenResult {
     image: LinearRgbImage,
-    /// Luminance in linear domain, before clamp/transfer.
-    /// Hard invariant: luminance.len() == image.width() * image.height()
-    luminance: Vec<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// Base params fingerprint — tracks which params affect PreparedBase
+// ---------------------------------------------------------------------------
+
+/// Subset of [`AutoSharpParams`] that determines the [`PreparedBase`] result.
+///
+/// Two params with equal keys produce identical base preparation output.
+/// Fields not listed here (e.g. `probe_strengths`, `metric_weights`,
+/// `sharpen_mode`) only affect the probing/fitting phase, not the base.
+#[derive(Debug, Clone, PartialEq)]
+struct BaseParamsKey {
+    target: ImageSize,
+    target_artifact_ratio: f32,
+    enable_contrast_leveling: bool,
+    sharpen_strategy: SharpenStrategy,
+    input_color_space: Option<crate::InputColorSpace>,
+    resize_strategy: Option<crate::ResizeStrategy>,
+    evaluation_color_space: Option<crate::EvaluationColorSpace>,
+    artifact_metric: ArtifactMetric,
+    evaluator_config: Option<crate::EvaluatorConfig>,
+}
+
+impl BaseParamsKey {
+    fn from_params(params: &AutoSharpParams) -> Self {
+        Self {
+            target: ImageSize { width: params.target_width, height: params.target_height },
+            target_artifact_ratio: params.target_artifact_ratio,
+            enable_contrast_leveling: params.enable_contrast_leveling,
+            sharpen_strategy: params.sharpen_strategy.clone(),
+            input_color_space: params.input_color_space,
+            resize_strategy: params.resize_strategy.clone(),
+            evaluation_color_space: params.evaluation_color_space,
+            artifact_metric: params.artifact_metric,
+            evaluator_config: params.evaluator_config,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Two-phase pipeline: prepare_base + process_from_prepared
+// ---------------------------------------------------------------------------
+
+/// Cached intermediate state from the pre-probing pipeline stages.
+///
+/// Contains everything computed before the probing loop: the downscaled base
+/// image, classification, baseline metric, evaluator, and luminance.  This
+/// struct is produced by [`prepare_base`] and consumed by
+/// [`process_from_prepared`], allowing the expensive resize + classify +
+/// evaluator work (~1.5 s on a 24 MP image) to run at image-load time.
+pub struct PreparedBase {
+    pub(crate) base: LinearRgbImage,
+    pub(crate) input_size: ImageSize,
+    /// Target dimensions this base was prepared for.
+    pub target: ImageSize,
+    /// Fingerprint of the params that produced this base.
+    base_key: BaseParamsKey,
+    pub(crate) base_luminance: Option<Vec<f32>>,
+    pub(crate) gain_map: Option<crate::GainMap>,
+    pub(crate) region_map: Option<crate::RegionMap>,
+    pub(crate) region_coverage: Option<RegionCoverage>,
+    pub(crate) baseline_artifact_ratio: f32,
+    pub(crate) effective_p0: f32,
+    pub(crate) base_resize_quality: crate::BaseResizeQuality,
+    pub(crate) evaluator_cap: Option<f32>,
+    // Timing
+    pub(crate) resize_us: u64,
+    pub(crate) base_quality_us: u64,
+    pub(crate) contrast_us: u64,
+    pub(crate) classification_us: Option<u64>,
+    pub(crate) baseline_us: u64,
+    pub(crate) evaluator_us: Option<u64>,
+    pub(crate) ingress_us: Option<u64>,
+    // Diagnostics
+    pub(crate) input_ingress_diag: Option<crate::types::InputIngressDiagnostics>,
+    pub(crate) resize_strategy_diag: Option<crate::ResizeStrategyDiagnostics>,
+}
+
+impl PreparedBase {
+    /// Base image pixel data (linear RGB, f32 interleaved).
+    pub fn base_pixels(&self) -> &[f32] { self.base.pixels() }
+    /// Base image width.
+    pub fn base_width(&self) -> u32 { self.base.width() }
+    /// Base image height.
+    pub fn base_height(&self) -> u32 { self.base.height() }
+    /// Pre-computed luminance (always Some after prepare_base).
+    pub fn luminance(&self) -> Option<&[f32]> { self.base_luminance.as_deref() }
+    /// Baseline artifact ratio (before sharpening).
+    pub fn baseline_artifact_ratio(&self) -> f32 { self.baseline_artifact_ratio }
+    /// Effective P0 target (after envelope scaling).
+    pub fn effective_p0(&self) -> f32 { self.effective_p0 }
+    /// Whether this prepared base is valid for the given params.
+    ///
+    /// Returns `false` if the params differ in any field that affects base
+    /// preparation (target dimensions, strategy, contrast, classification,
+    /// color space, artifact metric, evaluator, or target artifact ratio).
+    pub fn matches_params(&self, params: &AutoSharpParams) -> bool {
+        self.base_key == BaseParamsKey::from_params(params)
+    }
+}
+
+/// Pre-compute all pipeline stages that don't depend on sharpen/probe params.
+///
+/// Call this at image-load time with the current params.  The returned
+/// [`PreparedBase`] can be reused across multiple [`process_from_prepared`]
+/// calls as long as the target dimensions and strategy haven't changed.
+pub fn prepare_base(
+    input: &LinearRgbImage,
+    params: &AutoSharpParams,
+    on_stage: &dyn Fn(&str),
+) -> Result<PreparedBase, CoreError> {
+    on_stage("validating");
+    params.validate()?;
+
+    let input_size = input.size();
+    let target = ImageSize { width: params.target_width, height: params.target_height };
+
+    // Input color-space ingress
+    let (input, input_ingress_diag, ingress_us) = {
+        if let Some(cs) = params.input_color_space {
+            let t0 = Instant::now();
+            let (prepared, diag) = crate::color_space::prepare_input(input, cs)?;
+            let us = t0.elapsed().as_micros() as u64;
+            (std::borrow::Cow::Owned(prepared), Some(diag), Some(us))
+        } else {
+            (std::borrow::Cow::Borrowed(input), None, None)
+        }
+    };
+
+    // Resize
+    on_stage("resizing");
+    let t0 = Instant::now();
+    let (downscaled, resize_strategy_diag) = {
+        if let Some(ref strategy) = params.resize_strategy {
+            let (img, diag) = crate::resize_strategy::downscale_with_strategy(&input, target, strategy)?;
+            (img, Some(diag))
+        } else {
+            (downscale(&input, target)?, None)
+        }
+    };
+    let resize_us = t0.elapsed().as_micros() as u64;
+
+    // Base resize quality
+    let t0 = Instant::now();
+    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled);
+    let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
+    let base_quality_us = t0.elapsed().as_micros() as u64;
+
+    // Contrast leveling
+    let t0 = Instant::now();
+    let mut base = downscaled;
+    let cl_params = ContrastLevelingParams { enabled: params.enable_contrast_leveling };
+    apply_contrast_leveling(&mut base, &cl_params)?;
+    let contrast_us = t0.elapsed().as_micros() as u64;
+
+    // Classification
+    on_stage("classifying");
+    let t0 = Instant::now();
+    let (gain_map, region_map, region_coverage, classification_us) =
+        match &params.sharpen_strategy {
+            SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
+                let rmap = classify(&base, classification);
+                let gmap = gain_map_from_region_map(&rmap, gain_table);
+                let cov = RegionCoverage::from_region_map(&rmap);
+                let us = t0.elapsed().as_micros() as u64;
+                (Some(gmap), Some(rmap), Some(cov), Some(us))
+            }
+            SharpenStrategy::Uniform => (None, None, None, None),
+        };
+
+    // Baseline measurement
+    on_stage("baseline");
+    let t0 = Instant::now();
+    let baseline_artifact_ratio = {
+        if let Some(cs) = params.evaluation_color_space {
+            crate::chroma_guard::evaluate_in_color_space(&base, cs)
+        } else {
+            match params.artifact_metric {
+                ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(&base),
+                ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(&base),
+            }
+        }
+    };
+    let baseline_us = t0.elapsed().as_micros() as u64;
+
+    // Luminance extraction (always extract — cheap, needed for both probing and metrics)
+    let base_luminance = Some(color::extract_luminance(&base));
+
+    // Evaluator
+    on_stage("evaluating");
+    let t0 = Instant::now();
+    let evaluator_cap = match &params.evaluator_config {
+        Some(crate::types::EvaluatorConfig::Heuristic) => {
+            let eval = crate::evaluator::HeuristicEvaluator;
+            crate::evaluator::QualityEvaluator::suggest_strength(&eval, &base, 0.8)
+        }
+        None => None,
+    };
+    let evaluator_us = if params.evaluator_config.is_some() {
+        Some(t0.elapsed().as_micros() as u64)
+    } else {
+        None
+    };
+
+    let base_key = BaseParamsKey::from_params(params);
+
+    Ok(PreparedBase {
+        base,
+        input_size,
+        target,
+        base_key,
+        base_luminance,
+        gain_map,
+        region_map,
+        region_coverage,
+        baseline_artifact_ratio,
+        effective_p0,
+        base_resize_quality,
+        evaluator_cap,
+        resize_us,
+        base_quality_us,
+        contrast_us,
+        classification_us,
+        baseline_us,
+        evaluator_us,
+        ingress_us,
+        input_ingress_diag,
+        resize_strategy_diag,
+    })
+}
+
+/// Run the pipeline from a pre-computed base (probing → fit → sharpen → output).
+///
+/// Use [`prepare_base`] to produce the `PreparedBase`, then call this with the
+/// same or updated sharpen/probe params.  The expensive resize + classify +
+/// evaluator work is skipped entirely.
+pub fn process_from_prepared(
+    prepared: &PreparedBase,
+    params: &AutoSharpParams,
+    on_stage: &dyn Fn(&str),
+) -> Result<ProcessOutput, CoreError> {
+    let probe_result = run_probes_for_prepared(prepared, params, on_stage)?;
+    finish_pipeline(prepared, params, probe_result, on_stage)
+}
+
+/// Like [`process_from_prepared`] but with externally-collected probe samples.
+///
+/// Use this when probes were computed in parallel across multiple workers.
+/// The `probing_us` field should reflect the wall-clock time of the parallel
+/// probing phase (not the sum of per-worker times).
+///
+/// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
+/// (useful for TwoPass parallel probing where JS resolved the dense window).
+pub fn process_from_prepared_with_probes(
+    prepared: &PreparedBase,
+    params: &AutoSharpParams,
+    probe_samples: Vec<ProbeSample>,
+    probing_us: u64,
+    pass_diagnostics: Option<ProbePassDiagnostics>,
+    on_stage: &dyn Fn(&str),
+) -> Result<ProcessOutput, CoreError> {
+    let probe_result = ProbeResult {
+        samples: probe_samples,
+        pass_diagnostics,
+        probing_us,
+    };
+    finish_pipeline(prepared, params, probe_result, on_stage)
+}
+
+// ---------------------------------------------------------------------------
+// Probe strength resolution — for parallel probing from JS
+// ---------------------------------------------------------------------------
+
+/// Resolve the initial probe strengths for the current config.
+///
+/// For [`ProbeConfig::TwoPass`], returns the coarse-pass strengths (first phase).
+/// For [`ProbeConfig::Explicit`] or [`ProbeConfig::Range`], returns all strengths.
+pub fn resolve_initial_strengths(params: &AutoSharpParams) -> Result<Vec<f32>, CoreError> {
+    match &params.probe_strengths {
+        ProbeConfig::TwoPass { coarse_count, coarse_min, coarse_max, .. } => {
+            Ok(linspace(*coarse_min, *coarse_max, *coarse_count))
+        }
+        other => other.resolve(),
+    }
+}
+
+/// Resolve the dense (second-pass) probe strengths from coarse results.
+///
+/// Only meaningful for [`ProbeConfig::TwoPass`].  Returns `Ok(None)` for other
+/// configs (no second pass needed).
+pub fn resolve_dense_strengths(
+    coarse_samples: &[ProbeSample],
+    params: &AutoSharpParams,
+    effective_p0: f32,
+) -> Result<Option<(Vec<f32>, ProbePassDiagnostics)>, CoreError> {
+    match &params.probe_strengths {
+        ProbeConfig::TwoPass {
+            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
+        } => {
+            let (dense_lo, dense_hi) = find_dense_window(
+                coarse_samples, effective_p0, *coarse_min, *coarse_max, *window_margin,
+            );
+            let dense_strengths = linspace(dense_lo, dense_hi, *dense_count);
+            let diag = ProbePassDiagnostics {
+                coarse_count: *coarse_count,
+                coarse_min: *coarse_min,
+                coarse_max: *coarse_max,
+                dense_count: *dense_count,
+                dense_min: dense_lo,
+                dense_max: dense_hi,
+            };
+            Ok(Some((dense_strengths, diag)))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Run probes against raw image data (for use in dedicated probe workers).
+///
+/// Each probe worker receives the base image pixels + luminance from the main
+/// worker and calls this function with its assigned subset of strengths.
+pub fn run_probes_standalone(
+    base_pixels: &[f32],
+    width: u32,
+    height: u32,
+    base_luminance: &[f32],
+    strengths: &[f32],
+    params: &AutoSharpParams,
+    baseline_artifact_ratio: f32,
+) -> Result<Vec<ProbeSample>, CoreError> {
+    let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
+    let kernel = make_kernel(params.sharpen_sigma)?;
+    probe_strengths(
+        strengths, &base, Some(base_luminance),
+        params.sharpen_mode, params.metric_mode, params.artifact_metric,
+        baseline_artifact_ratio, &kernel, None,
+    )
+}
+
+/// Internal result of the probing phase.
+struct ProbeResult {
+    samples: Vec<ProbeSample>,
+    pass_diagnostics: Option<ProbePassDiagnostics>,
+    probing_us: u64,
+}
+
+/// Run the probing phase against a PreparedBase.
+fn run_probes_for_prepared(
+    prepared: &PreparedBase,
+    params: &AutoSharpParams,
+    on_stage: &dyn Fn(&str),
+) -> Result<ProbeResult, CoreError> {
+    let base = &prepared.base;
+    let base_luminance = prepared.base_luminance.as_deref();
+    let baseline_artifact_ratio = prepared.baseline_artifact_ratio;
+    let effective_p0 = prepared.effective_p0;
+
+    let kernel = make_kernel(params.sharpen_sigma)?;
+
+    let eval_cs_fn = params.evaluation_color_space.map(|cs| {
+        move |img: &LinearRgbImage| -> f32 {
+            crate::chroma_guard::evaluate_in_color_space(img, cs)
+        }
+    });
+    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
+        eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
+
+    on_stage("probing");
+    let t0 = Instant::now();
+    let (samples, pass_diagnostics) = match &params.probe_strengths {
+        ProbeConfig::TwoPass {
+            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
+        } => {
+            run_two_pass_probing(
+                *coarse_count, *coarse_min, *coarse_max,
+                *dense_count, *window_margin,
+                effective_p0,
+                base, base_luminance,
+                params.sharpen_mode, params.metric_mode, params.artifact_metric,
+                baseline_artifact_ratio, &kernel, metric_override,
+            )?
+        }
+        _ => {
+            let strengths = params.probe_strengths.resolve()?;
+            let samples = probe_strengths(
+                &strengths, base, base_luminance,
+                params.sharpen_mode, params.metric_mode, params.artifact_metric,
+                baseline_artifact_ratio, &kernel, metric_override,
+            )?;
+            (samples, None)
+        }
+    };
+    let probing_us = t0.elapsed().as_micros() as u64;
+
+    Ok(ProbeResult { samples, pass_diagnostics, probing_us })
+}
+
+/// Post-probing pipeline: fit → solve → sharpen → metrics → diagnostics.
+fn finish_pipeline(
+    prepared: &PreparedBase,
+    params: &AutoSharpParams,
+    probe_result: ProbeResult,
+    on_stage: &dyn Fn(&str),
+) -> Result<ProcessOutput, CoreError> {
+    let pipeline_start = Instant::now();
+
+    let base = &prepared.base;
+    let base_luminance = prepared.base_luminance.as_deref();
+    let baseline_artifact_ratio = prepared.baseline_artifact_ratio;
+    let effective_p0 = prepared.effective_p0;
+
+    let kernel = make_kernel(params.sharpen_sigma)?;
+
+    let eval_cs_fn = params.evaluation_color_space.map(|cs| {
+        move |img: &LinearRgbImage| -> f32 {
+            crate::chroma_guard::evaluate_in_color_space(img, cs)
+        }
+    });
+    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
+        eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
+
+    let ProbeResult { samples: probe_samples, pass_diagnostics: probe_pass_diagnostics, probing_us } = probe_result;
+
+    // --- Fit + Solve ---
+    let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
+        0.0_f64
+    } else {
+        probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05)
+    };
+    let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
+    let p0 = effective_p0 as f64;
+
+    on_stage("fitting");
+    let mut fit_data: Vec<(f64, f64)> = probe_samples
+        .iter()
+        .map(|ps| (ps.strength as f64, ps.metric_value as f64))
+        .collect();
+    if matches!(params.metric_mode, MetricMode::RelativeToBase) {
+        let first_s = probe_samples.first().map(|p| p.strength).unwrap_or(1.0);
+        if first_s > 1e-6 {
+            fit_data.insert(0, (0.0, 0.0));
+        }
+    }
+
+    let (monotonic, quasi_monotonic) = check_monotonicity(&probe_samples);
+
+    let t0 = Instant::now();
+    let (solve_result, fit_status, fit_coefficients, fit_quality) = match params.fit_strategy {
+        FitStrategy::DirectSearch => {
+            let result = find_sharpness_direct_with_policy(
+                &probe_samples, effective_p0, params.selection_policy,
+            )?;
+            (result, FitStatus::Skipped, None, None)
+        }
+        FitStrategy::Cubic => {
+            match fit_cubic_with_quality(&fit_data) {
+                Ok((poly, quality)) => {
+                    let result = find_sharpness_with_policy(
+                        &poly, p0, s_min, s_max, &probe_samples, params.selection_policy,
+                    )?;
+                    if quality.r_squared < 0.85
+                        && matches!(result.selection_mode, SelectionMode::PolynomialRoot)
+                    {
+                        let direct = find_sharpness_direct_with_policy(
+                            &probe_samples, effective_p0, params.selection_policy,
+                        )?;
+                        (direct, FitStatus::Success, Some(poly), Some(quality))
+                    } else {
+                        (result, FitStatus::Success, Some(poly), Some(quality))
+                    }
+                }
+                Err(fit_err) => {
+                    let result = find_sharpness_direct_with_policy(
+                        &probe_samples, effective_p0, params.selection_policy,
+                    )?;
+                    (result, FitStatus::Failed { reason: fit_err.to_string() }, None, None)
+                }
+            }
+        }
+    };
+    let fit_us = t0.elapsed().as_micros() as u64;
+
+    // --- LOO stability ---
+    on_stage("robustness");
+    let t0 = Instant::now();
+    let (loo_stable, max_loo_root_change) = if fit_coefficients.is_some() {
+        let primary_s = solve_result.selected_strength as f64;
+        loo_stability(&fit_data, p0, s_min, s_max, primary_s)
+    } else {
+        (true, 0.0)
+    };
+    let robustness_us = t0.elapsed().as_micros() as u64;
+
+    let r_squared_ok = fit_quality.is_none_or(|q| q.r_squared > 0.85);
+    let well_conditioned = fit_quality.is_none_or(|q| q.min_pivot > 1e-8);
+    let robustness = Some(RobustnessFlags {
+        monotonic, quasi_monotonic, r_squared_ok, well_conditioned, loo_stable, max_loo_root_change,
+    });
+
+    let budget_reachable_baseline = match params.metric_mode {
+        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= effective_p0,
+        MetricMode::RelativeToBase => true,
+    };
+    let budget_reachable = budget_reachable_baseline
+        && !matches!(solve_result.selection_mode, SelectionMode::LeastBadSample);
+    let selection_mode = if !budget_reachable_baseline {
+        SelectionMode::BudgetUnreachable
+    } else {
+        solve_result.selection_mode
+    };
+
+    let fallback_reason = determine_fallback_reason(
+        &selection_mode, &fit_status, budget_reachable_baseline,
+        monotonic, r_squared_ok, loo_stable, params.fit_strategy,
+        &solve_result.crossing_status,
+    );
+
+    // Evaluator cap
+    let selected_strength = match prepared.evaluator_cap {
+        Some(cap) if solve_result.selected_strength > cap => cap,
+        _ => solve_result.selected_strength,
+    };
+
+    // --- Final sharpening ---
+    on_stage("sharpening");
+    let t0 = Instant::now();
+    let _chroma_guard_diag;
+    let (mut final_image, adaptive_validation, adaptive_validation_us) =
+        match (&params.sharpen_strategy, &prepared.gain_map) {
+            (SharpenStrategy::Uniform, _) | (_, None) => {
+                let result = sharpen_image(
+                    base, base_luminance, params.sharpen_mode,
+                    selected_strength, &kernel,
+                )?;
+                (result.image, None, None)
+            }
+            (
+                SharpenStrategy::ContentAdaptive {
+                    max_backoff_iterations, backoff_scale_factor, ..
+                },
+                Some(gm),
+            ) => {
+                let effective_max_backoff = if budget_reachable { *max_backoff_iterations } else { 0 };
+                adaptive_sharpen_with_validation(
+                    base, base_luminance, params.sharpen_mode,
+                    selected_strength, gm, params.sharpen_sigma, effective_p0,
+                    params.artifact_metric, params.metric_mode,
+                    baseline_artifact_ratio, effective_max_backoff,
+                    *backoff_scale_factor, params.evaluation_color_space,
+                )?
+            }
+        };
+
+    // Chroma guard
+    {
+        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift, chroma_region_factors, saturation_guard,
+        }) = &params.experimental_sharpen_mode {
+            let (guarded, cg_diag) = crate::chroma_guard::apply_chroma_guard(
+                base, &final_image, *max_chroma_shift,
+                prepared.region_map.as_ref(),
+                chroma_region_factors.as_ref(),
+                saturation_guard.as_ref(),
+            )?;
+            final_image = guarded;
+            _chroma_guard_diag = Some(cg_diag);
+        } else {
+            _chroma_guard_diag = None;
+        }
+    }
+    let final_sharpen_us = t0.elapsed().as_micros() as u64;
+
+    // --- Metrics on final image ---
+    let fallback_luma;
+    let base_luma = match prepared.base_luminance.as_deref() {
+        Some(l) => l,
+        None => { fallback_luma = color::extract_luminance(base); &fallback_luma }
+    };
+    let final_luma = color::extract_luminance(&final_image);
+    let final_breakdown = crate::metrics::compute_metric_breakdown(
+        &final_image, base, base_luma, &final_luma,
+        params.artifact_metric, &params.metric_weights,
+    );
+    let measured_artifact_ratio = match metric_override {
+        Some(f) => f(&final_image),
+        None => final_breakdown.selection_score,
+    };
+    let measured_metric_value = compute_metric_value(
+        measured_artifact_ratio, baseline_artifact_ratio, params.metric_mode,
+    );
+
+    // Evaluator (full)
+    let (_evaluator_result, _evaluator_process_us) = {
+        if let Some(ref eval_config) = params.evaluator_config {
+            let t0 = Instant::now();
+            let result = match eval_config {
+                crate::types::EvaluatorConfig::Heuristic => {
+                    let eval = crate::evaluator::HeuristicEvaluator;
+                    crate::evaluator::QualityEvaluator::evaluate(&eval, base, &final_image, selected_strength)
+                }
+            };
+            let us = t0.elapsed().as_micros() as u64;
+            (Some(result), Some(us))
+        } else {
+            (None, None)
+        }
+    };
+
+    // --- Clamp ---
+    on_stage("finalizing");
+    let t0 = Instant::now();
+    match params.output_clamp {
+        ClampPolicy::Clamp => {
+            for v in final_image.pixels_mut() {
+                *v = v.clamp(0.0, 1.0);
+            }
+        }
+        ClampPolicy::Normalize => {
+            let max_val = final_image.pixels().iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            if max_val > 0.0 {
+                for v in final_image.pixels_mut() {
+                    *v = (*v / max_val).max(0.0);
+                }
+            } else {
+                for v in final_image.pixels_mut() {
+                    *v = 0.0;
+                }
+            }
+        }
+    }
+    let clamp_us = t0.elapsed().as_micros() as u64;
+    let total_us = pipeline_start.elapsed().as_micros() as u64;
+
+    // --- Assemble diagnostics ---
+    // Total timing includes pre-computed stages from PreparedBase.
+    let full_total_us = total_us
+        + prepared.resize_us + prepared.base_quality_us + prepared.contrast_us
+        + prepared.classification_us.unwrap_or(0) + prepared.baseline_us
+        + prepared.evaluator_us.unwrap_or(0) + prepared.ingress_us.unwrap_or(0);
+
+    let mut diagnostics = AutoSharpDiagnostics {
+        input_size: prepared.input_size,
+        output_size: prepared.target,
+        sharpen_mode: params.sharpen_mode,
+        metric_mode: params.metric_mode,
+        artifact_metric: params.artifact_metric,
+        selection_policy: params.selection_policy,
+        target_artifact_ratio: params.target_artifact_ratio,
+        baseline_artifact_ratio,
+        probe_samples,
+        fit_status,
+        fit_coefficients,
+        fit_quality,
+        crossing_status: solve_result.crossing_status,
+        robustness,
+        selected_strength,
+        selection_mode,
+        fallback_reason,
+        budget_reachable,
+        measured_artifact_ratio,
+        measured_metric_value,
+        metric_components: Some(final_breakdown),
+        metric_weights: params.metric_weights,
+        region_coverage: prepared.region_coverage,
+        adaptive_validation,
+        timing: StageTiming {
+            resize_us: prepared.resize_us,
+            contrast_us: prepared.contrast_us,
+            baseline_us: prepared.baseline_us,
+            probing_us,
+            fit_us,
+            robustness_us,
+            final_sharpen_us,
+            clamp_us,
+            total_us: full_total_us,
+            classification_us: prepared.classification_us,
+            adaptive_validation_us,
+            ingress_us: prepared.ingress_us,
+            evaluator_us: prepared.evaluator_us,
+            base_quality_us: Some(prepared.base_quality_us),
+        },
+        input_ingress: prepared.input_ingress_diag,
+        resize_strategy_diagnostics: prepared.resize_strategy_diag.clone(),  // contains Vec
+        chroma_guard: _chroma_guard_diag,
+        evaluator_result: _evaluator_result,
+        recommendations: Vec::new(),
+        probe_pass_diagnostics,
+        base_resize_quality: Some(prepared.base_resize_quality),
+        effective_target_artifact_ratio: effective_p0,
+    };
+
+    diagnostics.recommendations =
+        crate::recommendations::generate_recommendations(&diagnostics, params);
+
+    Ok(ProcessOutput { image: final_image, diagnostics })
 }
 
 /// Run the full automatic-sharpness downscale pipeline.
@@ -60,541 +753,16 @@ pub fn process_auto_sharp_downscale(
 /// The callback receives a short lowercase stage name such as `"resizing"`,
 /// `"probing"`, or `"sharpening"`.  WASM callers use this to post progress
 /// messages back to the main thread.
+///
+/// Internally delegates to [`prepare_base`] + [`process_from_prepared`] so
+/// that there is a single implementation of the pipeline logic.
 pub fn process_auto_sharp_downscale_with_progress(
     input: &LinearRgbImage,
     params: &AutoSharpParams,
     on_stage: &dyn Fn(&str),
 ) -> Result<ProcessOutput, CoreError> {
-    // -------------------------------------------------------------------
-    // 1. Validate
-    // -------------------------------------------------------------------
-    on_stage("validating");
-    params.validate()?;
-
-    let pipeline_start = Instant::now();
-    let input_size = input.size();
-    let target = ImageSize { width: params.target_width, height: params.target_height };
-
-    // -------------------------------------------------------------------
-    // 1.5 (experimental) Input color-space ingress
-    // -------------------------------------------------------------------
-    let (input, _input_ingress_diag, _ingress_us) = {
-        if let Some(cs) = params.input_color_space {
-            let t0 = Instant::now();
-            let (prepared, diag) = crate::color_space::prepare_input(input, cs)?;
-            let us = t0.elapsed().as_micros() as u64;
-            (std::borrow::Cow::Owned(prepared), Some(diag), Some(us))
-        } else {
-            (std::borrow::Cow::Borrowed(input), None, None)
-        }
-    };
-    // -------------------------------------------------------------------
-    // 2. Downscale in linear space
-    // -------------------------------------------------------------------
-    on_stage("resizing");
-    let t0 = Instant::now();
-    let (downscaled, _resize_strategy_diag) = {
-        if let Some(ref strategy) = params.resize_strategy {
-            let (img, diag) = crate::resize_strategy::downscale_with_strategy(&input, target, strategy)?;
-            (img, Some(diag))
-        } else {
-            (downscale(&input, target)?, None)
-        }
-    };
-    let resize_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 2.5. Base resize quality scoring (step 4)
-    // -------------------------------------------------------------------
-    let t0 = Instant::now();
-    let base_resize_quality = crate::base_quality::score_base_resize(&input, &downscaled);
-    let effective_p0 = params.target_artifact_ratio * base_resize_quality.envelope_scale;
-    let base_quality_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 3. Optional contrast leveling
-    // -------------------------------------------------------------------
-    let t0 = Instant::now();
-    let mut base = downscaled;
-    let cl_params = ContrastLevelingParams { enabled: params.enable_contrast_leveling };
-    apply_contrast_leveling(&mut base, &cl_params)?;
-    let contrast_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 2.5. Region classification (ContentAdaptive only)
-    // -------------------------------------------------------------------
-    let t0 = Instant::now();
-    let (gain_map, region_map, region_coverage, classification_us) =
-        match &params.sharpen_strategy {
-            SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
-                let rmap = classify(&base, classification);
-                let gmap = gain_map_from_region_map(&rmap, gain_table);
-                let cov = RegionCoverage::from_region_map(&rmap);
-                let us = t0.elapsed().as_micros() as u64;
-                (Some(gmap), Some(rmap), Some(cov), Some(us))
-            }
-            SharpenStrategy::Uniform => (None, None, None, None),
-        };
-
-    // -------------------------------------------------------------------
-    // 4. Measure baseline artifact ratio (before any sharpening)
-    // -------------------------------------------------------------------
-    on_stage("baseline");
-    let t0 = Instant::now();
-    let measure = |img: &LinearRgbImage| -> f32 {
-        if let Some(cs) = params.evaluation_color_space {
-            return crate::chroma_guard::evaluate_in_color_space(img, cs);
-        }
-        match params.artifact_metric {
-            ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(img),
-            ArtifactMetric::PixelOutOfGamutRatio => crate::metrics::pixel_out_of_gamut_ratio(img),
-        }
-    };
-    let baseline_artifact_ratio = measure(&base);
-    let baseline_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 5. Probe sharpening strengths
-    // -------------------------------------------------------------------
-    on_stage("probing");
-    let t0 = Instant::now();
-
-    // Build the Gaussian kernel once — sigma is constant across all probes.
-    let kernel = make_kernel(params.sharpen_sigma)?;
-
-    // Extract luminance once if using lightness mode (avoids recomputation per probe).
-    let base_luminance = if matches!(params.sharpen_mode, SharpenMode::Lightness) {
-        Some(color::extract_luminance(&base))
-    } else {
-        None
-    };
-
-    // Build metric override for experimental evaluation color space.
-    let eval_cs_fn = params.evaluation_color_space.map(|cs| {
-        move |img: &LinearRgbImage| -> f32 {
-            crate::chroma_guard::evaluate_in_color_space(img, cs)
-        }
-    });
-    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> =
-        eval_cs_fn.as_ref().map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
-
-    // Dispatch: two-pass adaptive placement or static resolve.
-    let (probe_samples, probe_pass_diagnostics) = match &params.probe_strengths {
-        ProbeConfig::TwoPass {
-            coarse_count, coarse_min, coarse_max, dense_count, window_margin,
-        } => {
-            run_two_pass_probing(
-                *coarse_count, *coarse_min, *coarse_max,
-                *dense_count, *window_margin,
-                effective_p0,
-                &base, base_luminance.as_deref(),
-                params.sharpen_mode, params.metric_mode, params.artifact_metric,
-                baseline_artifact_ratio, &kernel, &params.metric_weights, metric_override,
-            )?
-        }
-        _ => {
-            let strengths = params.probe_strengths.resolve()?;
-            let samples = probe_strengths(
-                &strengths,
-                &base,
-                base_luminance.as_deref(),
-                params.sharpen_mode,
-                params.metric_mode,
-                params.artifact_metric,
-                baseline_artifact_ratio,
-                &kernel,
-                &params.metric_weights,
-                metric_override,
-            )?;
-            (samples, None)
-        }
-    };
-    let probing_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 6–7. Fit + solve (or direct search)
-    // -------------------------------------------------------------------
-    // In RelativeToBase mode P(0)=0 < P0 is always true, so roots below the first
-    // probe are physically valid. Allow s_min=0 so the solver can find crossings
-    // that fall between the implicit anchor and the first non-zero probe.
-    let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
-        0.0_f64
-    } else {
-        probe_samples.first().map(|s| s.strength as f64).unwrap_or(0.05)
-    };
-    let s_max = probe_samples.last().map(|s| s.strength as f64).unwrap_or(3.0);
-    let p0 = effective_p0 as f64;
-
-    on_stage("fitting");
-
-    // Build fit data: (strength, metric_value) pairs.
-    // In RelativeToBase mode, prepend the known anchor (0.0, 0.0).
-    let mut fit_data: Vec<(f64, f64)> = probe_samples
-        .iter()
-        .map(|ps| (ps.strength as f64, ps.metric_value as f64))
-        .collect();
-    if matches!(params.metric_mode, MetricMode::RelativeToBase) {
-        // Prepend the theoretical anchor P(0)=0 unless the first probe is already
-        // at s=0 (adding a duplicate row degrades the Vandermonde fit quality).
-        let first_s = probe_samples.first().map(|p| p.strength).unwrap_or(1.0);
-        if first_s > 1e-6 {
-            fit_data.insert(0, (0.0, 0.0));
-        }
-    }
-
-    // Monotonicity check on probe samples.
-    let (monotonic, quasi_monotonic) = check_monotonicity(&probe_samples);
-
-    let t0 = Instant::now();
-    let (solve_result, fit_status, fit_coefficients, fit_quality) = match params.fit_strategy {
-        FitStrategy::DirectSearch => {
-            let result = find_sharpness_direct_with_policy(
-                &probe_samples,
-                effective_p0,
-                params.selection_policy,
-            )?;
-            (result, FitStatus::Skipped, None, None)
-        }
-
-        FitStrategy::Cubic => {
-            match fit_cubic_with_quality(&fit_data) {
-                Ok((poly, quality)) => {
-                    let result = find_sharpness_with_policy(
-                        &poly, p0, s_min, s_max, &probe_samples, params.selection_policy,
-                    )?;
-                    // R² quality gate: if the cubic fit is poor, the polynomial
-                    // may produce false crossings (e.g. step-like P(s) curves).
-                    // Fall back to direct search; keep fit data for diagnostics.
-                    if quality.r_squared < 0.85
-                        && matches!(result.selection_mode, SelectionMode::PolynomialRoot)
-                    {
-                        let direct = find_sharpness_direct_with_policy(
-                            &probe_samples, effective_p0, params.selection_policy,
-                        )?;
-                        (direct, FitStatus::Success, Some(poly), Some(quality))
-                    } else {
-                        (result, FitStatus::Success, Some(poly), Some(quality))
-                    }
-                }
-                Err(fit_err) => {
-                    let result = find_sharpness_direct_with_policy(
-                        &probe_samples,
-                        effective_p0,
-                        params.selection_policy,
-                    )?;
-                    (
-                        result,
-                        FitStatus::Failed { reason: fit_err.to_string() },
-                        None,
-                        None,
-                    )
-                }
-            }
-        }
-    };
-    let fit_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // LOO stability check
-    // -------------------------------------------------------------------
-    on_stage("robustness");
-    let t0 = Instant::now();
-    let loo_stable;
-    let max_loo_root_change;
-    if fit_coefficients.is_some() {
-        let primary_s = solve_result.selected_strength as f64;
-        let (stable, max_change) =
-            loo_stability(&fit_data, p0, s_min, s_max, primary_s);
-        loo_stable = stable;
-        max_loo_root_change = max_change;
-    } else {
-        loo_stable = true; // no fit → nothing to check
-        max_loo_root_change = 0.0;
-    }
-    let robustness_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // Robustness flags
-    // -------------------------------------------------------------------
-    let r_squared_ok = fit_quality.is_none_or(|q| q.r_squared > 0.85);
-    let well_conditioned = fit_quality.is_none_or(|q| q.min_pivot > 1e-8);
-
-    let robustness = Some(RobustnessFlags {
-        monotonic,
-        quasi_monotonic,
-        r_squared_ok,
-        well_conditioned,
-        loo_stable,
-        max_loo_root_change,
-    });
-
-    // -------------------------------------------------------------------
-    // Budget reachability
-    // -------------------------------------------------------------------
-    let budget_reachable_baseline = match params.metric_mode {
-        MetricMode::AbsoluteTotal => baseline_artifact_ratio <= effective_p0,
-        MetricMode::RelativeToBase => true, // by construction, relative starts at 0
-    };
-    let budget_reachable = budget_reachable_baseline
-        && !matches!(solve_result.selection_mode, SelectionMode::LeastBadSample);
-
-    // Override selection mode if budget is structurally unreachable due to baseline.
-    let selection_mode = if !budget_reachable_baseline {
-        SelectionMode::BudgetUnreachable
-    } else {
-        solve_result.selection_mode
-    };
-
-    // -------------------------------------------------------------------
-    // Fallback reason
-    // -------------------------------------------------------------------
-    let fallback_reason = determine_fallback_reason(
-        &selection_mode,
-        &fit_status,
-        budget_reachable_baseline,
-        monotonic,
-        r_squared_ok,
-        loo_stable,
-        params.fit_strategy,
-        &solve_result.crossing_status,
-    );
-
-    // -------------------------------------------------------------------
-    // 7.5 Evaluator strength cap (runs before final sharpening)
-    // -------------------------------------------------------------------
-    // When the evaluator is active, ask it for a suggested strength based
-    // on image content features.  If the solver picked higher than the
-    // evaluator recommends, cap it — the evaluator acts as a perceptual
-    // safety net that the gamut metric alone cannot provide (e.g. portraits
-    // where gamut excursion stays low but texture/halo damage is visible).
-    let evaluator_cap = match &params.evaluator_config {
-        Some(crate::types::EvaluatorConfig::Heuristic) => {
-            let eval = crate::evaluator::HeuristicEvaluator;
-            crate::evaluator::QualityEvaluator::suggest_strength(&eval, &base, 0.8)
-        }
-        None => None,
-    };
-    let selected_strength = match evaluator_cap {
-        Some(cap) if solve_result.selected_strength > cap => cap,
-        _ => solve_result.selected_strength,
-    };
-
-    // -------------------------------------------------------------------
-    // 8. Final sharpening (strategy-dependent)
-    // -------------------------------------------------------------------
-    on_stage("sharpening");
-    let t0 = Instant::now();
-
-    // Experimental: chroma guard sharpening overrides the standard path.
-    let _chroma_guard_diag;
-
-    let (mut final_image, adaptive_validation, adaptive_validation_us) =
-        match (&params.sharpen_strategy, &gain_map) {
-            (SharpenStrategy::Uniform, _) | (_, None) => {
-                let result = sharpen_image(
-                    &base, base_luminance.as_deref(),
-                    params.sharpen_mode,
-                    selected_strength, &kernel,
-                )?;
-                (result.image, None, None)
-            }
-            (
-                SharpenStrategy::ContentAdaptive {
-                    max_backoff_iterations,
-                    backoff_scale_factor,
-                    ..
-                },
-                Some(gm),
-            ) => {
-                // When budget is already unreachable (fallback mode), backoff would
-                // only reduce sharpening further without ever meeting P0. Skip it.
-                let effective_max_backoff = if budget_reachable { *max_backoff_iterations } else { 0 };
-                adaptive_sharpen_with_validation(
-                    &base,
-                    base_luminance.as_deref(),
-                    params.sharpen_mode,
-                    selected_strength,
-                    gm,
-                    params.sharpen_sigma,
-                    effective_p0,
-                    params.artifact_metric,
-                    params.metric_mode,
-                    baseline_artifact_ratio,
-                    effective_max_backoff,
-                    *backoff_scale_factor,
-                    params.evaluation_color_space,
-                )?
-            }
-        };
-    // Chroma guard: post-process the already-sharpened image.
-    // Compares chroma shift vs. the original base and soft-clamps where needed.
-    // Does NOT re-sharpen — preserves the content-adaptive gain map and backoff.
-    {
-        if let Some(crate::types::ExperimentalSharpenMode::LumaPlusChromaGuard {
-            max_chroma_shift, chroma_region_factors, saturation_guard,
-        }) = &params.experimental_sharpen_mode {
-            let (guarded, cg_diag) = crate::chroma_guard::apply_chroma_guard(
-                &base, &final_image, *max_chroma_shift,
-                region_map.as_ref(),
-                chroma_region_factors.as_ref(),
-                saturation_guard.as_ref(),
-            )?;
-            final_image = guarded;
-            _chroma_guard_diag = Some(cg_diag);
-        } else {
-            _chroma_guard_diag = None;
-        }
-    }
-    let final_sharpen_us = t0.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 9. Measure actual artifact ratio (pre-clamp)
-    // -------------------------------------------------------------------
-    let base_luma_for_metrics: Vec<f32> = match base_luminance.as_deref() {
-        Some(l) => l.to_vec(),
-        None => color::extract_luminance(&base),
-    };
-    let final_luma = color::extract_luminance(&final_image);
-    let final_breakdown = crate::metrics::compute_metric_breakdown(
-        &final_image,
-        &base,
-        &base_luma_for_metrics,
-        &final_luma,
-        params.artifact_metric,
-        &params.metric_weights,
-    );
-    let measured_artifact_ratio = match metric_override {
-        Some(f) => f(&final_image),
-        None => final_breakdown.selection_score,
-    };
-    let measured_metric_value = compute_metric_value(
-        measured_artifact_ratio,
-        baseline_artifact_ratio,
-        params.metric_mode,
-    );
-
-    // -------------------------------------------------------------------
-    // 9.5 (experimental) Run quality evaluator
-    // -------------------------------------------------------------------
-    let (_evaluator_result, _evaluator_us) = {
-        if let Some(ref eval_config) = params.evaluator_config {
-            let t0 = Instant::now();
-            let result = match eval_config {
-                crate::types::EvaluatorConfig::Heuristic => {
-                    let eval = crate::evaluator::HeuristicEvaluator;
-                    crate::evaluator::QualityEvaluator::evaluate(&eval, &base, &final_image, selected_strength)
-                }
-            };
-            let us = t0.elapsed().as_micros() as u64;
-            (Some(result), Some(us))
-        } else {
-            (None, None)
-        }
-    };
-
-    // -------------------------------------------------------------------
-    // 10. Apply clamp policy
-    // -------------------------------------------------------------------
-    on_stage("finalizing");
-    let t0 = Instant::now();
-    match params.output_clamp {
-        ClampPolicy::Clamp => {
-            for v in final_image.pixels_mut() {
-                *v = v.clamp(0.0, 1.0);
-            }
-        }
-        ClampPolicy::Normalize => {
-            let max_val = final_image
-                .pixels()
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
-            if max_val > 0.0 {
-                for v in final_image.pixels_mut() {
-                    // Divide by the positive maximum, then clamp negatives
-                    // that can survive from sharpening ringing.  Without this
-                    // clamp, negative values would produce NaN during the
-                    // subsequent linear→sRGB pow(x, 1/2.4) conversion.
-                    *v = (*v / max_val).max(0.0);
-                }
-            } else {
-                // Every channel value is <= 0 (degenerate image).
-                // Clamp to zero to avoid NaN in sRGB conversion.
-                for v in final_image.pixels_mut() {
-                    *v = 0.0;
-                }
-            }
-        }
-    }
-    let clamp_us = t0.elapsed().as_micros() as u64;
-    let total_us = pipeline_start.elapsed().as_micros() as u64;
-
-    // -------------------------------------------------------------------
-    // 11. Return
-    // -------------------------------------------------------------------
-    // Strip per-probe breakdowns in Summary mode to reduce serialization size.
-    let mut probe_samples = probe_samples;
-    if matches!(params.diagnostics_level, crate::DiagnosticsLevel::Summary) {
-        for sample in &mut probe_samples {
-            sample.breakdown = None;
-        }
-    }
-
-    let mut diagnostics = AutoSharpDiagnostics {
-        input_size,
-        output_size: target,
-        sharpen_mode: params.sharpen_mode,
-        metric_mode: params.metric_mode,
-        artifact_metric: params.artifact_metric,
-        selection_policy: params.selection_policy,
-        target_artifact_ratio: params.target_artifact_ratio,
-        baseline_artifact_ratio,
-        probe_samples,
-        fit_status,
-        fit_coefficients,
-        fit_quality,
-        crossing_status: solve_result.crossing_status,
-        robustness,
-        selected_strength,
-        selection_mode,
-        fallback_reason,
-        budget_reachable,
-        measured_artifact_ratio,
-        measured_metric_value,
-        metric_components: Some(final_breakdown),
-        metric_weights: params.metric_weights,
-        region_coverage,
-        adaptive_validation,
-        timing: StageTiming {
-            resize_us,
-            contrast_us,
-            baseline_us,
-            probing_us,
-            fit_us,
-            robustness_us,
-            final_sharpen_us,
-            clamp_us,
-            total_us,
-            classification_us,
-            adaptive_validation_us,
-            ingress_us: _ingress_us,
-            evaluator_us: _evaluator_us,
-            base_quality_us: Some(base_quality_us),
-        },
-        input_ingress: _input_ingress_diag,
-        resize_strategy_diagnostics: _resize_strategy_diag,
-        chroma_guard: _chroma_guard_diag,
-        evaluator_result: _evaluator_result,
-        recommendations: Vec::new(),
-        probe_pass_diagnostics,
-        base_resize_quality: Some(base_resize_quality),
-        effective_target_artifact_ratio: effective_p0,
-    };
-
-    diagnostics.recommendations =
-        crate::recommendations::generate_recommendations(&diagnostics, params);
-
-    Ok(ProcessOutput { image: final_image, diagnostics })
+    let prepared = prepare_base(input, params, on_stage)?;
+    process_from_prepared(&prepared, params, on_stage)
 }
 
 // ---------------------------------------------------------------------------
@@ -613,21 +781,17 @@ fn sharpen_image(
     amount: f32,
     kernel: &[f32],
 ) -> Result<SharpenResult, CoreError> {
-    match mode {
-        SharpenMode::Rgb => {
-            let image = unsharp_mask_with_kernel(base, amount, kernel);
-            let luminance = color::extract_luminance(&image);
-            Ok(SharpenResult { image, luminance })
-        }
+    let image = match mode {
+        SharpenMode::Rgb => unsharp_mask_with_kernel(base, amount, kernel),
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
             let w = base.width() as usize;
             let h = base.height() as usize;
             let sharpened_l = unsharp_mask_single_channel_with_kernel(lum, w, h, amount, kernel);
-            let image = color::reconstruct_rgb_from_lightness(base, &sharpened_l);
-            Ok(SharpenResult { image, luminance: sharpened_l })
+            color::reconstruct_rgb_from_lightness_with_luma(base, &sharpened_l, Some(lum))
         }
-    }
+    };
+    Ok(SharpenResult { image })
 }
 
 /// Run all probe strengths and collect `ProbeSample`s.
@@ -646,31 +810,16 @@ fn probe_strengths(
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     kernel: &[f32],
-    weights: &MetricWeights,
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
 ) -> Result<Vec<ProbeSample>, CoreError> {
-    // Base luminance for metric evaluation (needed even in RGB mode for v0.2 metrics).
-    let base_luma_for_metrics: Vec<f32> = match base_luminance {
-        Some(l) => l.to_vec(),
-        None => color::extract_luminance(base),
-    };
-
     let probe_one = |&s: &f32| -> Result<ProbeSample, CoreError> {
         let result = sharpen_image(base, base_luminance, sharpen_mode, s, kernel)?;
-        let breakdown = crate::metrics::compute_metric_breakdown(
-            &result.image,
-            base,
-            &base_luma_for_metrics,
-            &result.luminance,
-            artifact_metric,
-            weights,
-        );
         let p_total = match metric_override {
             Some(f) => f(&result.image),
-            None => breakdown.selection_score,
+            None => crate::metrics::compute_selection_metric(&result.image, artifact_metric),
         };
         let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-        Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: Some(breakdown) })
+        Ok(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: None })
     };
 
     #[cfg(feature = "parallel")]
@@ -679,10 +828,62 @@ fn probe_strengths(
         strengths.par_iter().map(probe_one).collect()
     }
 
+    // Sequential path (WASM): reuse scratch buffers across probes to avoid
+    // repeated allocation of the Gaussian blur intermediates.
     #[cfg(not(feature = "parallel"))]
     {
-        strengths.iter().map(probe_one).collect()
+        if matches!(sharpen_mode, SharpenMode::Lightness) {
+            probe_strengths_lightness_sequential(
+                strengths, base, base_luminance.unwrap(), artifact_metric,
+                baseline_artifact_ratio, metric_mode, kernel, metric_override,
+            )
+        } else {
+            strengths.iter().map(probe_one).collect()
+        }
     }
+}
+
+/// Optimized sequential Lightness-mode probe loop with scratch buffer reuse.
+///
+/// Avoids 2 × N allocations of W×H floats by reusing blur scratch buffers.
+#[cfg(not(feature = "parallel"))]
+#[allow(clippy::too_many_arguments)]
+fn probe_strengths_lightness_sequential(
+    strengths: &[f32],
+    base: &LinearRgbImage,
+    base_luminance: &[f32],
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+    metric_mode: MetricMode,
+    kernel: &[f32],
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+) -> Result<Vec<ProbeSample>, CoreError> {
+    use crate::sharpen::unsharp_mask_single_channel_with_scratch;
+
+    let w = base.width() as usize;
+    let h = base.height() as usize;
+    let n = w * h;
+
+    // Pre-allocate scratch buffers once for all probes.
+    let mut scratch_a = vec![0.0f32; n];
+    let mut scratch_b = vec![0.0f32; n];
+
+    let mut results = Vec::with_capacity(strengths.len());
+    for &s in strengths {
+        let sharpened_l = unsharp_mask_single_channel_with_scratch(
+            base_luminance, w, h, s, kernel, &mut scratch_a, &mut scratch_b,
+        );
+        let image = color::reconstruct_rgb_from_lightness_with_luma(
+            base, sharpened_l, Some(base_luminance),
+        );
+        let p_total = match metric_override {
+            Some(f) => f(&image),
+            None => crate::metrics::compute_selection_metric(&image, artifact_metric),
+        };
+        let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+        results.push(ProbeSample { strength: s, artifact_ratio: p_total, metric_value, breakdown: None });
+    }
+    Ok(results)
 }
 
 /// Compute the metric value used for fitting, based on the configured mode.
@@ -858,7 +1059,9 @@ fn adaptive_sharpen_with_validation(
                 let sharpened_l = crate::sharpen::apply_adaptive_lightness_from_detail(
                     luma, &detail, global_strength * scale, gain_map,
                 );
-                crate::color::reconstruct_rgb_from_lightness(base, &sharpened_l)
+                crate::color::reconstruct_rgb_from_lightness_with_luma(
+                    base, &sharpened_l, Some(luma),
+                )
             };
 
             // Initial apply at scale=1.0
@@ -1092,14 +1295,13 @@ fn run_two_pass_probing(
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     kernel: &[f32],
-    weights: &MetricWeights,
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
     // Phase 1: coarse
     let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
     let coarse_samples = probe_strengths(
         &coarse_strengths, base, base_luminance, sharpen_mode, metric_mode,
-        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+        artifact_metric, baseline_artifact_ratio, kernel, metric_override,
     )?;
 
     // Locate dense window from coarse results
@@ -1110,7 +1312,7 @@ fn run_two_pass_probing(
     let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
     let dense_samples = probe_strengths(
         &dense_strengths, base, base_luminance, sharpen_mode, metric_mode,
-        artifact_metric, baseline_artifact_ratio, kernel, weights, metric_override,
+        artifact_metric, baseline_artifact_ratio, kernel, metric_override,
     )?;
 
     // Merge, sort, remove near-duplicates (within 1e-5 of each other)

@@ -83,18 +83,34 @@ pub fn reconstruct_rgb_from_lightness(
     original: &LinearRgbImage,
     sharpened_luminance: &[f32],
 ) -> LinearRgbImage {
+    reconstruct_rgb_from_lightness_with_luma(original, sharpened_luminance, None)
+}
+
+/// Like [`reconstruct_rgb_from_lightness`] but accepts optional pre-computed
+/// original luminance to avoid redundant per-pixel `luminance_from_linear_srgb` calls.
+pub fn reconstruct_rgb_from_lightness_with_luma(
+    original: &LinearRgbImage,
+    sharpened_luminance: &[f32],
+    original_luminance: Option<&[f32]>,
+) -> LinearRgbImage {
     const EPSILON: f32 = 1e-6;
-    debug_assert_eq!(
-        sharpened_luminance.len(),
-        (original.width() as usize) * (original.height() as usize),
-    );
+    let n = (original.width() as usize) * (original.height() as usize);
+    debug_assert_eq!(sharpened_luminance.len(), n);
+    if let Some(ol) = original_luminance {
+        debug_assert_eq!(ol.len(), n);
+    }
+
     let out: Vec<f32> = original
         .pixels()
         .chunks_exact(3)
-        .zip(sharpened_luminance.iter())
-        .flat_map(|(rgb, &l_sharp)| {
+        .enumerate()
+        .flat_map(|(i, rgb)| {
             let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
-            let l_orig = luminance_from_linear_srgb(r, g, b);
+            let l_orig = match original_luminance {
+                Some(ol) => ol[i],
+                None => luminance_from_linear_srgb(r, g, b),
+            };
+            let l_sharp = sharpened_luminance[i];
             if l_orig.abs() < EPSILON {
                 [r, g, b]
             } else {

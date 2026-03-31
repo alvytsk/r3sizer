@@ -33,9 +33,9 @@ Metric mode                 : relative (sharpening-added artifacts)
 Artifact metric             : channel clipping ratio
 Baseline artifact ratio     : 0.000000
 Selected strength           : 1.8472
-Target metric value         : 0.001000
-Measured metric value        : 0.000997
-Measured artifact ratio     : 0.000997
+Target metric value         : 0.003000
+Measured metric value        : 0.002987
+Measured artifact ratio     : 0.002987
 Budget reachable            : yes
 Fit status                  : success
 Crossing status             : found
@@ -112,19 +112,22 @@ compiled to WASM without modification.
 input (sRGB file)
   ↓ load + normalize
   ↓ sRGB → linear RGB  (IEC 61966-2-1)
-  ↓ Lanczos3 downscale (linear space)
+  ↓ downscale (Lanczos3 or content-adaptive kernel)
+  ↓ classify regions (Flat, Textured, StrongEdge, Microtexture, RiskyHaloZone)
   ↓ optional contrast leveling
   ↓ measure baseline artifact ratio P(base)
-  ↓ extract CIE Y luminance from base
-  ↓ probe N sharpening strengths:
+  ↓ extract CIE Y luminance, build per-pixel gain map
+  ↓ two-pass adaptive probing:
+      coarse scan → find P0 crossing → dense refinement
       for each s_i:
-        sharpen luminance(s_i)  →  reconstruct RGB via k=L'/L  →  measure P(s_i)
+        sharpen luminance(s_i) × gain  →  reconstruct RGB  →  chroma guard  →  measure P(s_i)
   ↓ fit cubic  P_hat(s) = a·s³ + b·s² + c·s + d  (with fit quality: R², residuals)
-  ↓ robustness checks  (monotonicity, LOO stability)
-  ↓ solve  P_hat(s*) = P0  (default P0 = 0.001 = 0.1%)
-  ↓ apply final sharpening(s*)
+  ↓ robustness checks  (monotonicity, LOO stability, R², condition)
+  ↓ solve  P_hat(s*) = P0  (Photo: P0=0.003, Precision: P0=0.001)
+  ↓ adaptive backoff if budget exceeded
+  ↓ apply final sharpening(s*)  →  chroma guard
   ↓ clamp to [0,1]
-  ↓ linear RGB → sRGB  →  save
+  ↓ linear RGB → sRGB  →  save + recommendations
 ```
 
 See [`docs/algorithm.md`](docs/algorithm.md) for a full pipeline description.
@@ -140,18 +143,23 @@ See [`docs/algorithm.md`](docs/algorithm.md) for a full pipeline description.
 | `--width` | `-W` | — | Target width (px) |
 | `--height` | `-H` | — | Target height (px) |
 | `--preserve-aspect-ratio` | `-p` | off | Compute the missing dimension from the input aspect ratio |
-| `--target-artifact-ratio` | | `0.001` | P0 threshold (fraction, not percent) |
+| `--target-artifact-ratio` | | `0.003` | P0 threshold (fraction, not percent) |
+| `--preset` | | — | Named preset: `photo` (default), `precision` |
 | `--diagnostics` | | — | Path to write a JSON diagnostics file |
-| `--probe-strengths` | | `0.05,0.1,0.2,0.4,0.8,1.5,3.0` | Comma-separated explicit probe list |
+| `--diagnostics-level` | | `summary` | `summary` or `full` (per-probe breakdowns) |
+| `--probe-strengths` | | two-pass | Comma-separated explicit probe list |
 | `--sharpen-sigma` | | `1.0` | Gaussian sigma for unsharp mask |
 | `--sharpen-mode` | | `lightness` | `lightness` (CIE Y) or `rgb` |
 | `--metric-mode` | | `relative` | `relative` (sharpening-added) or `absolute` (total) |
-| `--sharpen-model` | | `practical-usm` | `practical-usm` or `paper-lightness-approx` |
 | `--artifact-metric` | | `channel-clipping` | `channel-clipping` or `pixel-out-of-gamut` |
+| `--metric-weights` | | `1.0,0.3,0.3,0.1` | Composite weights: gamut, halo, overshoot, texture |
+| `--selection-policy` | | `gamut-only` | `gamut-only`, `hybrid`, or `composite-only` |
 | `--enable-contrast-leveling` | | off | Enable contrast leveling stage (placeholder) |
 | `--sweep-dir` | | — | Directory of images to process in batch mode |
 | `--sweep-output-dir` | | — | Output directory for processed images (sweep mode) |
 | `--sweep-summary` | | — | Path to write sweep summary JSON |
+| `--sweep-diff` | | — | Compare two sweep summaries: `BASE,CANDIDATE` |
+| `--generate-corpus` | | — | Generate synthetic benchmark corpus in directory |
 
 In single-file mode, `--input` and `--output` are required. Both `--width` and `--height`
 are required unless `--preserve-aspect-ratio` is set, in which case only one is needed.
@@ -217,25 +225,30 @@ docker run -p 8080:80 r3sizer-web
 
 ## Library usage
 
-`r3sizer-core` exposes the pipeline as a single function:
+`r3sizer-core` exposes the pipeline as a single function (one-shot) or as a two-phase
+API for interactive use:
 
 ```rust
-use r3sizer_core::{AutoSharpParams, ProcessOutput, pipeline::process_auto_sharp_downscale};
+use r3sizer_core::{AutoSharpParams, ProcessOutput, process_auto_sharp_downscale};
 
-let params = AutoSharpParams {
-    target_width: 800,
-    target_height: 600,
-    ..Default::default()
-};
-
+// One-shot (CLI / batch)
+let params = AutoSharpParams::photo(800, 600);
 let ProcessOutput { image, diagnostics } =
     process_auto_sharp_downscale(&input_linear_rgb, &params)?;
+
+// Two-phase (interactive / WASM)
+use r3sizer_core::{prepare_base, process_from_prepared};
+
+let base = prepare_base(&input_linear_rgb, &params, &|_| {})?;
+// ... user adjusts params (non-base-affecting) ...
+let output = process_from_prepared(&base, &params, &|_| {})?;
 ```
 
 `AutoSharpDiagnostics` is `Serialize`-able for JSON export and contains the full probe
-data, fit coefficients, selection mode, per-stage provenance tags, fit quality metrics
-(R², residuals), solver robustness flags (monotonicity, LOO stability), typed fallback
-reasons, per-stage timing, and composite metric breakdowns.
+data, fit coefficients, selection mode, fit quality metrics (R², residuals), solver
+robustness flags (monotonicity, LOO stability), typed fallback reasons, per-stage timing,
+composite metric breakdowns, region coverage, chroma guard statistics, evaluator results,
+and parameter recommendations.
 
 ---
 

@@ -81,6 +81,20 @@ pub fn compute_metric_breakdown(
     }
 }
 
+/// Fast path: compute only the selection metric used by the solver.
+///
+/// Skips the expensive edge profiling, halo, overshoot, and texture metrics
+/// that are only needed for diagnostics.
+pub fn compute_selection_metric(
+    sharpened: &LinearRgbImage,
+    artifact_metric: ArtifactMetric,
+) -> f32 {
+    match artifact_metric {
+        ArtifactMetric::ChannelClippingRatio => channel_clipping_ratio(sharpened),
+        ArtifactMetric::PixelOutOfGamutRatio => pixel_out_of_gamut_ratio(sharpened),
+    }
+}
+
 /// Deprecated alias for [`channel_clipping_ratio`].
 #[deprecated(note = "renamed to channel_clipping_ratio")]
 pub fn artifact_ratio(img: &LinearRgbImage) -> f32 {
