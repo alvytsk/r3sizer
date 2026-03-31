@@ -455,25 +455,35 @@ Keep out of the baseline roadmap until the classical pipeline is already well-pr
 
 # Recommended implementation order
 
-## Immediate backlog
+## Immediate backlog — COMPLETED (v0.7)
 
-1. Probe policy reduction + early stopping
-2. Prepared analysis context + scratch reuse
-3. Parallel probe execution
-4. Runtime modes (`fast/balanced/quality`)
-5. Staged shrink path for large reductions
+1. ~~Probe policy reduction + early stopping~~ — `PipelineMode` + early-stop in coarse scan
+2. ~~Prepared analysis context + scratch reuse~~ — `PreparedBase` + detail precomputation
+3. ~~Parallel probe execution~~ — rayon (native) + Web Worker pool (WASM)
+4. ~~Runtime modes (`fast/balanced/quality`)~~ — `PipelineMode` enum with `resolved()`
+5. ~~Staged shrink path for large reductions~~ — bilinear pre-reduce at >= 3x ratio
+6. ~~Reusable sharpen-detail formulation~~ — `compute_probe_detail` / `run_probes_from_detail`
+7. ~~SIMD resize~~ — switched to `fast_image_resize` crate (SSE4.1/AVX2)
+8. ~~Source-side diagnostics skip~~ — `base_quality::score_base_resize(full_diagnostics: bool)`
+
+**Measured results (1024x768 -> 512x384, release, x86-64):**
+* Fast mode: **34 ms** end-to-end
+* Balanced mode: **117 ms** end-to-end
+* Quality mode: **139 ms** end-to-end
+* Resize stage: **7.7 ms** (was 31 ms with `image` crate)
+* Probing (7+4 TwoPass): **6-13 ms** (detail precomputation eliminates per-probe blur)
 
 ## Next backlog
 
-6. Multi-stage metric evaluation
-7. Lightweight adaptive mode
-8. Tile-based probing
+6. Multi-stage metric evaluation — partially done (fast path exists, no guard metric)
+7. Lightweight adaptive mode — not started
+8. Tile-based probing — not started
 
 ## Research backlog
 
-9. Reusable sharpen-detail formulation
-10. SIMD pass tuning
-11. LUT/adaptive resampling experiments
+9. ~~Reusable sharpen-detail formulation~~ — DONE (moved to immediate)
+10. ~~SIMD pass tuning~~ — DONE for resize; Gaussian blur still hand-rolled
+11. LUT/adaptive resampling experiments — not started
 
 ---
 

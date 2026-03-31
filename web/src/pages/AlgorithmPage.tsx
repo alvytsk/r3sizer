@@ -8,10 +8,11 @@ import "katex/dist/katex.min.css";
 
 const PIPELINE_STAGES = [
   { name: "linearize", desc: "sRGB \u2192 linear" },
-  { name: "downscale", desc: "adaptive kernel" },
+  { name: "downscale", desc: "SIMD Lanczos3" },
   { name: "classify", desc: "region map" },
   { name: "baseline", desc: "measure P(0)" },
-  { name: "probe", desc: "N strengths" },
+  { name: "detail", desc: "blur once" },
+  { name: "probe", desc: "two-pass" },
   { name: "fit", desc: "cubic P\u0302(s)" },
   { name: "solve", desc: "Cardano" },
   { name: "sharpen", desc: "adaptive + guard" },
@@ -47,6 +48,10 @@ const DESIGN_DECISIONS = [
   {
     title: "Content-adaptive gain map",
     text: "The classifier labels each pixel as Flat, Textured, StrongEdge, Microtexture, or RiskyHaloZone. A per-class gain table translates this into a per-pixel strength multiplier. Misclassification degrades gracefully \u2014 gain values are bounded to [0.25, 4.0].",
+  },
+  {
+    title: "Detail precomputation",
+    text: "The unsharp mask detail signal D = input - blur(input) is independent of strength s. The Gaussian blur (dominant cost) runs once; each probe applies out = input + s * D as a trivial multiply-add. In WASM, the detail is computed in the main worker and distributed to all probe workers, eliminating redundant blur across the pool.",
   },
   {
     title: "Chroma guard is non-destructive",

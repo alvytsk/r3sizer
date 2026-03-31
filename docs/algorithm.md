@@ -10,11 +10,18 @@ This document describes the pipeline implemented in `r3sizer-core`.
 1.   Input decoding              (r3sizer-io / load.rs)
 1.5. Input color-space ingress   (color_space.rs)        -- experimental, optional
 2.   sRGB -> linear RGB          (color.rs)
-2a.  Resize (with optional strategy)  (resize.rs / resize_strategy.rs)
+2a.  Resize (staged shrink)      (resize.rs / resize_strategy.rs)
+       -- bilinear pre-reduce when ratio >= 3x, then Lanczos3
 2.5. Region classification       (classifier.rs)         -- ContentAdaptive only
 3.   Contrast leveling           (contrast.rs)           -- optional
 4.   Baseline measurement        (metrics/)
-5.   Probe sharpening            (sharpen.rs + color.rs + metrics/)
+4a.  Base resize quality         (base_quality.rs)
+       -- ringing always; edge/texture retention only in Full diagnostics
+5.   Detail precomputation       D = input - blur(input)  -- computed once
+5a.  TwoPass coarse scan         (pipeline.rs)
+       -- early stop after 3+ probes when P0 bracket found
+5b.  Dense window selection      (pipeline.rs)
+5c.  TwoPass dense refinement    (pipeline.rs)
 6.   Cubic fit                   (fit.rs)
 7.   Root solving                (solve.rs)
 7b.  LOO stability check         (pipeline.rs)
@@ -71,10 +78,19 @@ filtering are physically correct.
 
 ## Stage 2a: Downscale in linear space
 
-`resize::downscale` wraps the linear f32 buffer as `image::ImageBuffer<Rgb<f32>>`
-and calls `imageops::resize` with `FilterType::Lanczos3` (default path).
+`resize::downscale` performs Lanczos3 resampling via `fast_image_resize`
+(SIMD-accelerated on x86-64).  The function operates on the raw f32 linear
+pixel buffer.  No clamping is applied; the output remains in linear f32.
 
-No clamping is applied.  The output remains in linear f32.
+**Staged shrink:** for shrink ratios >= 3x (max of X and Y axes), a two-stage
+path is used.  A fast bilinear pre-reduce brings the image to approximately 2x
+the target dimensions, then a final Lanczos3 pass produces the output.  This
+follows the same principle as libvips' `gap` parameter: the bilinear pass
+cheaply removes the bulk of the high-frequency energy that would otherwise
+alias through the Lanczos kernel, while the final Lanczos3 pass preserves
+edge sharpness at the target scale.  For ratios below 3x, a single Lanczos3
+pass is used directly.  The diagnostic field `used_staged_shrink` records
+which path was taken.
 
 **Note:** The specific resampling kernel used in the original paper is not
 confirmed.  Lanczos3 is used as a high-quality standard choice.
@@ -157,12 +173,68 @@ sharpening-induced artifacts from resize-induced artifacts.
 When `params.evaluation_color_space` is set, the measurement uses
 `chroma_guard::evaluate_in_color_space` instead of the standard metric.
 
+### Base resize quality (`BaseResizeQuality`)
+
+Immediately after the resize stage, `base_quality::score_base_resize` assesses
+the downscaled image:
+
+- **Ringing score** (always computed, no-reference) — sign-flip oscillation
+  near edges on the resized luma.  Drives `envelope_scale`:
+  `effective_p0 = target_artifact_ratio * envelope_scale`.
+- **Edge retention** and **texture retention** (reference-aware, diagnostic-only
+  in v1) — per-pixel Sobel energy ratio and local-variance ratio between the
+  source and resized images.  These require expensive O(W*H) Sobel and variance
+  passes on the full-resolution source image.
+
+**Performance note:** source-side edge/texture retention is computed only when
+`diagnostics_level == Full`.  In `Summary` mode (the default, and what
+`Fast`/`Balanced` pipeline modes use), these fields are skipped to avoid the
+O(W*H) Sobel + local-variance cost on the original input.
+
 ---
 
 ## Stage 5: Probe sharpening strengths
 
 For each strength `s_i` in the probe set, sharpening is applied and artifacts
-are measured.  Two sharpening modes are supported:
+are measured.
+
+### Detail precomputation
+
+Before the probe loop begins, the detail signal `D = input - blur(input)` is
+computed once from the base image (or base luminance in Lightness mode) using
+the configured Gaussian kernel.  Each probe then applies sharpening as a
+multiply-add `output = input + s * D`, avoiding a redundant blur per probe.
+This collapses the per-probe cost from `O(blur) + O(metric)` to
+`O(multiply-add) + O(metric)`, since `blur` dominates at typical image sizes.
+
+### TwoPass probing (`ProbeConfig::TwoPass`)
+
+The default probing strategy uses a two-pass adaptive scheme:
+
+1. **Coarse scan** — `coarse_count` strengths (default 7) are evaluated at
+   uniform spacing over `[coarse_min, coarse_max]`.  **Early stopping:** after
+   the first 3 probes, the coarse scan exits as soon as a P0 crossing bracket
+   is found (i.e. `metric_value[i] <= P0 && metric_value[i+1] > P0`).  This
+   typically saves 2-4 probes at the tail of the range.
+
+2. **Dense refinement** — the crossing bracket from the coarse pass is expanded
+   by `window_margin` (default 0.5x the bracket width) on each side, then
+   `dense_count` (default 4) probes are evaluated uniformly within that window.
+
+3. **Merge** — coarse and dense samples are combined, sorted by strength, and
+   near-duplicates (within 1e-5) are removed before fitting.
+
+Both phases share the precomputed detail signal `D`, so the total cost is
+`1 x blur + (coarse_used + dense_count) x (multiply-add + metric)`.
+
+Diagnostics for the two-pass scheme are stored in
+`AutoSharpDiagnostics::probe_pass_diagnostics` (`ProbePassDiagnostics`),
+including the dense window bounds and how many coarse probes were actually
+evaluated before early stopping.
+
+For static probe configurations (`ProbeConfig::Explicit` or
+`ProbeConfig::Range`), all strengths are evaluated in a single pass using
+the same detail-precomputation optimization.
 
 ### Sharpening modes (`SharpenMode`)
 
@@ -513,10 +585,11 @@ Every pipeline invocation records wall-clock microsecond timing via `StageTiming
 
 | Field | What it measures |
 |---|---|
-| `resize_us` | Lanczos3 or strategy-based downscale |
+| `resize_us` | Lanczos3 or strategy-based downscale (includes staged shrink when applicable) |
 | `contrast_us` | Contrast leveling (0 when disabled) |
 | `baseline_us` | Baseline artifact measurement |
-| `probing_us` | Entire probe loop (all strengths) |
+| `base_quality_us` | Base resize quality scoring (ringing + optional edge/texture retention) |
+| `probing_us` | Entire probe loop (detail precomputation + all probe strengths) |
 | `fit_us` | Cubic polynomial fitting + solve |
 | `robustness_us` | Monotonicity + LOO stability checks |
 | `final_sharpen_us` | Final sharpening at selected s* (including chroma guard) |
@@ -528,6 +601,45 @@ Every pipeline invocation records wall-clock microsecond timing via `StageTiming
 | `evaluator_us` | Quality evaluator (None when not configured) |
 
 Timing is always collected (no feature flag needed).
+
+---
+
+## Pipeline modes (`PipelineMode`)
+
+Three runtime performance-quality tradeoff modes are available.  Each mode
+adjusts probe budgets, adaptive complexity, and diagnostic depth while
+preserving user-chosen P0, sigma, target dimensions, metric, and sharpen mode.
+Apply via `PipelineMode::apply` before passing params to the pipeline (or set
+`params.pipeline_mode` and call `params.resolved()`).
+
+### Fast
+
+Minimal probing for lowest latency.  Trades some quality on complex images
+for speed.
+
+| Setting | Value |
+|---|---|
+| TwoPass coarse/dense | 4 / 2 |
+| Sharpen strategy | `Uniform` (no classification, no gain map) |
+| Chroma guard | Disabled |
+| Evaluator | Disabled |
+
+### Balanced (default)
+
+Current default behaviour — no overrides.  Content-adaptive sharpening,
+two-pass probing (7 coarse / 4 dense), chroma guard, heuristic evaluator.
+
+### Quality
+
+Extended probing with a wider dense window and full diagnostics.
+
+| Setting | Value |
+|---|---|
+| TwoPass coarse/dense | 9 / 6 |
+| TwoPass window margin | 0.7 |
+| Sharpen strategy | `ContentAdaptive` (ensured; up to 6 backoff iterations) |
+| Chroma guard | Ensured on |
+| Evaluator | Ensured on |
 
 ---
 

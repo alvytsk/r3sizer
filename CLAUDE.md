@@ -40,9 +40,9 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 
 **`r3sizer-core`** — all image processing logic, no I/O. Reusable in CLI, WASM, and future Tauri GUI. Modules map 1:1 to pipeline stages:
 
-- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `MetricMode`, `ArtifactMetric`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, `SharpenStrategy`, `ResizeStrategy`, `ProbeConfig`, etc.)
+- `types.rs` — all shared data types (`LinearRgbImage`, `AutoSharpParams`, `ProcessOutput`, `AutoSharpDiagnostics`, `CubicPolynomial`, `ProbeSample`, `SharpenMode`, `MetricMode`, `ArtifactMetric`, `FitStatus`, `FitQuality`, `CrossingStatus`, `SelectionMode`, `FallbackReason`, `RobustnessFlags`, `StageTiming`, `MetricBreakdown`, `MetricComponent`, `SharpenStrategy`, `ResizeStrategy`, `ProbeConfig`, `PipelineMode`, etc.)
 - `color.rs` — sRGB ↔ linear RGB (IEC 61966-2-1), CIE Y luminance extraction, lightness-based RGB reconstruction
-- `resize.rs` — Lanczos3 downscale via `image` crate
+- `resize.rs` — Lanczos3 downscale via `fast_image_resize` (SIMD-accelerated on x86-64); staged bilinear pre-reduce for shrink ratios ≥ 3×
 - `resize_strategy.rs` — content-adaptive resize (uniform or per-region kernel selection)
 - `sharpen.rs` — unsharp mask (3-channel RGB and single-channel luminance) with hand-rolled separable Gaussian; **deliberately no clamping** so out-of-range values exist for the metric
 - `metrics/` — sub-modules for gamut, halo, overshoot, texture, edges, composite; `channel_clipping_ratio` and `pixel_out_of_gamut_ratio` selectable via `ArtifactMetric`; `compute_metric_breakdown` produces component-wise `MetricBreakdown`
@@ -51,18 +51,18 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 - `solve.rs` — Cardano's formula for cubic roots + fallback to best probe sample; returns `SolveResult` with `SelectionMode` and `CrossingStatus`
 - `contrast.rs` — placeholder contrast leveling (percentile stretch); real formula unknown
 - `chroma_guard.rs` — soft chroma clamping with context-aware thresholds per region
-- `base_quality.rs` — resize quality scoring (edge retention, texture retention, ringing)
+- `base_quality.rs` — resize quality scoring (edge retention, texture retention, ringing); `full_diagnostics` flag skips expensive source-side metrics in fast/balanced modes
 - `evaluator.rs` — heuristic quality evaluator (feature extraction + advisory strength cap)
 - `recommendations.rs` — diagnostic-driven parameter suggestions
-- `pipeline.rs` — orchestrates all stages in a **two-phase architecture**: `prepare_base` (resize, classify, baseline — cached as `PreparedBase`) and `process_from_prepared` (probing, fit, solve, sharpen). Also exposes `resolve_initial_strengths` and `resolve_dense_strengths` for JS-side TwoPass parallel probing. `PreparedBase` carries a `BaseParamsKey` fingerprint so cache reuse is safe across param changes. One-shot entry point `process_auto_sharp_downscale` remains for CLI use.
+- `pipeline.rs` — orchestrates all stages in a **two-phase architecture**: `prepare_base` (resize, classify, baseline — cached as `PreparedBase`) and `process_from_prepared` (probing, fit, solve, sharpen). Also exposes `resolve_initial_strengths` and `resolve_dense_strengths` for JS-side TwoPass parallel probing, and `compute_probe_detail` / `run_probes_from_detail` for parallel probe workers that receive precomputed detail signal. Early stopping in coarse probing exits as soon as a P0 bracket is found. Detail precomputation (`D = input - blur(input)`) computes the Gaussian blur once and shares the result across coarse and dense phases. `PreparedBase` carries a `BaseParamsKey` fingerprint so cache reuse is safe across param changes. One-shot entry point `process_auto_sharp_downscale` remains for CLI use.
 
 **`r3sizer-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
 
 **`r3sizer-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
-**`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). WASM exports: `prepare_image` (sRGB→linear cache), `prepare_base` (resize+classify+baseline cache with params fingerprint fast-path), `process_image` (full pipeline), `get_base_data` (extract cached base for probe workers), `probe_batch` (run probes on raw base data), `process_from_probes` (finish pipeline with externally-collected probes), `resolve_initial_strengths` (coarse/all strengths for parallel probing), `resolve_dense_strengths` (TwoPass dense window from coarse results). Thread-local `RefCell` caching for input and `PreparedBase`. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion in `convert.rs`.
+**`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). WASM exports: `prepare_image` (sRGB→linear cache), `prepare_base` (resize+classify+baseline cache with params fingerprint fast-path), `process_image` (full pipeline), `get_base_data` (extract cached base for probe workers), `probe_batch` (run probes on raw base data), `compute_probe_detail` (precompute detail signal `D = input - blur(input)` for probe workers), `probe_batch_with_detail` (run probes using precomputed detail, skipping per-probe blur), `process_from_probes` (finish pipeline with externally-collected probes), `resolve_initial_strengths` (coarse/all strengths for parallel probing), `resolve_dense_strengths` (TwoPass dense window from coarse results). Thread-local `RefCell` caching for input, `PreparedBase`, and precomputed detail signal. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion in `convert.rs`.
 
-**`web/`** — React 19 + Vite + Tailwind diagnostic UI. Communicates with `r3sizer-wasm` via a main Web Worker (`wasm.ts` / `wasm-worker.ts`) and a **probe worker pool** (`probe-pool.ts` / `probe-worker.ts`) for parallel sharpening strength evaluation. The pool distributes probes across N workers (up to 6), supports TwoPass two-round probing, and caches base data in workers to avoid redundant structured clones. State managed by Zustand (`processor-store.ts`). TypeScript types are auto-generated from Rust via `ts-rs` (see below).
+**`web/`** — React 19 + Vite + Tailwind diagnostic UI. Communicates with `r3sizer-wasm` via a main Web Worker (`wasm.ts` / `wasm-worker.ts`) and a **probe worker pool** (`probe-pool.ts` / `probe-worker.ts`) for parallel sharpening strength evaluation. The pool distributes probes across N workers (up to 6), supports TwoPass two-round probing, and caches base data in workers to avoid redundant structured clones. Probe workers receive precomputed detail signal and skip the Gaussian blur when detail is available, using `probe_batch_with_detail` instead of `probe_batch`. State managed by Zustand (`processor-store.ts`). TypeScript types are auto-generated from Rust via `ts-rs` (see below).
 
 ### TypeScript type generation (`ts-rs`)
 
@@ -89,6 +89,8 @@ The web UI is deployed to GitHub Pages at https://alvytsk.github.io/r3sizer/ via
 - **Content-adaptive sharpening is the default** — `SharpenStrategy::ContentAdaptive` classifies pixels into 5 regions and modulates sharpening strength via a per-pixel gain map. Backoff loop reduces strength if budget is exceeded.
 - **Chroma guard is on by default** — soft chroma clamping after lightness-based sharpening, with context-aware thresholds modulated by region class and saturation.
 - **TypeScript types are generated from Rust, not handwritten** — `ts-rs` with `serde-compat` reads `#[serde(...)]` attributes and produces matching TypeScript. The `typegen` feature flag keeps `ts-rs` out of production builds. Default constants are serialized from Rust `Default` impls so they stay in sync. `generated.ts` must be committed; the Docker build regenerates it to ensure freshness.
+- **Detail signal precomputed once per probe phase** — `D = input - blur(input)` is independent of sharpening strength `s`. The Gaussian blur (dominant per-probe cost) runs once; each probe then applies `out = input + s × D` as a trivial multiply-add. This collapses probe cost from `N × blur` to `1 × blur + N × apply`.
+- **Runtime modes control the speed-quality tradeoff** — `PipelineMode::Fast` uses fewer probes, uniform sharpening, no chroma guard; `Balanced` is the default; `Quality` extends probing and guarantees full adaptive pipeline. Applied via `AutoSharpParams::resolved()` before pipeline entry.
 
 ## Algorithm summary
 
@@ -98,8 +100,9 @@ The core idea: select sharpening strength by constraining the fraction of channe
 linearize → downscale (with optional content-adaptive kernel) →
 [contrast leveling] → classify regions → measure baseline P(base) →
 extract luminance L → build gain map →
-probe N strengths (two-pass adaptive: coarse scan → dense refinement):
-  { sharpen L(s_i) × gain → reconstruct RGB → chroma guard → measure P(s_i) } →
+precompute detail signal D = L - blur(L) (one Gaussian blur) →
+probe N strengths (two-pass adaptive: coarse scan with early stopping → dense refinement):
+  { apply sharpened = L + s_i × D → reconstruct RGB → chroma guard → measure P(s_i) } →
 fit cubic P_hat(s) (with quality metrics) →
 robustness checks (monotonicity, LOO, R², condition) →
 solve P_hat(s*) = P0 → adaptive backoff if budget exceeded →

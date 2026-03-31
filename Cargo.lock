@@ -975,7 +975,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "r3sizer-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -988,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "r3sizer-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "approx",
  "criterion",
@@ -1004,7 +1004,7 @@ dependencies = [
 
 [[package]]
 name = "r3sizer-io"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "image",
  "r3sizer-core",
@@ -1014,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "r3sizer-wasm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "js-sys",
  "r3sizer-core",
