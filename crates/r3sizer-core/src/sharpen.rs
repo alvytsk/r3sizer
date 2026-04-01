@@ -49,14 +49,18 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
     let src_data = src.pixels();
 
     // --- Horizontal pass ---
-    // Split into: left edge (clamp), interior (no bounds check), right edge (clamp).
+    // Interior uses transposed loop order: iterate kernel taps in the outer
+    // loop, pixel channels in the inner loop. Because RGB channels are stored
+    // contiguously (R,G,B,R,G,B,...), a shift of 1 pixel = shift of 3 f32s.
+    // The inner loop becomes a contiguous slice multiply-accumulate that LLVM
+    // can auto-vectorize across all three channels simultaneously.
     let mut horiz = vec![0.0f32; w * h * 3];
     for y in 0..h {
         let row_start = y * stride;
         let row = &src_data[row_start..row_start + stride];
         let out_row = &mut horiz[row_start..row_start + stride];
 
-        // Left edge: x < radius
+        // Left edge: x < radius (clamped, per-pixel reduction)
         for x in 0..radius.min(w) {
             let mut r = 0.0f32;
             let mut g = 0.0f32;
@@ -72,26 +76,34 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
             out_row[x * 3 + 2] = b;
         }
 
-        // Interior: no bounds checks needed
+        // Interior: transposed loop order for auto-vectorization.
+        // Treat the interior as a flat contiguous buffer of (interior_pixels * 3) f32s.
         let x_start = radius.min(w);
         let x_end = w.saturating_sub(radius);
-        for x in x_start..x_end {
-            let mut r = 0.0f32;
-            let mut g = 0.0f32;
-            let mut b = 0.0f32;
-            let base = (x - radius) * 3;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let off = base + ki * 3;
-                r += row[off] * kv;
-                g += row[off + 1] * kv;
-                b += row[off + 2] * kv;
+        let interior = x_end.saturating_sub(x_start);
+        if interior > 0 {
+            let out_start = x_start * 3;
+            let out_len = interior * 3;
+            let out_interior = &mut out_row[out_start..out_start + out_len];
+
+            // First tap: initialize
+            let kv0 = kernel[0];
+            let src_off = (x_start - radius) * 3;
+            let src0 = &row[src_off..src_off + out_len];
+            for i in 0..out_len {
+                out_interior[i] = src0[i] * kv0;
             }
-            out_row[x * 3] = r;
-            out_row[x * 3 + 1] = g;
-            out_row[x * 3 + 2] = b;
+            // Remaining taps: accumulate
+            for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+                let src_off = (x_start - radius + ki) * 3;
+                let src = &row[src_off..src_off + out_len];
+                for i in 0..out_len {
+                    out_interior[i] += src[i] * kv;
+                }
+            }
         }
 
-        // Right edge: x >= w - radius
+        // Right edge: x >= w - radius (clamped, per-pixel reduction)
         for x in x_end.max(x_start)..w {
             let mut r = 0.0f32;
             let mut g = 0.0f32;
@@ -109,24 +121,21 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
     }
 
     // --- Vertical pass ---
-    // Process one row at a time, accumulating from kernel.len() row pointers.
-    // This is cache-friendly: we read full rows sequentially.
+    // Already in transposed order: outer loop over kernel taps, inner loop
+    // over contiguous row elements. LLVM vectorizes the inner `for i` loops.
     let mut vert = vec![0.0f32; w * h * 3];
 
-    // Precompute clamped row indices for each (y, ki) to avoid per-pixel branching.
-    // Top edge
+    // Top edge (clamped)
     for y in 0..radius.min(h) {
         let out_start = y * stride;
         let out_row = &mut vert[out_start..out_start + stride];
 
-        // First kernel tap: initialize
         let yi0 = y.saturating_sub(radius);
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
         for i in 0..stride {
             out_row[i] = src_row0[i] * kv0;
         }
-        // Remaining kernel taps: accumulate
         for (ki, &kv) in kernel.iter().enumerate().skip(1) {
             let yi = (y + ki).saturating_sub(radius).min(h - 1);
             let src_row = &horiz[yi * stride..yi * stride + stride];
@@ -144,7 +153,7 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
         let out_row = &mut vert[out_start..out_start + stride];
 
         let yi0 = y - radius;
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
         for i in 0..stride {
             out_row[i] = src_row0[i] * kv0;
@@ -158,13 +167,13 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
         }
     }
 
-    // Bottom edge
+    // Bottom edge (clamped)
     for y in y_end.max(y_start)..h {
         let out_start = y * stride;
         let out_row = &mut vert[out_start..out_start + stride];
 
         let yi0 = y.saturating_sub(radius);
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * stride..yi0 * stride + stride];
         for i in 0..stride {
             out_row[i] = src_row0[i] * kv0;
@@ -217,11 +226,14 @@ pub(crate) fn gaussian_blur_single_channel_into(
     let radius = kernel.len() / 2;
 
     // --- Horizontal pass ---
+    // Interior uses transposed loop order: iterate kernel taps in the outer
+    // loop, pixels in the inner loop. This turns the per-pixel reduction into
+    // a contiguous slice multiply-accumulate that LLVM can auto-vectorize.
     for y in 0..height {
         let row = &data[y * width..(y + 1) * width];
         let out_row = &mut horiz[y * width..(y + 1) * width];
 
-        // Left edge
+        // Left edge (clamped)
         for x in 0..radius.min(width) {
             let mut acc = 0.0f32;
             for (ki, &kv) in kernel.iter().enumerate() {
@@ -230,18 +242,31 @@ pub(crate) fn gaussian_blur_single_channel_into(
             }
             out_row[x] = acc;
         }
-        // Interior
+
+        // Interior: transposed loop order for auto-vectorization.
         let x_start = radius.min(width);
         let x_end = width.saturating_sub(radius);
-        for x in x_start..x_end {
-            let mut acc = 0.0f32;
-            let base = x - radius;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                acc += row[base + ki] * kv;
+        let interior = x_end.saturating_sub(x_start);
+        if interior > 0 {
+            let out_interior = &mut out_row[x_start..x_end];
+
+            // First tap: initialize (write, no read of out)
+            let kv0 = kernel[0];
+            let src0 = &row[x_start - radius..x_end - radius];
+            for i in 0..interior {
+                out_interior[i] = src0[i] * kv0;
             }
-            out_row[x] = acc;
+            // Remaining taps: accumulate
+            for ki in 1..kernel.len() {
+                let kv = kernel[ki];
+                let src = &row[x_start - radius + ki..x_end - radius + ki];
+                for i in 0..interior {
+                    out_interior[i] += src[i] * kv;
+                }
+            }
         }
-        // Right edge
+
+        // Right edge (clamped)
         for x in x_end.max(x_start)..width {
             let mut acc = 0.0f32;
             for (ki, &kv) in kernel.iter().enumerate() {
@@ -253,11 +278,13 @@ pub(crate) fn gaussian_blur_single_channel_into(
     }
 
     // --- Vertical pass ---
+    // Already in transposed order: outer loop over kernel taps, inner loop
+    // over contiguous row elements. LLVM vectorizes the inner `for i` loops.
     // Top edge
     for y in 0..radius.min(height) {
         let out_row = &mut vert[y * width..(y + 1) * width];
         let yi0 = y.saturating_sub(radius);
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
         for i in 0..width {
             out_row[i] = src_row0[i] * kv0;
@@ -276,12 +303,13 @@ pub(crate) fn gaussian_blur_single_channel_into(
     for y in y_start..y_end {
         let out_row = &mut vert[y * width..(y + 1) * width];
         let yi0 = y - radius;
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
         for i in 0..width {
             out_row[i] = src_row0[i] * kv0;
         }
-        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
+        for ki in 1..kernel.len() {
+            let kv = kernel[ki];
             let yi = yi0 + ki;
             let src_row = &horiz[yi * width..(yi + 1) * width];
             for i in 0..width {
@@ -293,7 +321,7 @@ pub(crate) fn gaussian_blur_single_channel_into(
     for y in y_end.max(y_start)..height {
         let out_row = &mut vert[y * width..(y + 1) * width];
         let yi0 = y.saturating_sub(radius);
-        let &kv0 = &kernel[0];
+        let kv0 = kernel[0];
         let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
         for i in 0..width {
             out_row[i] = src_row0[i] * kv0;
