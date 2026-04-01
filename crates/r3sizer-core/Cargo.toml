@@ -31,3 +31,7 @@ harness = false
 [[bench]]
 name    = "kernel_bench"
 harness = false
+
+[[bench]]
+name    = "profile_e2e"
+harness = false

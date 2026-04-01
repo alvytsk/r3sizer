@@ -286,6 +286,7 @@ fn evaluator_diagnostics_populated_when_configured() {
     let src = gradient_image(16, 16);
     let params = AutoSharpParams {
         evaluator_config: Some(EvaluatorConfig::Heuristic),
+        diagnostics_level: DiagnosticsLevel::Full,
         ..default_params(4, 4)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
@@ -303,8 +304,12 @@ fn evaluator_diagnostics_populated_when_configured() {
 #[test]
 fn evaluator_on_by_default() {
     let src = gradient_image(16, 16);
-    let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
-    let ev = out.diagnostics.evaluator_result.expect("evaluator should be on by default");
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    let ev = out.diagnostics.evaluator_result.expect("evaluator should run in Full diagnostics mode");
     assert!((0.0..=1.0).contains(&ev.predicted_quality_score));
     assert!((0.0..=1.0).contains(&ev.confidence));
 }
@@ -325,6 +330,7 @@ fn evaluator_suggested_strength_in_range() {
     let src = gradient_image(16, 16);
     let params = AutoSharpParams {
         evaluator_config: Some(EvaluatorConfig::Heuristic),
+        diagnostics_level: DiagnosticsLevel::Full,
         ..default_params(4, 4)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
@@ -432,7 +438,10 @@ fn evaluator_features_vary_across_image_types() {
 #[test]
 fn default_pipeline_produces_valid_output_with_promoted_features() {
     let src = gradient_image(16, 16);
-    let params = default_params(4, 4);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(4, 4)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 4);
     assert_eq!(out.image.height(), 4);
@@ -442,7 +451,27 @@ fn default_pipeline_produces_valid_output_with_promoted_features() {
     // Not configured → absent
     assert!(out.diagnostics.input_ingress.is_none());
     assert!(out.diagnostics.resize_strategy_diagnostics.is_none());
-    // On by default → present
+    // On by default + Full diagnostics → present
     assert!(out.diagnostics.chroma_guard.is_some());
     assert!(out.diagnostics.evaluator_result.is_some());
+}
+
+#[test]
+fn summary_diagnostics_skips_expensive_inspection() {
+    let src = gradient_image(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Summary,
+        ..default_params(4, 4)
+    };
+    let out = process_auto_sharp_downscale(&src, &params).unwrap();
+    assert_eq!(out.image.width(), 4);
+    assert_eq!(out.image.height(), 4);
+    // Output image is still valid
+    assert!(out.diagnostics.selected_strength.is_finite());
+    assert!(out.diagnostics.measured_artifact_ratio.is_finite());
+    // Expensive inspection skipped
+    assert!(out.diagnostics.metric_components.is_none());
+    assert!(out.diagnostics.evaluator_result.is_none());
+    // Recommendations still run (cheap struct reads, no image processing).
+    // Rules that need evaluator_result skip gracefully when absent.
 }

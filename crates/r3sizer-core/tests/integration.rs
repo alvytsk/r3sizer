@@ -427,7 +427,10 @@ fn timing_total_gte_parts() {
 #[test]
 fn metric_breakdown_present_in_diagnostics() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.expect("metric_components should be present");
     assert_eq!(mc.components.len(), 4);
@@ -470,7 +473,10 @@ fn probe_samples_stripped_in_summary_mode() {
 #[test]
 fn metric_breakdown_selection_score_matches_measured() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.unwrap();
     assert!((mc.selection_score - out.diagnostics.measured_artifact_ratio).abs() < 1e-6);
@@ -479,7 +485,10 @@ fn metric_breakdown_selection_score_matches_measured() {
 #[test]
 fn composite_score_equals_weighted_sum() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.unwrap();
     let w = &out.diagnostics.metric_weights;
@@ -529,7 +538,10 @@ fn v02_components_are_finite_and_nonnegative() {
 #[allow(deprecated)]
 fn aggregate_equals_selection_score() {
     let src = gradient_image(64, 64);
-    let params = default_params(16, 16);
+    let params = AutoSharpParams {
+        diagnostics_level: DiagnosticsLevel::Full,
+        ..default_params(16, 16)
+    };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let mc = out.diagnostics.metric_components.unwrap();
     assert_eq!(mc.aggregate, mc.selection_score);
