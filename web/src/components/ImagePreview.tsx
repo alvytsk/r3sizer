@@ -155,11 +155,11 @@ function ComparisonSlider({
           </div>
         </div>
 
-        <span className="absolute top-2 left-2 z-10 pointer-events-none text-[10px] font-mono uppercase tracking-widest text-white/60 bg-black/40 px-1.5 py-0.5 rounded-sm">
-          Input
+        <span className="absolute bottom-2 left-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
+          <span className="uppercase tracking-widest">Input</span> <span className="text-white/60">{inputW}&times;{inputH}</span>
         </span>
-        <span className="absolute top-2 right-2 z-10 pointer-events-none text-[10px] font-mono uppercase tracking-widest text-white/60 bg-black/40 px-1.5 py-0.5 rounded-sm">
-          Output
+        <span className="absolute bottom-2 right-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
+          <span className="uppercase tracking-widest">Output</span> <span className="text-white/60">{outputW}&times;{outputH}</span>
         </span>
       </div>
     </div>

@@ -795,7 +795,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
       {recommendations.length > 1 && (
         <button
           type="button"
-          className="w-full text-[11px] font-mono text-muted-foreground hover:text-primary transition-colors text-center py-1"
+          className="w-full text-[11px] font-mono font-medium text-primary/70 hover:text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 rounded-md transition-colors text-center py-1.5"
           onClick={applyAll}
         >
           Apply all recommendations

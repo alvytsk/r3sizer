@@ -531,7 +531,7 @@ export function ParameterPanel() {
           </div>
           <button
             type="button"
-            className="shrink-0 h-8 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            className="shrink-0 h-8 w-8 flex items-center justify-center rounded-md border border-border/30 text-foreground/50 hover:text-primary hover:border-primary/30 hover:bg-primary/10 transition-colors"
             onClick={() =>
               updateParams({
                 target_width: params.target_height,
@@ -571,7 +571,7 @@ export function ParameterPanel() {
                 checked={lockDimensions}
                 onCheckedChange={setLockDimensions}
               />
-              <Label htmlFor="pin-dims" className="text-[13px] text-muted-foreground">
+              <Label htmlFor="pin-dims" className="text-[13px] text-foreground/70">
                 Pin exact
               </Label>
             </div>
@@ -616,7 +616,7 @@ export function ParameterPanel() {
                 <span className={`text-xs font-semibold ${active ? "text-primary" : "text-foreground/70"}`}>
                   {meta.label}
                 </span>
-                <span className={`block text-[10px] mt-0.5 ${active ? "text-primary/60" : "text-muted-foreground/40"}`}>
+                <span className={`block text-[10px] mt-0.5 ${active ? "text-primary/70" : "text-muted-foreground/60"}`}>
                   {meta.desc}
                 </span>
               </button>
@@ -653,7 +653,7 @@ export function ParameterPanel() {
                 <span className={`text-[10px] font-semibold ${active ? "text-primary" : "text-foreground/70"}`}>
                   {meta.label}
                 </span>
-                <span className={`block text-[9px] ${active ? "text-primary/50" : "text-muted-foreground/30"}`}>
+                <span className={`block text-[9px] ${active ? "text-primary/70" : "text-muted-foreground/60"}`}>
                   {meta.desc}
                 </span>
               </button>
@@ -663,26 +663,26 @@ export function ParameterPanel() {
         {/* Active config summary */}
         <div className="rounded-md border border-border/20 bg-surface/50 px-2.5 py-2">
           <div className="flex items-baseline gap-2 mb-1.5">
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/40">P₀</span>
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60">P₀</span>
             <span className="text-base font-mono font-bold text-primary tabular-nums">
               {params.target_artifact_ratio.toExponential(0)}
             </span>
-            <span className="text-[10px] text-muted-foreground/30">
+            <span className="text-[10px] text-muted-foreground/60">
               ({(params.target_artifact_ratio * 100).toFixed(1)}% budget)
             </span>
           </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/50 font-mono">
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70 font-mono">
             <span>
               {"TwoPass" in params.probe_strengths
                 ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} probes`
                 : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} probes`}
             </span>
-            <span className="text-border/40">|</span>
+            <span className="text-border/60">|</span>
             <span>
               {params.sharpen_strategy.strategy === "content_adaptive" ? "adaptive" : "uniform"}
               {params.experimental_sharpen_mode ? " + guard" : ""}
             </span>
-            <span className="text-border/40">|</span>
+            <span className="text-border/60">|</span>
             <span>{params.sharpen_mode}</span>
           </div>
         </div>
@@ -1022,7 +1022,7 @@ export function ParameterPanel() {
                 />
               </div>
             ))}
-            <p className="text-[10px] text-muted-foreground/40 italic">
+            <p className="text-[10px] text-muted-foreground/60 italic">
               Diagnostic only — does not affect selection
             </p>
           </div>

@@ -72,10 +72,10 @@ export function DownloadButton() {
           <button
             key={fmt}
             onClick={() => setFormat(fmt)}
-            className={`px-2 py-1 text-[11px] font-mono transition-colors ${
+            className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
               format === fmt
                 ? "bg-primary text-primary-foreground"
-                : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
+                : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
             }`}
           >
             {fmt.toUpperCase()}
@@ -90,10 +90,10 @@ export function DownloadButton() {
               <button
                 key={preset.label}
                 onClick={() => setQuality(preset.value)}
-                className={`px-2 py-1 text-[11px] font-mono transition-colors ${
+                className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
                   quality === preset.value
                     ? "bg-primary/20 text-primary"
-                    : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
+                    : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
                 }`}
               >
                 {preset.label}
