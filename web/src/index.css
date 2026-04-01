@@ -146,6 +146,7 @@
   --color-amber-bright: oklch(0.88 0.14 80);
   --color-surface: oklch(0.24 0.008 270);
   --color-surface-raised: oklch(0.30 0.01 270);
+  --color-panel-inset: oklch(0.13 0.004 270);
 }
 
 /* Grain overlay for darkroom texture */
@@ -208,6 +209,65 @@
       transparent 3px
     );
   }
+
+  /* Amber accent line — spatial anchor between header and content */
+  .accent-line {
+    background: linear-gradient(
+      to right,
+      transparent,
+      oklch(0.78 0.16 75 / 0.20) 15%,
+      oklch(0.78 0.16 75 / 0.35) 50%,
+      oklch(0.78 0.16 75 / 0.20) 85%,
+      transparent
+    );
+  }
+
+  /* Recessed viewport — inset shadow for the image viewing area */
+  .viewport-inset {
+    box-shadow:
+      inset 0 1px 3px oklch(0 0 0 / 0.4),
+      inset 0 0 12px oklch(0 0 0 / 0.15);
+  }
+
+  /* Crop mark corners — positioned via ::before and ::after on parent */
+  .crop-marks {
+    --cm-size: 14px;
+    --cm-weight: 1.5px;
+    --cm-color: oklch(0.78 0.16 75 / 0.35);
+    --cm-offset: -6px;
+  }
+
+  /* LED indicator dot — tiny status light */
+  .led {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .led-amber {
+    background: oklch(0.78 0.16 75);
+    box-shadow: 0 0 4px oklch(0.78 0.16 75 / 0.5);
+  }
+  .led-green {
+    background: oklch(0.68 0.17 150);
+    box-shadow: 0 0 4px oklch(0.68 0.17 150 / 0.5);
+  }
+  .led-dim {
+    background: oklch(0.35 0.01 270);
+    box-shadow: none;
+  }
+}
+
+/* KaTeX: inherit text color in dark mode instead of default black */
+.dark .katex,
+.dark .katex .mord,
+.dark .katex .mbin,
+.dark .katex .mrel,
+.dark .katex .mopen,
+.dark .katex .mclose,
+.dark .katex .mpunct,
+.dark .katex .minner {
+  color: inherit;
 }
 
 /* Respect prefers-reduced-motion for CSS animations */
