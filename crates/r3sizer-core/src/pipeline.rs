@@ -24,10 +24,10 @@ use crate::{
     sharpen::{make_kernel, unsharp_mask_with_kernel, unsharp_mask_single_channel_with_kernel},
     solve::{find_sharpness_with_policy, find_sharpness_direct_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ClampPolicy, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
-    RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy,
-    StageTiming, CoreError,
+    ClampPolicy, DiagnosticsLevel, FallbackReason, FitStatus, FitStrategy, ImageSize,
+    LinearRgbImage, MetricMode, ProbeConfig, ProbePassDiagnostics, ProbeSample,
+    ProcessOutput, RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode,
+    SharpenStrategy, StageTiming, CoreError,
 };
 
 /// Pipeline-internal result of a sharpening step.
@@ -676,36 +676,62 @@ fn finish_pipeline(
     let final_sharpen_us = t0.elapsed().as_micros() as u64;
 
     // --- Metrics on final image ---
-    let fallback_luma;
-    let base_luma = match prepared.base_luminance.as_deref() {
-        Some(l) => l,
-        None => { fallback_luma = color::extract_luminance(base); &fallback_luma }
-    };
-    let final_luma = color::extract_luminance(&final_image);
-    let final_breakdown = crate::metrics::compute_metric_breakdown(
-        &final_image, base, base_luma, &final_luma,
-        params.artifact_metric, &params.metric_weights,
-    );
-    let measured_artifact_ratio = match metric_override {
-        Some(f) => f(&final_image),
-        None => final_breakdown.selection_score,
+    //
+    // The inspection path (Full diagnostics) computes the complete metric
+    // breakdown (edge profiling, halo, overshoot, texture) and runs the
+    // post-sharpen evaluator.  The output path (Summary) only needs the
+    // selection metric (gamut check) for `measured_artifact_ratio`.
+    let full_diagnostics = matches!(params.diagnostics_level, DiagnosticsLevel::Full);
+
+    let (measured_artifact_ratio, final_breakdown) = if full_diagnostics {
+        // Full: compute all four metric components.
+        let fallback_luma;
+        let base_luma = match prepared.base_luminance.as_deref() {
+            Some(l) => l,
+            None => { fallback_luma = color::extract_luminance(base); &fallback_luma }
+        };
+        let final_luma = color::extract_luminance(&final_image);
+        let breakdown = crate::metrics::compute_metric_breakdown(
+            &final_image, base, base_luma, &final_luma,
+            params.artifact_metric, &params.metric_weights,
+        );
+        let ratio = match metric_override {
+            Some(f) => f(&final_image),
+            None => breakdown.selection_score,
+        };
+        (ratio, Some(breakdown))
+    } else {
+        // Summary: selection metric only — skip edge profiling, halo,
+        // overshoot, texture, and the luminance extractions they require.
+        let ratio = match metric_override {
+            Some(f) => f(&final_image),
+            None => crate::metrics::compute_selection_metric(
+                &final_image, params.artifact_metric,
+            ),
+        };
+        (ratio, None)
     };
     let measured_metric_value = compute_metric_value(
         measured_artifact_ratio, baseline_artifact_ratio, params.metric_mode,
     );
 
-    // Evaluator (full)
+    // Evaluator (full diagnostics only — purely diagnostic, does not
+    // alter the selection path or the output image).
     let (_evaluator_result, _evaluator_process_us) = {
-        if let Some(ref eval_config) = params.evaluator_config {
-            let t0 = Instant::now();
-            let result = match eval_config {
-                crate::types::EvaluatorConfig::Heuristic => {
-                    let eval = crate::evaluator::HeuristicEvaluator;
-                    crate::evaluator::QualityEvaluator::evaluate(&eval, base, &final_image, selected_strength)
-                }
-            };
-            let us = t0.elapsed().as_micros() as u64;
-            (Some(result), Some(us))
+        if full_diagnostics {
+            if let Some(ref eval_config) = params.evaluator_config {
+                let t0 = Instant::now();
+                let result = match eval_config {
+                    crate::types::EvaluatorConfig::Heuristic => {
+                        let eval = crate::evaluator::HeuristicEvaluator;
+                        crate::evaluator::QualityEvaluator::evaluate(&eval, base, &final_image, selected_strength)
+                    }
+                };
+                let us = t0.elapsed().as_micros() as u64;
+                (Some(result), Some(us))
+            } else {
+                (None, None)
+            }
         } else {
             (None, None)
         }
@@ -764,7 +790,7 @@ fn finish_pipeline(
         budget_reachable,
         measured_artifact_ratio,
         measured_metric_value,
-        metric_components: Some(final_breakdown),
+        metric_components: final_breakdown,
         metric_weights: params.metric_weights,
         region_coverage: prepared.region_coverage,
         adaptive_validation,

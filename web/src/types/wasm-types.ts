@@ -81,11 +81,12 @@ export {
 
 // ── Web-specific defaults ───────────────────────────────────────────────
 
-// Override: web UI needs "full" diagnostics for the diagnostics panel.
-// Rust defaults to "summary" which strips per-probe breakdowns.
+// Use Rust default (summary) for fast processing. The diagnostics panel
+// gracefully handles absent metric_components, evaluator_result, and
+// recommendations — those sections simply don't render.
+// Set diagnostics_level: "full" to enable the inspection path (slower).
 export const DEFAULT_PARAMS: AutoSharpParams = {
   ..._GENERATED_DEFAULT_PARAMS,
-  diagnostics_level: "full",
 };
 
 // ── Types not in Rust (WASM boundary or TS-only helpers) ────────────────
