@@ -318,7 +318,7 @@ export default function AlgorithmPage() {
   return (
     <div className="min-h-screen bg-background grain relative">
       {/* Navigation bar */}
-      <nav className="sticky top-0 z-20 border-b border-border/60 backdrop-blur-sm bg-background/80">
+      <nav className="sticky top-0 z-20 backdrop-blur-sm bg-background/80">
         <div className="max-w-6xl mx-auto px-6 py-2.5 flex items-center gap-3">
           <Link
             to="/"
@@ -332,6 +332,7 @@ export default function AlgorithmPage() {
             algorithm
           </span>
         </div>
+        <div className="h-px accent-line" />
       </nav>
 
       {/* Hero with curve background */}
@@ -421,8 +422,8 @@ export default function AlgorithmPage() {
             sRGB encoding is only applied at output.
           </p>
 
-          {/* Pipeline: stepped vertical grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-border/20 rounded-xl overflow-hidden border border-border/30 mb-8">
+          {/* Pipeline: stepped vertical grid — 4 columns avoids orphan (4+4+3) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-border/20 rounded-xl overflow-hidden border border-border/30 mb-8">
             {PIPELINE_STAGES.map(({ name, desc }, i) => (
               <div
                 key={name}
@@ -865,11 +866,14 @@ export default function AlgorithmPage() {
             Every run produces a complete diagnostics record — a
             JSON-serializable snapshot of the entire pipeline execution:
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-px bg-border/20 rounded-lg overflow-hidden border border-border/30">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {DIAGNOSTICS_FIELDS.map(([label, desc]) => (
-              <div key={label} className="bg-card px-3.5 py-2.5">
-                <p className="text-xs font-mono font-medium text-foreground/80">{label}</p>
-                <p className="text-[11px] text-muted-foreground/50 mt-0.5">{desc}</p>
+              <div key={label} className="flex rounded-lg bg-card border border-border/30 overflow-hidden">
+                <div className="w-1 flex-shrink-0 bg-primary/15" />
+                <div className="px-3.5 py-2.5">
+                  <p className="text-xs font-mono font-medium text-foreground/80">{label}</p>
+                  <p className="text-[11px] text-muted-foreground/50 mt-0.5">{desc}</p>
+                </div>
               </div>
             ))}
           </div>
