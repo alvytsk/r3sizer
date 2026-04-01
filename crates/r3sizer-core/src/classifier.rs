@@ -54,27 +54,72 @@ pub(crate) fn classify_features(
 ///
 /// L2 norm: `g = sqrt(Gx² + Gy²)`. Theoretical max for luminance in [0,1]: 4√2 ≈ 5.66.
 /// Border handling: edge-replicate (clamp pixel coordinates to valid range).
+///
+/// Split into border (clamped) and interior (unchecked) loops for performance.
+/// The interior loop has no bounds checks, enabling auto-vectorization.
 fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f32> {
     let n = width * height;
     let mut grad = vec![0.0_f32; n];
 
+    // Clamped version for border pixels.
     let clamp_x = |x: isize| -> usize { (x.max(0) as usize).min(width - 1) };
     let clamp_y = |y: isize| -> usize { (y.max(0) as usize).min(height - 1) };
     let px = |x: isize, y: isize| -> f32 { luma[clamp_y(y) * width + clamp_x(x)] };
 
-    for y in 0..height {
-        let yi = y as isize;
+    #[inline(always)]
+    fn sobel_clamped(px: impl Fn(isize, isize) -> f32, xi: isize, yi: isize) -> f32 {
+        let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
+            - 2.0 * px(xi - 1, yi) + 2.0 * px(xi + 1, yi)
+            - px(xi - 1, yi + 1) + px(xi + 1, yi + 1);
+        let gy = -px(xi - 1, yi - 1) - 2.0 * px(xi, yi - 1) - px(xi + 1, yi - 1)
+            + px(xi - 1, yi + 1) + 2.0 * px(xi, yi + 1) + px(xi + 1, yi + 1);
+        (gx * gx + gy * gy).sqrt()
+    }
+
+    // Top border row (y == 0)
+    #[allow(clippy::needless_range_loop)] // x used both as grad index and Sobel coordinate
+    if height > 0 {
         for x in 0..width {
-            let xi = x as isize;
+            grad[x] = sobel_clamped(px, x as isize, 0);
+        }
+    }
 
-            let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
-                - 2.0 * px(xi - 1, yi) + 2.0 * px(xi + 1, yi)
-                - px(xi - 1, yi + 1) + px(xi + 1, yi + 1);
+    // Left and right border columns + interior for rows 1..height-1
+    for y in 1..height.saturating_sub(1) {
+        // Left border pixel
+        grad[y * width] = sobel_clamped(px, 0, y as isize);
 
-            let gy = -px(xi - 1, yi - 1) - 2.0 * px(xi, yi - 1) - px(xi + 1, yi - 1)
-                + px(xi - 1, yi + 1) + 2.0 * px(xi, yi + 1) + px(xi + 1, yi + 1);
+        // Interior: direct indexing, no bounds checks
+        let prev_row = &luma[(y - 1) * width..y * width];
+        let curr_row = &luma[y * width..(y + 1) * width];
+        let next_row = &luma[(y + 1) * width..(y + 2) * width];
+        let out_row = &mut grad[y * width..(y + 1) * width];
+        for x in 1..width.saturating_sub(1) {
+            let tl = prev_row[x - 1];
+            let tc = prev_row[x];
+            let tr = prev_row[x + 1];
+            let ml = curr_row[x - 1];
+            let mr = curr_row[x + 1];
+            let bl = next_row[x - 1];
+            let bc = next_row[x];
+            let br = next_row[x + 1];
 
-            grad[y * width + x] = (gx * gx + gy * gy).sqrt();
+            let gx = -tl + tr - 2.0 * ml + 2.0 * mr - bl + br;
+            let gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br;
+            out_row[x] = (gx * gx + gy * gy).sqrt();
+        }
+
+        // Right border pixel
+        if width > 1 {
+            grad[y * width + width - 1] = sobel_clamped(px, (width - 1) as isize, y as isize);
+        }
+    }
+
+    // Bottom border row (y == height - 1), if height > 1
+    if height > 1 {
+        let y = height - 1;
+        for x in 0..width {
+            grad[y * width + x] = sobel_clamped(px, x as isize, y as isize);
         }
     }
 
@@ -89,27 +134,73 @@ fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f3
 ///
 /// `window_size` must be odd and >= 3 (validated by ClassificationParams).
 /// Border handling: edge-replicate.
+///
+/// Uses summed area tables (SAT) for O(1) per-pixel variance instead of
+/// the naive O(W²) scan. The luma buffer is padded with replicated edges
+/// so that every pixel sees a full `window_size × window_size` window.
 fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize) -> Vec<f32> {
+    let half = window_size / 2;
+    let count = (window_size * window_size) as f64;
+    let inv_count = 1.0 / count;
+
+    // Build edge-replicated padded buffer.
+    let pw = width + 2 * half;  // padded width
+    let ph = height + 2 * half; // padded height
+    let mut padded = vec![0.0_f32; pw * ph];
+    for py in 0..ph {
+        let sy = py.saturating_sub(half).min(height - 1);
+        for px in 0..pw {
+            let sx = px.saturating_sub(half).min(width - 1);
+            padded[py * pw + px] = luma[sy * width + sx];
+        }
+    }
+
+    // Build SATs for sum and sum-of-squares.
+    // SAT is (ph+1) × (pw+1) with a zero-padded top row and left column.
+    let sat_w = pw + 1;
+    let sat_h = ph + 1;
+    let mut sat_sum = vec![0.0_f64; sat_w * sat_h];
+    let mut sat_sq = vec![0.0_f64; sat_w * sat_h];
+
+    for y in 0..ph {
+        for x in 0..pw {
+            let v = padded[y * pw + x] as f64;
+            let idx = (y + 1) * sat_w + (x + 1);
+            sat_sum[idx] = v
+                + sat_sum[y * sat_w + (x + 1)]
+                + sat_sum[(y + 1) * sat_w + x]
+                - sat_sum[y * sat_w + x];
+            sat_sq[idx] = v * v
+                + sat_sq[y * sat_w + (x + 1)]
+                + sat_sq[(y + 1) * sat_w + x]
+                - sat_sq[y * sat_w + x];
+        }
+    }
+
+    // Query: for pixel (x, y) in the original image, the window in padded
+    // coordinates is [x, x + window_size) × [y, y + window_size).
+    // In SAT coordinates (1-indexed): top-left = (y, x), bottom-right = (y + window_size, x + window_size).
     let n = width * height;
     let mut var = vec![0.0_f32; n];
-    let half = (window_size / 2) as isize;
-    let count = (window_size * window_size) as f32;
 
     for y in 0..height {
         for x in 0..width {
-            let mut sum = 0.0_f32;
-            let mut sum_sq = 0.0_f32;
-            for dy in -half..=half {
-                let yy = (y as isize + dy).max(0).min(height as isize - 1) as usize;
-                for dx in -half..=half {
-                    let xx = (x as isize + dx).max(0).min(width as isize - 1) as usize;
-                    let v = luma[yy * width + xx];
-                    sum += v;
-                    sum_sq += v * v;
-                }
-            }
-            let mean = sum / count;
-            var[y * width + x] = (sum_sq / count - mean * mean).max(0.0);
+            let y0 = y;
+            let x0 = x;
+            let y1 = y + window_size;
+            let x1 = x + window_size;
+
+            let s = sat_sum[y1 * sat_w + x1]
+                - sat_sum[y0 * sat_w + x1]
+                - sat_sum[y1 * sat_w + x0]
+                + sat_sum[y0 * sat_w + x0];
+            let sq = sat_sq[y1 * sat_w + x1]
+                - sat_sq[y0 * sat_w + x1]
+                - sat_sq[y1 * sat_w + x0]
+                + sat_sq[y0 * sat_w + x0];
+
+            let mean = s * inv_count;
+            var[y * width + x] = (sq * inv_count - mean * mean).max(0.0) as f32;
         }
     }
 

@@ -6,24 +6,28 @@ license.workspace = true
 description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
 
 [features]
-default = ["parallel"]
-parallel = ["rayon", "image/rayon"]
-typegen      = ["ts-rs"]
+default     = ["parallel"]
+parallel    = ["rayon", "image/rayon"]
+typegen     = ["ts-rs"]
 
 [dependencies]
-thiserror = { workspace = true }
-serde     = { workspace = true }
-image     = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+thiserror   = { workspace = true }
+serde       = { workspace = true }
+image       = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 fast_image_resize = { workspace = true }
-rayon     = { version = "1", optional = true }
-web-time  = { workspace = true }
-ts-rs     = { workspace = true, optional = true }
+rayon       = { version = "1", optional = true }
+web-time    = { workspace = true }
+ts-rs       = { workspace = true, optional = true }
 
 [dev-dependencies]
-approx     = { workspace = true }
-criterion  = { workspace = true }
-serde_json = { workspace = true }
+approx      = { workspace = true }
+criterion   = { workspace = true }
+serde_json  = { workspace = true }
 
 [[bench]]
 name    = "pipeline_bench"
+harness = false
+
+[[bench]]
+name    = "kernel_bench"
 harness = false
