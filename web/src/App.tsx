@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { Loader2, FolderOpen, ChevronLeft, ChevronRight, BarChart3, SlidersHorizontal, Lock, BookOpen } from "lucide-react";
+import { Loader2, FolderOpen, ChevronLeft, ChevronRight, BarChart3, SlidersHorizontal, Lock, BookOpen, Play, RefreshCw, AlertTriangle, Activity, Pipette, Scaling, Sparkles, Target } from "lucide-react";
 import { DownloadButton } from "@/components/DownloadButton";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePreview } from "@/components/ImagePreview";
@@ -220,8 +220,12 @@ export default function App() {
                 className={paramsChanged ? "glow-amber border border-primary/40" : "glow-amber"}
                 size="sm"
               >
-                {isProcessing && (
+                {isProcessing ? (
                   <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : paramsChanged ? (
+                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                ) : (
+                  <Play className="h-3.5 w-3.5 mr-1.5" />
                 )}
                 {isProcessing
                   ? "Processing..."
@@ -272,7 +276,8 @@ export default function App() {
 
           {/* Error banner */}
           {error && (
-            <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex-shrink-0">
+            <div className="px-4 py-2 bg-destructive/10 border-b border-destructive/20 flex-shrink-0 flex items-center gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
               <span className="text-destructive text-xs font-mono">{error}</span>
             </div>
           )}
@@ -305,14 +310,14 @@ export default function App() {
                         ]}
                         easing={[0.16, 1, 0.3, 1]}
                       />
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-primary/25 bg-primary/[0.06] text-xs font-mono tracking-wide">
-                        <Lock className="h-3 w-3 text-primary/80" />
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-green-500/25 bg-green-500/[0.06] text-xs font-mono tracking-wide">
+                        <Lock className="h-3 w-3 text-green-400/80" />
                         <ShinyText
                           text="Runs entirely in your browser"
                           speed={3.5}
                           delay={1}
-                          color="oklch(0.64 0.015 80)"
-                          shineColor="oklch(0.88 0.14 80)"
+                          color="oklch(0.72 0.15 145)"
+                          shineColor="oklch(0.90 0.20 145)"
                           className="text-xs font-mono tracking-wide"
                         />
                       </span>
@@ -329,13 +334,13 @@ export default function App() {
                   </div>
                   {/* Pipeline hint — hidden on narrow screens */}
                   <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50 animate-fade-up delay-400">
-                    <span>linearize</span>
+                    <span className="inline-flex items-center gap-1"><Pipette className="h-3 w-3" />linearize</span>
                     <span className="text-primary/30">&rarr;</span>
-                    <span>downscale</span>
+                    <span className="inline-flex items-center gap-1"><Scaling className="h-3 w-3" />downscale</span>
                     <span className="text-primary/30">&rarr;</span>
-                    <span>sharpen</span>
+                    <span className="inline-flex items-center gap-1"><Sparkles className="h-3 w-3" />sharpen</span>
                     <span className="text-primary/30">&rarr;</span>
-                    <span>optimize</span>
+                    <span className="inline-flex items-center gap-1"><Target className="h-3 w-3" />optimize</span>
                   </div>
                 </div>
               </div>
@@ -424,7 +429,7 @@ export default function App() {
           </>
         ) : (
           <span className="flex items-center gap-2">
-            <span className="led led-dim" />
+            <Activity className="h-3 w-3 text-muted-foreground/30" />
             <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">ready</span>
           </span>
         )}

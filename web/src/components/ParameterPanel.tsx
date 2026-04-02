@@ -480,7 +480,7 @@ export function ParameterPanel() {
   const [activePreset, setActivePreset] = useState("photo");
 
   return (
-    <TooltipProvider>
+    <TooltipProvider delay={100}>
     <div className="p-3 space-y-4">
       {/* Dimensions */}
       <div className="space-y-2">
