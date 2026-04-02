@@ -41,8 +41,8 @@ export default function App() {
   const error = useProcessorStore((s) => s.error);
   const diagnostics = useProcessorStore((s) => s.diagnostics);
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
-  const params = useProcessorStore((s) => s.params);
-  const lastProcessedParams = useProcessorStore((s) => s.lastProcessedParams);
+  const paramsVersion = useProcessorStore((s) => s.paramsVersion);
+  const lastProcessedVersion = useProcessorStore((s) => s.lastProcessedVersion);
   const setInput = useProcessorStore((s) => s.setInput);
   const process = useProcessorStore((s) => s.process);
   const reset = useProcessorStore((s) => s.reset);
@@ -54,11 +54,7 @@ export default function App() {
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const paramsChanged = !!(
-    lastProcessedParams &&
-    outputRgbaData &&
-    JSON.stringify(params) !== JSON.stringify(lastProcessedParams)
-  );
+  const paramsChanged = !!(outputRgbaData && paramsVersion !== lastProcessedVersion);
 
   const handleOpenFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {

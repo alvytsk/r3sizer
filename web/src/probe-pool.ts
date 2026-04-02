@@ -33,6 +33,9 @@ export interface ProbePoolResult {
 
 const DEFAULT_POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 6);
 
+/** Timeout for individual probe operations (ms). */
+const PROBE_TIMEOUT = 30_000;
+
 let pool: Worker[] = [];
 let poolReady: Promise<void> | null = null;
 let nextProbeId = 0;
@@ -108,10 +111,15 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
   await poolReady;
 
   const promises = pool.map((w) => {
-    return new Promise<void>((resolve) => {
+    return new Promise<void>((resolve, reject) => {
       const id = nextProbeId++;
+      const timer = setTimeout(() => {
+        w.removeEventListener("message", handler);
+        reject(new Error("Probe worker set_base timed out"));
+      }, PROBE_TIMEOUT);
       const handler = (e: MessageEvent<ProbeWorkerResponse>) => {
         if (e.data.type !== "base_cached" || e.data.id !== id) return;
+        clearTimeout(timer);
         w.removeEventListener("message", handler);
         resolve();
       };
@@ -191,9 +199,14 @@ function runProbeOnWorker(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const id = nextProbeId++;
+    const timer = setTimeout(() => {
+      worker.removeEventListener("message", handler);
+      reject(new Error("Probe worker timed out"));
+    }, PROBE_TIMEOUT);
 
     const handler = (e: MessageEvent<ProbeWorkerResponse>) => {
       if (e.data.type !== "probe_result" || e.data.id !== id) return;
+      clearTimeout(timer);
       worker.removeEventListener("message", handler);
       if (e.data.error) {
         reject(new Error(e.data.error));

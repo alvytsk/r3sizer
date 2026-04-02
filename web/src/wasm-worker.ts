@@ -29,7 +29,8 @@ export interface WorkerRequest {
 export interface WorkerResponse {
   type:
     | "ready" | "result" | "prepared" | "base_prepared"
-    | "base_data" | "detail" | "progress" | "strengths" | "dense_result";
+    | "base_data" | "detail" | "progress" | "strengths" | "dense_result"
+    | "cache_cleared";
   id?: number;
   stage?: string;
   result?: {
@@ -63,7 +64,9 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   }
 
   if (msg.type === "clear_cache") {
+    const { id } = msg;
     if (ready) clear_cache();
+    (self as unknown as Worker).postMessage({ type: "cache_cleared", id } as WorkerResponse);
     return;
   }
 

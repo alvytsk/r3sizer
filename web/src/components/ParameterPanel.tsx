@@ -25,6 +25,7 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { useProcessorStore } from "@/stores/processor-store";
+import { useThrottledUpdateParams, useDebouncedUpdateParams } from "@/hooks/useThrottledParams";
 import type {
   AutoSharpParams,
   MetricWeights,
@@ -460,6 +461,8 @@ const ALL_PRESETS = DIMENSION_PRESETS.flatMap((g) => g.items);
 export function ParameterPanel() {
   const params = useProcessorStore((s) => s.params);
   const updateParams = useProcessorStore((s) => s.updateParams);
+  const throttledUpdate = useThrottledUpdateParams();
+  const debouncedUpdate = useDebouncedUpdateParams();
   const preserveAspectRatio = useProcessorStore((s) => s.preserveAspectRatio);
   const setPreserveAspectRatio = useProcessorStore(
     (s) => s.setPreserveAspectRatio
@@ -707,7 +710,7 @@ export function ParameterPanel() {
             step={0.1}
             value={[params.sharpen_sigma]}
             onValueChange={(v) =>
-              updateParams({ sharpen_sigma: sliderValue(v) })
+              throttledUpdate({ sharpen_sigma: sliderValue(v) })
             }
           />
         </div>
@@ -778,7 +781,7 @@ export function ParameterPanel() {
               step={0.1}
               value={[logRatio]}
               onValueChange={(v) =>
-                updateParams({ target_artifact_ratio: Math.pow(10, sliderValue(v)) })
+                throttledUpdate({ target_artifact_ratio: Math.pow(10, sliderValue(v)) })
               }
             />
           </div>
@@ -831,7 +834,7 @@ export function ParameterPanel() {
           {params.sharpen_strategy.strategy === "content_adaptive" && (
             <AdaptiveSettings
               strategy={params.sharpen_strategy}
-              updateParams={updateParams}
+              updateParams={throttledUpdate}
             />
           )}
 
@@ -972,7 +975,7 @@ export function ParameterPanel() {
                   .map((s) => parseFloat(s.trim()))
                   .filter((n) => !isNaN(n) && n > 0);
                 if (vals.length > 0) {
-                  updateParams({
+                  debouncedUpdate({
                     probe_strengths: { Explicit: vals },
                   });
                 }
@@ -1017,7 +1020,7 @@ export function ParameterPanel() {
                       ...params.metric_weights,
                       [key]: sliderValue(v),
                     };
-                    updateParams({ metric_weights: w });
+                    throttledUpdate({ metric_weights: w });
                   }}
                 />
               </div>
