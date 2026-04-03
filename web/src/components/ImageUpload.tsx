@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { useProcessorStore } from "@/stores/processor-store";
+import { loadImageAsRgba } from "@/lib/image-loader";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
@@ -11,25 +12,9 @@ export function ImageUpload() {
 
   const handleFile = useCallback(
     (file: File) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        setInput(
-          file,
-          new Uint8Array(imageData.data.buffer),
-          canvas.width,
-          canvas.height
-        );
-        URL.revokeObjectURL(url);
-      };
-      img.src = url;
+      loadImageAsRgba(file).then(({ data, width, height }) => {
+        setInput(file, data, width, height);
+      });
     },
     [setInput]
   );
