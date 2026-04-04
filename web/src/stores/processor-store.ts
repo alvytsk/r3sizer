@@ -106,6 +106,10 @@ interface ProcessorState {
   diagnostics: AutoSharpDiagnostics | null;
   lastProcessedParams: AutoSharpParams | null;
 
+  // Change tracking (cheap dirty check without JSON.stringify)
+  paramsVersion: number;
+  lastProcessedVersion: number;
+
   // Actions
   setInput: (
     file: File,
@@ -151,6 +155,8 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   outputHeight: 0,
   diagnostics: null,
   lastProcessedParams: null,
+  paramsVersion: 0,
+  lastProcessedVersion: 0,
 
   setInput: (file, rgbaData, width, height) => {
     const state = get();
@@ -225,7 +231,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       saveDims(isPortrait, newParams.target_width, newParams.target_height);
     }
 
-    set({ params: newParams });
+    set({ params: newParams, paramsVersion: state.paramsVersion + 1 });
   },
 
   setPreserveAspectRatio: (v) => {
@@ -288,6 +294,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
         outputHeight: result.outputHeight,
         diagnostics: result.diagnostics,
         lastProcessedParams: { ...state.params },
+        lastProcessedVersion: get().paramsVersion,
         isProcessing: false,
         processingStage: null,
       });
@@ -323,6 +330,8 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       outputHeight: 0,
       diagnostics: null,
       lastProcessedParams: null,
+      paramsVersion: 0,
+      lastProcessedVersion: 0,
     });
   },
 }));

@@ -103,6 +103,7 @@ function ComparisonSlider({
   const outputCanvasRef = useRef<HTMLCanvasElement>(null);
   const [sliderPos, setSliderPos] = useState(50);
   const dims = useFittedDims(wrapperRef, outputW, outputH);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (inputCanvasRef.current)
@@ -113,6 +114,11 @@ function ComparisonSlider({
     if (outputCanvasRef.current)
       renderToCanvas(outputCanvasRef.current, outputRgba, outputW, outputH);
   }, [outputRgba, outputW, outputH]);
+
+  // Clean up document-level listeners if component unmounts mid-drag.
+  useEffect(() => {
+    return () => cleanupRef.current?.();
+  }, []);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -130,9 +136,11 @@ function ComparisonSlider({
     const onUp = () => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
+      cleanupRef.current = null;
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
+    cleanupRef.current = onUp;
   }, []);
 
   return (

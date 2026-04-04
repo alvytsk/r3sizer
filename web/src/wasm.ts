@@ -7,8 +7,12 @@ import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
 let nextId = 0;
+
+/** Timeout for pending worker requests (ms). Prevents permanent hangs. */
+const WORKER_TIMEOUT = 30_000;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pending = new Map<number, { resolve: (r: any) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (r: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
 
 // ---------------------------------------------------------------------------
 // Progress callback — set by the store to receive pipeline stage updates.
@@ -61,9 +65,13 @@ function ensureWorker(): Promise<void> {
           rejectReady(new Error(msg));
           // Reject all pending calls
           for (const [id, cb] of pending) {
+            clearTimeout(cb.timer);
             cb.reject(new Error(msg));
             pending.delete(id);
           }
+          // Reset state so ensureWorker() can retry on next call
+          worker = null;
+          workerReadyPromise = null;
         };
 
         w.onmessage = (e: MessageEvent<WorkerResponse>) => {
@@ -87,6 +95,7 @@ function ensureWorker(): Promise<void> {
           if (data.id != null) {
             const cb = pending.get(data.id);
             if (!cb) return;
+            clearTimeout(cb.timer);
             pending.delete(data.id);
             if (data.error) {
               cb.reject(new Error(data.error));
@@ -101,6 +110,8 @@ function ensureWorker(): Promise<void> {
             } else if (data.type === "dense_result") {
               cb.resolve(data.denseResult ?? null);
             } else if (data.type === "base_prepared") {
+              cb.resolve(undefined);
+            } else if (data.type === "cache_cleared") {
               cb.resolve(undefined);
             }
           }
@@ -144,7 +155,7 @@ ensureWorker().catch(() => {
  */
 export async function clearAllCaches(): Promise<void> {
   await ensureWorker();
-  worker!.postMessage({ type: "clear_cache" } as WorkerRequest);
+  await callWorker<void>({ type: "clear_cache" });
   resetBaseCache();
 }
 
@@ -158,7 +169,11 @@ export async function processImageAsync(
 
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error("Worker request timed out (process)"));
+    }, WORKER_TIMEOUT);
+    pending.set(id, { resolve, reject, timer });
 
     const msg: WorkerRequest = {
       type: "process",
@@ -331,7 +346,11 @@ function getBaseData(): Promise<BaseData | null> {
 function callWorker<T>(msg: Omit<WorkerRequest, "id">): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Worker request timed out (${msg.type})`));
+    }, WORKER_TIMEOUT);
+    pending.set(id, { resolve, reject, timer });
     worker!.postMessage({ ...msg, id } as WorkerRequest);
   });
 }

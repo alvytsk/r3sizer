@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useProcessorStore, type ExportFormat } from "@/stores/processor-store";
 
 const FORMAT_EXT: Record<ExportFormat, string> = {
@@ -15,14 +16,8 @@ const FORMAT_MIME: Record<ExportFormat, string> = {
   webp: "image/webp",
 };
 
-const QUALITY_PRESETS = [
-  { label: "Max", value: 100 },
-  { label: "High", value: 90 },
-  { label: "Std", value: 80 },
-  { label: "Low", value: 60 },
-] as const;
-
 export function DownloadButton() {
+  const { t } = useTranslation();
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
   const outputWidth = useProcessorStore((s) => s.outputWidth);
   const outputHeight = useProcessorStore((s) => s.outputHeight);
@@ -63,6 +58,12 @@ export function DownloadButton() {
   if (!outputRgbaData) return null;
 
   const isLossy = format !== "png";
+  const qualityPresets = [
+    { label: t("download.max"), value: 100 },
+    { label: t("download.high"), value: 90 },
+    { label: t("download.std"), value: 80 },
+    { label: t("download.low"), value: 60 },
+  ] as const;
 
   return (
     <div className="flex items-center gap-2">
@@ -86,9 +87,9 @@ export function DownloadButton() {
       <div className="hidden xl:flex items-center">
         {isLossy ? (
           <div className="flex rounded-md border border-border/40 overflow-hidden">
-            {QUALITY_PRESETS.map((preset) => (
+            {qualityPresets.map((preset) => (
               <button
-                key={preset.label}
+                key={preset.value}
                 onClick={() => setQuality(preset.value)}
                 className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
                   quality === preset.value
@@ -102,7 +103,7 @@ export function DownloadButton() {
           </div>
         ) : (
           <span className="px-2 py-1 text-[11px] font-mono text-muted-foreground border border-border/40 rounded-md bg-card">
-            Lossless
+            {t("download.lossless")}
           </span>
         )}
       </div>
@@ -111,12 +112,15 @@ export function DownloadButton() {
         size="sm"
         onClick={handleDownload}
         className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
-        title={`Save as ${format.toUpperCase()}${isLossy ? ` · Q${quality}` : " · Lossless"}`}
+        title={isLossy
+          ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })
+          : t("download.saveAsLossless", { format: format.toUpperCase() })
+        }
       >
         <Download className="h-3.5 w-3.5 mr-1" />
         {/* Below lg: show format in button since selector is hidden */}
         <span className="lg:hidden">{format.toUpperCase()}</span>
-        <span className="hidden lg:inline">Save</span>
+        <span className="hidden lg:inline">{t("download.save")}</span>
       </Button>
     </div>
   );
