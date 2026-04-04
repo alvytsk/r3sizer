@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useTranslation } from "react-i18next";
 import { useProcessorStore } from "@/stores/processor-store";
 import { TimingBar } from "./TimingBar";
 import { SummaryTab } from "./diagnostics/SummaryTab";
@@ -7,6 +8,7 @@ import { FitTab } from "./diagnostics/FitTab";
 import { JsonViewer } from "./diagnostics/JsonViewer";
 
 export function DiagnosticsPanel() {
+  const { t } = useTranslation();
   const diagnostics = useProcessorStore((s) => s.diagnostics);
   if (!diagnostics) return null;
 
@@ -15,19 +17,19 @@ export function DiagnosticsPanel() {
       <Tabs defaultValue="advice" className="w-full">
         <TabsList variant="line" className="grid grid-cols-5 w-full h-8">
           <TabsTrigger value="advice" className="text-[13px] font-mono">
-            Advice
+            {t("diagnostics.advice")}
           </TabsTrigger>
           <TabsTrigger value="summary" className="text-[13px] font-mono">
-            Summary
+            {t("diagnostics.summary")}
           </TabsTrigger>
           <TabsTrigger value="fit" className="text-[13px] font-mono">
-            Fit
+            {t("diagnostics.fit")}
           </TabsTrigger>
           <TabsTrigger value="timing" className="text-[13px] font-mono">
-            Timing
+            {t("diagnostics.timing")}
           </TabsTrigger>
           <TabsTrigger value="json" className="text-[13px] font-mono">
-            JSON
+            {t("diagnostics.json")}
           </TabsTrigger>
         </TabsList>
 

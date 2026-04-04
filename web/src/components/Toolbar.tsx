@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Loader2, FolderOpen, SlidersHorizontal, BarChart3, Play, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { DownloadButton } from "@/components/DownloadButton";
 
 export function Toolbar({
@@ -21,10 +22,12 @@ export function Toolbar({
   onShowParams: () => void;
   onShowDiag: () => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="px-4 py-2 border-b border-border/30 flex items-center gap-2 flex-shrink-0">
       {paramsChanged && (
-        <div className="w-2 h-2 rounded-full bg-primary animate-pulse" title="Parameters changed" />
+        <div className="w-2 h-2 rounded-full bg-primary animate-pulse" title={t("toolbar.paramsChanged")} />
       )}
       <Button
         onClick={onProcess}
@@ -40,17 +43,17 @@ export function Toolbar({
           <Play className="h-3.5 w-3.5 mr-1.5" />
         )}
         {isProcessing
-          ? "Processing..."
+          ? t("toolbar.processing")
           : paramsChanged
-            ? "Reprocess"
-            : "Process"}
+            ? t("toolbar.reprocess")
+            : t("toolbar.process")}
       </Button>
       <span className={`text-[11px] font-mono hidden sm:inline ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}>
         {isProcessing
-          ? processingStage || "starting..."
+          ? processingStage || t("toolbar.starting")
           : paramsChanged
-            ? "parameters changed"
-            : "auto-sharpness downscale"}
+            ? t("toolbar.paramsChanged")
+            : t("toolbar.autoSharpness")}
       </span>
       <div className="flex items-center gap-1 ml-auto">
         {hasOutput && <DownloadButton />}
@@ -59,7 +62,7 @@ export function Toolbar({
           size="sm"
           onClick={onOpenFile}
           className="text-muted-foreground hover:text-foreground"
-          title="Open another image"
+          title={t("toolbar.openFile")}
         >
           <FolderOpen className="h-3.5 w-3.5" />
         </Button>
@@ -69,7 +72,7 @@ export function Toolbar({
           size="sm"
           onClick={onShowParams}
           className="text-muted-foreground hover:text-primary lg:hidden"
-          title="Parameters"
+          title={t("toolbar.parameters")}
         >
           <SlidersHorizontal className="h-3.5 w-3.5" />
         </Button>
@@ -78,7 +81,7 @@ export function Toolbar({
           size="sm"
           onClick={onShowDiag}
           className="text-muted-foreground hover:text-primary lg:hidden"
-          title="Diagnostics"
+          title={t("toolbar.diagnostics")}
         >
           <BarChart3 className="h-3.5 w-3.5" />
         </Button>

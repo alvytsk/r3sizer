@@ -1,7 +1,10 @@
 import { Activity } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { AutoSharpDiagnostics } from "@/types/wasm-types";
 
 export function StatusBar({ diagnostics }: { diagnostics: AutoSharpDiagnostics | null }) {
+  const { t } = useTranslation();
+
   return (
     <footer className="footer-separator border-t border-border/40 px-5 flex items-center gap-5 bg-background/90 backdrop-blur-sm flex-shrink-0 h-9">
       {diagnostics ? (
@@ -18,7 +21,7 @@ export function StatusBar({ diagnostics }: { diagnostics: AutoSharpDiagnostics |
           </span>
           <span className="w-px h-3 bg-border/30 flex-shrink-0" />
           <span className="flex items-center gap-1.5">
-            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">Out</span>
+            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">{t("diagnostics.output")}</span>
             <span className="text-[11px] font-mono text-foreground tabular-nums">{diagnostics.output_size.width}&times;{diagnostics.output_size.height}</span>
           </span>
           <span className="ml-auto flex items-center gap-1.5">
@@ -29,7 +32,7 @@ export function StatusBar({ diagnostics }: { diagnostics: AutoSharpDiagnostics |
       ) : (
         <span className="flex items-center gap-2">
           <Activity className="h-3 w-3 text-muted-foreground/30" />
-          <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">ready</span>
+          <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">{t("status.ready")}</span>
         </span>
       )}
     </footer>

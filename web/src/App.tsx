@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { ChevronLeft, ChevronRight, BarChart3, AlertTriangle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ImagePreview } from "@/components/ImagePreview";
 import { ParameterPanel } from "@/components/ParameterPanel";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
@@ -15,6 +16,7 @@ import { loadImageAsRgba } from "@/lib/image-loader";
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
 export default function App() {
+  const { t } = useTranslation();
   const inputFile = useProcessorStore((s) => s.inputFile);
   const isProcessing = useProcessorStore((s) => s.isProcessing);
   const processingStage = useProcessorStore((s) => s.processingStage);
@@ -99,12 +101,12 @@ export default function App() {
                 <button
                   onClick={() => setSidebarOpen(!sidebarOpen)}
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
-                  title={sidebarOpen ? "Collapse panel" : "Show parameters"}
+                  title={sidebarOpen ? t("sidebar.collapsePanel") : t("sidebar.showParameters")}
                 >
                   {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </button>
                 <span className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}>
-                  Parameters
+                  {t("sidebar.parameters")}
                 </span>
               </div>
               <div className={`flex-1 overflow-y-auto transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}>
@@ -171,12 +173,12 @@ export default function App() {
                 <button
                   onClick={() => setDiagOpen(!diagOpen)}
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
-                  title={diagOpen ? "Collapse panel" : "Show diagnostics"}
+                  title={diagOpen ? t("sidebar.collapsePanel") : t("sidebar.showDiagnostics")}
                 >
                   {diagOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
                 </button>
                 <span className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}>
-                  Diagnostics
+                  {t("sidebar.diagnostics")}
                 </span>
               </div>
               <div className={`flex-1 overflow-y-auto transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}>
@@ -190,9 +192,9 @@ export default function App() {
                       <BarChart3 className="h-5 w-5" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground/50">No diagnostics yet</p>
+                      <p className="text-sm text-muted-foreground/50">{t("sidebar.noDiagnostics")}</p>
                       <p className="text-[11px] font-mono text-muted-foreground/30">
-                        Process an image to see pipeline results
+                        {t("sidebar.processPrompt")}
                       </p>
                     </div>
                   </div>

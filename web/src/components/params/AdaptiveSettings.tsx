@@ -5,6 +5,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ChevronDown } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { ValueLabel } from "./helpers";
 import { sliderValue } from "./constants";
 import type {
@@ -18,21 +19,6 @@ import {
   DEFAULT_CLASSIFICATION_PARAMS,
 } from "@/types/wasm-types";
 
-const GAIN_TABLE_ENTRIES: [keyof GainTable, string][] = [
-  ["flat", "Flat"],
-  ["textured", "Textured"],
-  ["strong_edge", "Strong Edge"],
-  ["microtexture", "Microtexture"],
-  ["risky_halo_zone", "Risky Halo"],
-];
-
-const CLASSIFICATION_ENTRIES: [keyof Omit<ClassificationParams, "variance_window">, string, number, number, number][] = [
-  ["gradient_low_threshold", "Grad Low", 0, 1, 0.01],
-  ["gradient_high_threshold", "Grad High", 0, 2, 0.01],
-  ["variance_low_threshold", "Var Low", 0, 0.1, 0.001],
-  ["variance_high_threshold", "Var High", 0, 0.1, 0.001],
-];
-
 export function AdaptiveSettings({
   strategy,
   updateParams,
@@ -40,6 +26,23 @@ export function AdaptiveSettings({
   strategy: ContentAdaptiveStrategy;
   updateParams: (partial: Partial<AutoSharpParams>) => void;
 }) {
+  const { t } = useTranslation();
+
+  const GAIN_TABLE_ENTRIES: [keyof GainTable, string][] = [
+    ["flat", t("params.flat")],
+    ["textured", t("params.textured")],
+    ["strong_edge", t("params.strongEdge")],
+    ["microtexture", t("params.microtexture")],
+    ["risky_halo_zone", t("params.riskyHalo")],
+  ];
+
+  const CLASSIFICATION_ENTRIES: [keyof Omit<ClassificationParams, "variance_window">, string, number, number, number][] = [
+    ["gradient_low_threshold", t("params.gradLow"), 0, 1, 0.01],
+    ["gradient_high_threshold", t("params.gradHigh"), 0, 2, 0.01],
+    ["variance_low_threshold", t("params.varLow"), 0, 0.1, 0.001],
+    ["variance_high_threshold", t("params.varHigh"), 0, 0.1, 0.001],
+  ];
+
   function updateStrategy(patch: Partial<ContentAdaptiveStrategy>): void {
     updateParams({ sharpen_strategy: { ...strategy, ...patch } });
   }
@@ -48,18 +51,18 @@ export function AdaptiveSettings({
     <Collapsible>
       <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
         <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[panel-open]:rotate-180" />
-        Adaptive Settings
+        {t("params.adaptiveSettings")}
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3 pt-2">
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <ValueLabel>Gain Table</ValueLabel>
+            <ValueLabel>{t("params.gainTable")}</ValueLabel>
             <button
               type="button"
               className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
               onClick={() => updateStrategy({ gain_table: { ...DEFAULT_GAIN_TABLE } })}
             >
-              reset
+              {t("params.reset")}
             </button>
           </div>
           {GAIN_TABLE_ENTRIES.map(([key, label]) => (
@@ -87,13 +90,13 @@ export function AdaptiveSettings({
 
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <ValueLabel>Classification</ValueLabel>
+            <ValueLabel>{t("params.classification")}</ValueLabel>
             <button
               type="button"
               className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
               onClick={() => updateStrategy({ classification: { ...DEFAULT_CLASSIFICATION_PARAMS } })}
             >
-              reset
+              {t("params.reset")}
             </button>
           </div>
           {CLASSIFICATION_ENTRIES.map(([key, label, min, max, step]) => (
@@ -119,7 +122,7 @@ export function AdaptiveSettings({
           ))}
           <div>
             <div className="flex items-baseline justify-between">
-              <span className="text-[11px] text-muted-foreground/70">Var Window</span>
+              <span className="text-[11px] text-muted-foreground/70">{t("params.varWindow")}</span>
               <span className="text-[10px] font-mono text-primary">
                 {strategy.classification.variance_window}
               </span>
@@ -139,10 +142,10 @@ export function AdaptiveSettings({
         </div>
 
         <div className="space-y-1.5">
-          <ValueLabel>Backoff</ValueLabel>
+          <ValueLabel>{t("params.backoff")}</ValueLabel>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <span className="text-[11px] text-muted-foreground/70">Max Iterations</span>
+              <span className="text-[11px] text-muted-foreground/70">{t("params.maxIterations")}</span>
               <Slider
                 min={0}
                 max={10}
@@ -157,7 +160,7 @@ export function AdaptiveSettings({
               </span>
             </div>
             <div>
-              <span className="text-[11px] text-muted-foreground/70">Scale Factor</span>
+              <span className="text-[11px] text-muted-foreground/70">{t("params.scaleFactor")}</span>
               <Slider
                 min={0.1}
                 max={0.95}

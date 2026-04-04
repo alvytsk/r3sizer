@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/collapsible";
 import { ChevronDown, ArrowLeftRight } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useTranslation } from "react-i18next";
 import { useProcessorStore } from "@/stores/processor-store";
 import { useThrottledUpdateParams, useDebouncedUpdateParams } from "@/hooks/useThrottledParams";
 import type { MetricWeights } from "@/types/wasm-types";
@@ -35,19 +36,12 @@ import { SectionLabel, ValueLabel, SelectedLabel } from "./params/helpers";
 import { AdaptiveSettings } from "./params/AdaptiveSettings";
 import {
   sliderValue,
-  SHARPEN_MODE,
-  METRIC_MODE,
-  ARTIFACT_METRIC,
-  SELECTION_POLICY,
-  FIT_STRATEGY,
-  CLAMP_POLICY,
-  SHARPEN_STRATEGY,
-  RESIZE_KERNEL,
   DIMENSION_PRESETS,
   ALL_PRESETS,
 } from "./params/constants";
 
 export function ParameterPanel() {
+  const { t } = useTranslation();
   const params = useProcessorStore((s) => s.params);
   const updateParams = useProcessorStore((s) => s.updateParams);
   const throttledUpdate = useThrottledUpdateParams();
@@ -68,14 +62,58 @@ export function ParameterPanel() {
   const logRatio = Math.log10(params.target_artifact_ratio);
   const [activePreset, setActivePreset] = useState("photo");
 
+  const SHARPEN_MODE: Record<string, string> = {
+    lightness: t("params.lightness"),
+    rgb: t("params.rgb"),
+  };
+
+  const METRIC_MODE: Record<string, string> = {
+    relative_to_base: t("params.relative"),
+    absolute_total: t("params.absolute"),
+  };
+
+  const ARTIFACT_METRIC: Record<string, string> = {
+    channel_clipping_ratio: t("params.channelClipping"),
+    pixel_out_of_gamut_ratio: t("params.pixelOog"),
+  };
+
+  const SELECTION_POLICY: Record<string, string> = {
+    gamut_only: t("params.gamutOnly"),
+    hybrid: t("params.hybrid"),
+    composite_only: t("params.compositeOnly"),
+  };
+
+  const FIT_STRATEGY: Record<string, string> = {
+    Cubic: t("params.cubic"),
+    DirectSearch: t("params.directSearch"),
+  };
+
+  const CLAMP_POLICY: Record<string, string> = {
+    Clamp: t("params.clamp"),
+    Normalize: t("params.normalize"),
+  };
+
+  const SHARPEN_STRATEGY: Record<string, string> = {
+    uniform: t("params.uniformStrategy"),
+    content_adaptive: t("params.contentAdaptive"),
+  };
+
+  const RESIZE_KERNEL: Record<string, string> = {
+    lanczos3: t("params.kernels.lanczos3"),
+    mitchell_netravali: t("params.kernels.mitchellNetravali"),
+    catmull_rom: t("params.kernels.catmullRom"),
+    gaussian: t("params.kernels.gaussian"),
+    content_adaptive: t("params.kernels.contentAdaptive"),
+  };
+
   return (
     <TooltipProvider delay={100}>
     <div className="p-3 space-y-4">
       {/* Dimensions */}
       <div className="space-y-2">
-        <SectionLabel>Dimensions</SectionLabel>
+        <SectionLabel>{t("params.dimensions")}</SectionLabel>
         <div>
-          <ValueLabel>Preset</ValueLabel>
+          <ValueLabel>{t("params.preset")}</ValueLabel>
           <Select
             value={presetKey}
             onValueChange={(v) => {
@@ -88,7 +126,7 @@ export function ParameterPanel() {
               <span className="flex flex-1 text-left truncate" data-slot="select-value">
                 {matchingPreset
                   ? `${matchingPreset.label} — ${matchingPreset.detail}`
-                  : <span className="text-muted-foreground">Select preset…</span>
+                  : <span className="text-muted-foreground">{t("params.selectPreset")}</span>
                 }
               </span>
             </SelectTrigger>
@@ -96,7 +134,7 @@ export function ParameterPanel() {
               {DIMENSION_PRESETS.map((group, gi) => (
                 <SelectGroup key={group.group}>
                   {gi > 0 && <SelectSeparator />}
-                  <SelectLabel>{group.group}</SelectLabel>
+                  <SelectLabel>{t(`params.dimensionPresets.${group.group.toLowerCase()}` as const)}</SelectLabel>
                   {group.items.map((p) => (
                     <SelectItem key={`${p.w}x${p.h}`} value={`${p.w}x${p.h}`}>
                       <span className="flex items-center justify-between gap-3 w-full">
@@ -112,7 +150,7 @@ export function ParameterPanel() {
         </div>
         <div className="flex items-end gap-1">
           <div className="flex-1 min-w-0">
-            <ValueLabel>Width</ValueLabel>
+            <ValueLabel>{t("params.width")}</ValueLabel>
             <NumericInput
               id="width"
               min={1}
@@ -130,12 +168,12 @@ export function ParameterPanel() {
                 target_height: params.target_width,
               })
             }
-            title="Swap width and height"
+            title={t("params.swapDimensions")}
           >
             <ArrowLeftRight className="h-3.5 w-3.5" />
           </button>
           <div className="flex-1 min-w-0">
-            <ValueLabel>Height</ValueLabel>
+            <ValueLabel>{t("params.height")}</ValueLabel>
             <NumericInput
               id="height"
               min={1}
@@ -154,7 +192,7 @@ export function ParameterPanel() {
                 onCheckedChange={setPreserveAspectRatio}
               />
               <Label htmlFor="aspect" className="text-[13px] text-muted-foreground">
-                Lock ratio
+                {t("params.lockRatio")}
               </Label>
             </div>
             <div className="flex items-center gap-2">
@@ -164,7 +202,7 @@ export function ParameterPanel() {
                 onCheckedChange={setLockDimensions}
               />
               <Label htmlFor="pin-dims" className="text-[13px] text-foreground/70">
-                Pin exact
+                {t("params.pinExact")}
               </Label>
             </div>
           </div>
@@ -173,13 +211,13 @@ export function ParameterPanel() {
 
       {/* Pipeline preset */}
       <div className="space-y-2">
-        <SectionLabel>Pipeline</SectionLabel>
+        <SectionLabel>{t("params.pipeline")}</SectionLabel>
         <div className="grid grid-cols-2 gap-1">
           {(["photo", "precision"] as const).map((key) => {
             const active = activePreset === key;
             const meta = key === "photo"
-              ? { label: "Photo", desc: "natural images" }
-              : { label: "Precision", desc: "text, UI, architecture" };
+              ? { label: t("params.photo"), desc: t("params.photoDesc") }
+              : { label: t("params.precision"), desc: t("params.precisionDesc") };
             return (
               <button
                 key={key}
@@ -221,9 +259,9 @@ export function ParameterPanel() {
             const current = params.pipeline_mode ?? "balanced";
             const active = current === mode;
             const meta = {
-              fast: { label: "Fast", desc: "minimal probing" },
-              balanced: { label: "Balanced", desc: "default" },
-              quality: { label: "Quality", desc: "extended probing" },
+              fast: { label: t("params.fast"), desc: t("params.fastDesc") },
+              balanced: { label: t("params.balanced"), desc: t("params.balancedDesc") },
+              quality: { label: t("params.quality"), desc: t("params.qualityDesc") },
             }[mode];
             return (
               <button
@@ -260,19 +298,19 @@ export function ParameterPanel() {
               {params.target_artifact_ratio.toExponential(0)}
             </span>
             <span className="text-[10px] text-muted-foreground/60">
-              ({(params.target_artifact_ratio * 100).toFixed(1)}% budget)
+              ({(params.target_artifact_ratio * 100).toFixed(1)}% {t("params.budget")})
             </span>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70 font-mono">
             <span>
               {"TwoPass" in params.probe_strengths
-                ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} probes`
-                : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} probes`}
+                ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} ${t("params.probes")}`
+                : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} ${t("params.probes")}`}
             </span>
             <span className="text-border/60">|</span>
             <span>
-              {params.sharpen_strategy.strategy === "content_adaptive" ? "adaptive" : "uniform"}
-              {params.experimental_sharpen_mode ? " + guard" : ""}
+              {params.sharpen_strategy.strategy === "content_adaptive" ? t("params.adaptive") : t("params.uniform")}
+              {params.experimental_sharpen_mode ? ` + ${t("params.guard")}` : ""}
             </span>
             <span className="text-border/60">|</span>
             <span>{params.sharpen_mode}</span>
@@ -285,10 +323,10 @@ export function ParameterPanel() {
 
       {/* Sharpening — only sigma and resize kernel at top level */}
       <div className="space-y-2">
-        <SectionLabel>Sharpening</SectionLabel>
+        <SectionLabel>{t("params.sharpening")}</SectionLabel>
         <div>
           <div className="flex items-baseline justify-between">
-            <ValueLabel tip="Gaussian blur radius for the unsharp mask. Higher values sharpen coarser details but risk halos around edges. Lower values sharpen fine detail with fewer artifacts.">Sigma</ValueLabel>
+            <ValueLabel tip={t("params.sigmaTip")}>{t("params.sigma")}</ValueLabel>
             <span className="text-xs font-mono text-primary">
               {params.sharpen_sigma.toFixed(1)}
             </span>
@@ -304,7 +342,7 @@ export function ParameterPanel() {
           />
         </div>
         <div>
-          <ValueLabel tip="Interpolation filter for downscaling. Lanczos3 is sharpest; Gaussian is smoothest; Catmull-Rom / Mitchell-Netravali are balanced cubic filters. Content Adaptive selects kernel per region (flat → Gaussian, edges → Lanczos3, etc.).">Resize Kernel</ValueLabel>
+          <ValueLabel tip={t("params.resizeKernelTip")}>{t("params.resizeKernel")}</ValueLabel>
           <Select
             value={
               params.resize_strategy?.strategy === "content_adaptive"
@@ -336,11 +374,11 @@ export function ParameterPanel() {
               />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="lanczos3">Lanczos3</SelectItem>
-              <SelectItem value="mitchell_netravali">Mitchell-Netravali</SelectItem>
-              <SelectItem value="catmull_rom">Catmull-Rom</SelectItem>
-              <SelectItem value="gaussian">Gaussian</SelectItem>
-              <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
+              <SelectItem value="lanczos3">{t("params.kernels.lanczos3")}</SelectItem>
+              <SelectItem value="mitchell_netravali">{t("params.kernels.mitchellNetravali")}</SelectItem>
+              <SelectItem value="catmull_rom">{t("params.kernels.catmullRom")}</SelectItem>
+              <SelectItem value="gaussian">{t("params.kernels.gaussian")}</SelectItem>
+              <SelectItem value="content_adaptive">{t("params.kernels.contentAdaptive")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -351,7 +389,7 @@ export function ParameterPanel() {
       <Collapsible>
         <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground/60 hover:text-primary transition-colors border-b border-border/20 pb-1 w-full">
           <div className="w-0.5 h-3 rounded-full bg-muted-foreground/20 group-hover:bg-primary/50 transition-colors" />
-          Advanced
+          {t("params.advanced")}
           <ChevronDown className="h-3 w-3 ml-auto transition-transform duration-200 group-data-[panel-open]:rotate-180" />
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-3 pt-3">
@@ -359,7 +397,7 @@ export function ParameterPanel() {
           {/* Target artifact ratio */}
           <div>
             <div className="flex items-baseline justify-between">
-              <ValueLabel tip="Maximum allowed fraction of pixels with out-of-range values after sharpening. Lower = less artifacts but softer image. Higher = sharper but more clipping.">Target P(s)</ValueLabel>
+              <ValueLabel tip={t("params.targetPsTip")}>{t("params.targetPs")}</ValueLabel>
               <span className="text-xs font-mono text-primary">
                 {params.target_artifact_ratio.toExponential(1)}
               </span>
@@ -378,7 +416,7 @@ export function ParameterPanel() {
           {/* Sharpen mode & strategy */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <ValueLabel tip="Lightness sharpens only luminance (less color fringing). RGB sharpens all channels independently (stronger but may shift colors).">Mode</ValueLabel>
+              <ValueLabel tip={t("params.modeTip")}>{t("params.mode")}</ValueLabel>
               <Select
                 value={params.sharpen_mode}
                 onValueChange={(v) => {
@@ -390,13 +428,13 @@ export function ParameterPanel() {
                   <SelectedLabel labels={SHARPEN_MODE} value={params.sharpen_mode} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lightness">Lightness</SelectItem>
-                  <SelectItem value="rgb">RGB</SelectItem>
+                  <SelectItem value="lightness">{t("params.lightness")}</SelectItem>
+                  <SelectItem value="rgb">{t("params.rgb")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <ValueLabel tip="Uniform applies equal sharpening everywhere. Content Adaptive varies strength per region.">Strategy</ValueLabel>
+              <ValueLabel tip={t("params.strategyTip")}>{t("params.strategy")}</ValueLabel>
               <Select
                 value={params.sharpen_strategy.strategy}
                 onValueChange={(v) => {
@@ -414,8 +452,8 @@ export function ParameterPanel() {
                   <SelectedLabel labels={SHARPEN_STRATEGY} value={params.sharpen_strategy.strategy} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="uniform">Uniform</SelectItem>
-                  <SelectItem value="content_adaptive">Content Adaptive</SelectItem>
+                  <SelectItem value="uniform">{t("params.uniformStrategy")}</SelectItem>
+                  <SelectItem value="content_adaptive">{t("params.contentAdaptive")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -430,7 +468,7 @@ export function ParameterPanel() {
           {/* Metric mode & artifact metric */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <ValueLabel tip="Relative subtracts the baseline artifact ratio so only sharpening-induced artifacts are measured.">Metric Mode</ValueLabel>
+              <ValueLabel tip={t("params.metricModeTip")}>{t("params.metricMode")}</ValueLabel>
               <Select
                 value={params.metric_mode}
                 onValueChange={(v) => {
@@ -441,13 +479,13 @@ export function ParameterPanel() {
                   <SelectedLabel labels={METRIC_MODE} value={params.metric_mode} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="relative_to_base">Relative</SelectItem>
-                  <SelectItem value="absolute_total">Absolute</SelectItem>
+                  <SelectItem value="relative_to_base">{t("params.relative")}</SelectItem>
+                  <SelectItem value="absolute_total">{t("params.absolute")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <ValueLabel tip="Channel Clipping counts individual R/G/B values outside [0,1]. Pixel Out-of-Gamut counts pixels where any channel is clipped.">Artifact Metric</ValueLabel>
+              <ValueLabel tip={t("params.artifactMetricTip")}>{t("params.artifactMetric")}</ValueLabel>
               <Select
                 value={params.artifact_metric}
                 onValueChange={(v) => {
@@ -458,8 +496,8 @@ export function ParameterPanel() {
                   <SelectedLabel labels={ARTIFACT_METRIC} value={params.artifact_metric} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="channel_clipping_ratio">Channel Clipping</SelectItem>
-                  <SelectItem value="pixel_out_of_gamut_ratio">Pixel OOG</SelectItem>
+                  <SelectItem value="channel_clipping_ratio">{t("params.channelClipping")}</SelectItem>
+                  <SelectItem value="pixel_out_of_gamut_ratio">{t("params.pixelOog")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -467,7 +505,7 @@ export function ParameterPanel() {
 
           {/* Selection policy */}
           <div>
-            <ValueLabel tip="Gamut Only uses gamut excursion for both fitting and fallback ranking. Hybrid keeps gamut as the hard safety constraint but ranks fallback candidates by composite score (halo, overshoot, texture). Composite Only is experimental.">Selection Policy</ValueLabel>
+            <ValueLabel tip={t("params.selectionPolicyTip")}>{t("params.selectionPolicy")}</ValueLabel>
             <Select
               value={params.selection_policy}
               onValueChange={(v) => {
@@ -478,9 +516,9 @@ export function ParameterPanel() {
                 <SelectedLabel labels={SELECTION_POLICY} value={params.selection_policy} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="gamut_only">Gamut Only</SelectItem>
-                <SelectItem value="hybrid">Hybrid</SelectItem>
-                <SelectItem value="composite_only">Composite Only (exp)</SelectItem>
+                <SelectItem value="gamut_only">{t("params.gamutOnly")}</SelectItem>
+                <SelectItem value="hybrid">{t("params.hybrid")}</SelectItem>
+                <SelectItem value="composite_only">{t("params.compositeOnly")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -488,7 +526,7 @@ export function ParameterPanel() {
           {/* Fit strategy & clamp policy */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <ValueLabel tip="Cubic fits a polynomial and solves analytically. Direct Search picks the best probe sample directly.">Fit Strategy</ValueLabel>
+              <ValueLabel tip={t("params.fitStrategyTip")}>{t("params.fitStrategy")}</ValueLabel>
               <Select
                 value={params.fit_strategy}
                 onValueChange={(v) => {
@@ -499,13 +537,13 @@ export function ParameterPanel() {
                   <SelectedLabel labels={FIT_STRATEGY} value={params.fit_strategy} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Cubic">Cubic</SelectItem>
-                  <SelectItem value="DirectSearch">Direct Search</SelectItem>
+                  <SelectItem value="Cubic">{t("params.cubic")}</SelectItem>
+                  <SelectItem value="DirectSearch">{t("params.directSearch")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <ValueLabel tip="Clamp clips values to [0,1]. Normalize rescales the entire image to fit.">Clamp Policy</ValueLabel>
+              <ValueLabel tip={t("params.clampPolicyTip")}>{t("params.clampPolicy")}</ValueLabel>
               <Select
                 value={params.output_clamp}
                 onValueChange={(v) => {
@@ -516,8 +554,8 @@ export function ParameterPanel() {
                   <SelectedLabel labels={CLAMP_POLICY} value={params.output_clamp} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Clamp">Clamp</SelectItem>
-                  <SelectItem value="Normalize">Normalize</SelectItem>
+                  <SelectItem value="Clamp">{t("params.clamp")}</SelectItem>
+                  <SelectItem value="Normalize">{t("params.normalize")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -534,7 +572,7 @@ export function ParameterPanel() {
                 }
               />
               <Label htmlFor="contrast" className="text-[13px] text-muted-foreground">
-                Contrast leveling
+                {t("params.contrastLeveling")}
               </Label>
             </div>
             <div className="flex items-center gap-2">
@@ -546,17 +584,17 @@ export function ParameterPanel() {
                 }
               />
               <Label htmlFor="evaluator" className="text-[13px] text-muted-foreground">
-                Evaluator
+                {t("params.evaluator")}
               </Label>
             </div>
           </div>
 
           {/* Probe strengths override */}
           <div>
-            <ValueLabel tip="Override the two-pass probe placement with explicit comma-separated strengths.">Probe strengths</ValueLabel>
+            <ValueLabel tip={t("params.probeStrengthsTip")}>{t("params.probeStrengths")}</ValueLabel>
             <Input
               className="h-8 text-sm font-mono"
-              placeholder="auto (two-pass)"
+              placeholder={t("params.probeStrengthsPlaceholder")}
               value={("Explicit" in params.probe_strengths ? params.probe_strengths.Explicit : []).join(", ")}
               onChange={(e) => {
                 const vals = e.target.value
@@ -575,22 +613,22 @@ export function ParameterPanel() {
           {/* Metric weights */}
           <div className="space-y-1.5 pt-1">
             <div className="flex items-center justify-between">
-              <ValueLabel>Metric Weights</ValueLabel>
+              <ValueLabel>{t("params.metricWeights")}</ValueLabel>
               <button
                 type="button"
                 className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
                 onClick={() => updateParams({ metric_weights: { ...DEFAULT_METRIC_WEIGHTS } })}
               >
-                reset
+                {t("params.reset")}
               </button>
             </div>
             {(
               [
-                ["gamut_excursion", "Gamut"],
-                ["halo_ringing", "Halo"],
-                ["edge_overshoot", "Overshoot"],
-                ["texture_flattening", "Texture"],
-              ] as const
+                ["gamut_excursion", t("params.gamut")],
+                ["halo_ringing", t("params.halo")],
+                ["edge_overshoot", t("params.overshoot")],
+                ["texture_flattening", t("params.texture")],
+              ] as [keyof MetricWeights, string][]
             ).map(([key, label]) => (
               <div key={key}>
                 <div className="flex items-baseline justify-between">
@@ -615,7 +653,7 @@ export function ParameterPanel() {
               </div>
             ))}
             <p className="text-[10px] text-muted-foreground/60 italic">
-              Diagnostic only — does not affect selection
+              {t("params.metricWeightsNote")}
             </p>
           </div>
         </CollapsibleContent>

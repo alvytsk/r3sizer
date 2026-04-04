@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   AutoSharpDiagnostics,
   RegionCoverage,
@@ -6,14 +7,14 @@ import type {
 import { StatusIndicators } from "../StatusIndicators";
 import { ProbeChart } from "../ProbeChart";
 import { Readout } from "./shared";
-import { COMPONENT_LABELS, buildDiagnosis, severityStyle } from "./utils";
+import { buildDiagnosis, severityStyle } from "./utils";
 
-const REGION_LABELS: [keyof RegionCoverage, keyof RegionCoverage, string][] = [
-  ["flat", "flat_fraction", "Flat"],
-  ["textured", "textured_fraction", "Textured"],
-  ["strong_edge", "strong_edge_fraction", "Strong Edge"],
-  ["microtexture", "microtexture_fraction", "Microtexture"],
-  ["risky_halo_zone", "risky_halo_zone_fraction", "Risky Halo"],
+const REGION_KEYS: [keyof RegionCoverage, keyof RegionCoverage, string][] = [
+  ["flat", "flat_fraction", "diagnostics.flat"],
+  ["textured", "textured_fraction", "diagnostics.textured"],
+  ["strong_edge", "strong_edge_fraction", "diagnostics.strongEdge"],
+  ["microtexture", "microtexture_fraction", "diagnostics.microtexture"],
+  ["risky_halo_zone", "risky_halo_zone_fraction", "diagnostics.riskyHalo"],
 ];
 
 const REGION_COLORS = [
@@ -24,14 +25,23 @@ const REGION_COLORS = [
   "bg-chart-5",
 ];
 
+const COMPONENT_LABELS_KEYS: Record<string, string> = {
+  gamut_excursion: "diagnostics.components.gamutExcursion",
+  halo_ringing: "diagnostics.components.haloRinging",
+  edge_overshoot: "diagnostics.components.edgeOvershoot",
+  texture_flattening: "diagnostics.components.textureFlattening",
+};
+
 function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-1.5">
       <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50">
-        Region Coverage
+        {t("diagnostics.regionCoverage")}
       </div>
       <div className="flex h-2 rounded-[2px] overflow-hidden bg-background border border-border/20">
-        {REGION_LABELS.map(([, fracKey], i) => {
+        {REGION_KEYS.map(([, fracKey], i) => {
           const pct = (coverage[fracKey] as number) * 100;
           if (pct < 0.3) return null;
           return (
@@ -44,13 +54,13 @@ function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
         })}
       </div>
       <div className="space-y-0.5">
-        {REGION_LABELS.map(([countKey, fracKey, label], i) => {
+        {REGION_KEYS.map(([countKey, fracKey, labelKey], i) => {
           const frac = coverage[fracKey] as number;
           const count = coverage[countKey] as number;
           return (
             <div key={countKey} className="flex items-center gap-2 text-[11px]">
               <div className={`w-1.5 h-1.5 rounded-[1px] shrink-0 ${REGION_COLORS[i]}`} />
-              <span className="text-muted-foreground flex-1">{label}</span>
+              <span className="text-muted-foreground flex-1">{t(labelKey)}</span>
               <span className="font-mono tabular-nums text-foreground/70 w-[42px] text-right">
                 {(frac * 100).toFixed(1)}%
               </span>
@@ -66,6 +76,7 @@ function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
 }
 
 function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcome }) {
+  const { t } = useTranslation();
   const isPassed =
     outcome.outcome === "passed_direct" || outcome.outcome === "passed_after_backoff";
   const borderColor = isPassed ? "border-chart-3/25" : "border-destructive/30";
@@ -76,14 +87,14 @@ function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcom
   let headline: string;
   let detail: string;
   if (outcome.outcome === "passed_direct") {
-    headline = "Adaptive: passed direct";
-    detail = `No backoff needed. Measured metric: ${outcome.measured_metric.toExponential(3)}`;
+    headline = t("diagnostics.adaptivePassedDirect");
+    detail = t("diagnostics.noBackoff", { value: outcome.measured_metric.toExponential(3) });
   } else if (outcome.outcome === "passed_after_backoff") {
-    headline = `Adaptive: passed after ${outcome.iterations} backoff`;
-    detail = `Final scale: ${outcome.final_scale.toFixed(3)}, measured metric: ${outcome.measured_metric.toExponential(3)}`;
+    headline = t("diagnostics.adaptivePassedBackoff", { count: outcome.iterations });
+    detail = t("diagnostics.finalScale", { scale: outcome.final_scale.toFixed(3), value: outcome.measured_metric.toExponential(3) });
   } else {
-    headline = `Adaptive: budget exceeded (${outcome.iterations} iterations)`;
-    detail = `Best scale: ${outcome.best_scale.toFixed(3)}, best metric: ${outcome.best_metric.toExponential(3)}`;
+    headline = t("diagnostics.adaptiveBudgetExceeded", { count: outcome.iterations });
+    detail = t("diagnostics.bestScale", { scale: outcome.best_scale.toFixed(3), value: outcome.best_metric.toExponential(3) });
   }
 
   return (
@@ -100,7 +111,8 @@ function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcom
 }
 
 function DiagnosisCard({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
-  const entries = buildDiagnosis(diagnostics);
+  const { t } = useTranslation();
+  const entries = buildDiagnosis(diagnostics, t);
   if (entries.length === 0) return null;
 
   return (
@@ -128,6 +140,8 @@ function DiagnosisCard({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
 }
 
 export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-3 mt-3">
       <StatusIndicators diagnostics={diagnostics} />
@@ -140,37 +154,37 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
       )}
       <div className="space-y-0.5 border-t border-border/30 pt-2">
         <Readout
-          label="Selected strength"
+          label={t("diagnostics.selectedStrength")}
           value={diagnostics.selected_strength.toFixed(4)}
         />
         <Readout
-          label={<>Target P<sub>0</sub></>}
+          label={<>{t("diagnostics.targetP0")}</>}
           value={diagnostics.target_artifact_ratio.toExponential(2)}
         />
         <Readout
-          label="Measured P"
+          label={t("diagnostics.measuredP")}
           value={diagnostics.measured_artifact_ratio.toExponential(3)}
         />
         <Readout
-          label="Baseline P"
+          label={t("diagnostics.baselineP")}
           value={diagnostics.baseline_artifact_ratio.toExponential(3)}
         />
 
         {diagnostics.metric_components && (
           <div className="mt-2 pt-2 border-t border-border/20 space-y-0.5">
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50 mb-1">
-              Metric Breakdown
+              {t("diagnostics.metricBreakdown")}
             </div>
             {Object.entries(diagnostics.metric_components.components).map(
               ([name, value]) => (
                 <div key={name} className="flex justify-between text-[12px] py-px">
-                  <span className="text-muted-foreground/70">{COMPONENT_LABELS[name] ?? name}</span>
+                  <span className="text-muted-foreground/70">{t(COMPONENT_LABELS_KEYS[name] ?? name)}</span>
                   <span className="font-mono text-foreground/80">{(value as number).toExponential(2)}</span>
                 </div>
               )
             )}
             <div className="flex justify-between text-[12px] pt-1 border-t border-border/10">
-              <span className="text-muted-foreground/50 italic">composite</span>
+              <span className="text-muted-foreground/50 italic">{t("diagnostics.composite")}</span>
               <span className="font-mono text-muted-foreground/60">
                 {diagnostics.metric_components.composite_score.toExponential(2)}
               </span>
@@ -179,11 +193,11 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
         )}
 
         <Readout
-          label="Input"
+          label={t("diagnostics.input")}
           value={`${diagnostics.input_size.width}\u00d7${diagnostics.input_size.height}`}
         />
         <Readout
-          label="Output"
+          label={t("diagnostics.output")}
           value={`${diagnostics.output_size.width}\u00d7${diagnostics.output_size.height}`}
         />
       </div>
@@ -195,24 +209,24 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
         <div className="space-y-2 border-t border-border/30 pt-2">
           {diagnostics.input_ingress && (
             <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
-              <div className="text-[11px] font-mono font-semibold text-muted-foreground">Ingress</div>
-              <Readout label="Color space" value={diagnostics.input_ingress.declared_color_space} />
+              <div className="text-[11px] font-mono font-semibold text-muted-foreground">{t("diagnostics.ingress")}</div>
+              <Readout label={t("diagnostics.colorSpace")} value={diagnostics.input_ingress.declared_color_space} />
               {diagnostics.input_ingress.raw_value_min != null && (
-                <Readout label="Raw range" value={`${diagnostics.input_ingress.raw_value_min.toFixed(3)} – ${diagnostics.input_ingress.raw_value_max?.toFixed(3) ?? "?"}`} />
+                <Readout label={t("diagnostics.rawRange")} value={`${diagnostics.input_ingress.raw_value_min.toFixed(3)} – ${diagnostics.input_ingress.raw_value_max?.toFixed(3) ?? "?"}`} />
               )}
               {diagnostics.input_ingress.normalization_scale != null && (
-                <Readout label="Norm scale" value={diagnostics.input_ingress.normalization_scale.toFixed(4)} />
+                <Readout label={t("diagnostics.normScale")} value={diagnostics.input_ingress.normalization_scale.toFixed(4)} />
               )}
               {diagnostics.input_ingress.out_of_range_fraction != null && (
-                <Readout label="Out of range" value={`${(diagnostics.input_ingress.out_of_range_fraction * 100).toFixed(2)}%`} />
+                <Readout label={t("diagnostics.outOfRange")} value={`${(diagnostics.input_ingress.out_of_range_fraction * 100).toFixed(2)}%`} />
               )}
             </div>
           )}
 
           {diagnostics.resize_strategy_diagnostics && (
             <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
-              <div className="text-[11px] font-mono font-semibold text-muted-foreground">Resize Strategy</div>
-              <Readout label="Kernels used" value={diagnostics.resize_strategy_diagnostics.kernels_used.join(", ")} />
+              <div className="text-[11px] font-mono font-semibold text-muted-foreground">{t("diagnostics.resizeStrategy")}</div>
+              <Readout label={t("diagnostics.kernelsUsed")} value={diagnostics.resize_strategy_diagnostics.kernels_used.join(", ")} />
               {Object.entries(diagnostics.resize_strategy_diagnostics.per_kernel_pixel_count).map(
                 ([kernel, count]) => (
                   <Readout key={kernel} label={kernel} value={String(count)} />
@@ -223,33 +237,33 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
 
           {diagnostics.chroma_guard && (
             <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
-              <div className="text-[11px] font-mono font-semibold text-muted-foreground">Chroma Guard</div>
-              <Readout label="Pixels clamped" value={`${(diagnostics.chroma_guard.pixels_clamped_fraction * 100).toFixed(2)}%`} />
-              <Readout label="Mean shift" value={diagnostics.chroma_guard.mean_chroma_shift.toFixed(4)} />
-              <Readout label="Max shift" value={diagnostics.chroma_guard.max_chroma_shift.toFixed(4)} />
+              <div className="text-[11px] font-mono font-semibold text-muted-foreground">{t("diagnostics.chromaGuard")}</div>
+              <Readout label={t("diagnostics.pixelsClamped")} value={`${(diagnostics.chroma_guard.pixels_clamped_fraction * 100).toFixed(2)}%`} />
+              <Readout label={t("diagnostics.meanShift")} value={diagnostics.chroma_guard.mean_chroma_shift.toFixed(4)} />
+              <Readout label={t("diagnostics.maxShift")} value={diagnostics.chroma_guard.max_chroma_shift.toFixed(4)} />
             </div>
           )}
 
           {diagnostics.evaluator_result && (
             <div className="space-y-0.5 bg-muted/20 rounded-md p-2">
-              <div className="text-[11px] font-mono font-semibold text-muted-foreground">Quality Evaluator</div>
-              <Readout label="Quality score" value={diagnostics.evaluator_result.predicted_quality_score.toFixed(3)} />
-              <Readout label="Confidence" value={diagnostics.evaluator_result.confidence.toFixed(3)} />
+              <div className="text-[11px] font-mono font-semibold text-muted-foreground">{t("diagnostics.qualityEvaluator")}</div>
+              <Readout label={t("diagnostics.qualityScore")} value={diagnostics.evaluator_result.predicted_quality_score.toFixed(3)} />
+              <Readout label={t("diagnostics.confidence")} value={diagnostics.evaluator_result.confidence.toFixed(3)} />
               {diagnostics.evaluator_result.suggested_strength != null && (
-                <Readout label="Suggested s*" value={diagnostics.evaluator_result.suggested_strength.toFixed(4)} />
+                <Readout label={t("diagnostics.suggestedS")} value={diagnostics.evaluator_result.suggested_strength.toFixed(4)} />
               )}
               <details className="mt-1">
                 <summary className="text-[10px] font-mono text-muted-foreground/50 cursor-pointer hover:text-primary transition-colors">
-                  Features
+                  {t("diagnostics.features")}
                 </summary>
                 <div className="pt-1 space-y-0.5">
-                  <Readout label="Edge density" value={diagnostics.evaluator_result.features.edge_density.toExponential(2)} />
-                  <Readout label="Mean gradient" value={diagnostics.evaluator_result.features.mean_gradient_magnitude.toExponential(2)} />
-                  <Readout label="Gradient var" value={diagnostics.evaluator_result.features.gradient_variance.toExponential(2)} />
-                  <Readout label="Mean local var" value={diagnostics.evaluator_result.features.mean_local_variance.toExponential(2)} />
-                  <Readout label="Local var var" value={diagnostics.evaluator_result.features.local_variance_variance.toExponential(2)} />
-                  <Readout label="Laplacian var" value={diagnostics.evaluator_result.features.laplacian_variance.toExponential(2)} />
-                  <Readout label="Luma entropy" value={diagnostics.evaluator_result.features.luminance_histogram_entropy.toFixed(3)} />
+                  <Readout label={t("diagnostics.edgeDensity")} value={diagnostics.evaluator_result.features.edge_density.toExponential(2)} />
+                  <Readout label={t("diagnostics.meanGradient")} value={diagnostics.evaluator_result.features.mean_gradient_magnitude.toExponential(2)} />
+                  <Readout label={t("diagnostics.gradientVar")} value={diagnostics.evaluator_result.features.gradient_variance.toExponential(2)} />
+                  <Readout label={t("diagnostics.meanLocalVar")} value={diagnostics.evaluator_result.features.mean_local_variance.toExponential(2)} />
+                  <Readout label={t("diagnostics.localVarVar")} value={diagnostics.evaluator_result.features.local_variance_variance.toExponential(2)} />
+                  <Readout label={t("diagnostics.laplacianVar")} value={diagnostics.evaluator_result.features.laplacian_variance.toExponential(2)} />
+                  <Readout label={t("diagnostics.lumaEntropy")} value={diagnostics.evaluator_result.features.luminance_histogram_entropy.toFixed(3)} />
                 </div>
               </details>
             </div>

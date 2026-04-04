@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   AutoSharpDiagnostics,
   Recommendation,
@@ -5,6 +6,7 @@ import type {
   Severity as RecSeverity,
 } from "@/types/wasm-types";
 import { useProcessorStore } from "@/stores/processor-store";
+import type { TFunction } from "i18next";
 
 interface Advice {
   icon: string;
@@ -13,7 +15,7 @@ interface Advice {
   kind: "success" | "tip" | "warning";
 }
 
-function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
+function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
   const advice: Advice[] = [];
   const ratio = d.measured_artifact_ratio;
   const target = d.target_artifact_ratio;
@@ -26,8 +28,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.selection_mode === "polynomial_root" && ratio <= target * 1.1) {
     advice.push({
       icon: "\u2713",
-      title: "Optimal result",
-      body: "The polynomial solve found an analytical root. Sharpening strength is well-calibrated for this image.",
+      title: t("advice.optimalResult"),
+      body: t("advice.optimalResultBody"),
       kind: "success",
     });
   }
@@ -35,15 +37,15 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.selection_mode === "budget_unreachable") {
     advice.push({
       icon: "!",
-      title: "Budget unreachable",
-      body: "All probe strengths exceeded the artifact budget. Try increasing Target P(s) (e.g. from 1e-3 to 1e-2), reducing output resolution, or switching to Lightness sharpening mode.",
+      title: t("advice.budgetUnreachable"),
+      body: t("advice.budgetUnreachableBody"),
       kind: "warning",
     });
   } else if (ratio > target * 2) {
     advice.push({
       icon: "!",
-      title: "Measured artifacts exceed target",
-      body: `Measured P is ${(ratio / target).toFixed(1)}x the target. Consider raising Target P(s) or lowering sigma to reduce sharpening intensity.`,
+      title: t("advice.artifactsExceedTarget"),
+      body: t("advice.artifactsExceedTargetBody", { ratio: (ratio / target).toFixed(1) }),
       kind: "warning",
     });
   }
@@ -51,8 +53,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (strength < 0.02 && d.selection_mode !== "budget_unreachable") {
     advice.push({
       icon: "\u2193",
-      title: "Very low sharpening applied",
-      body: "Strength is below 0.02 — the image may appear soft. You can raise Target P(s) to allow more sharpening, or this image may simply not need much.",
+      title: t("advice.veryLowSharpening"),
+      body: t("advice.veryLowSharpeningBody"),
       kind: "tip",
     });
   }
@@ -63,8 +65,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (strength > 0 && probeMax > 0 && strength >= probeMax * 0.95) {
     advice.push({
       icon: "\u2191",
-      title: "Strength near probe limit",
-      body: "Selected strength is at the upper edge of probe range. Consider adding higher probe values (e.g. 0.7, 1.0) so the solver has more room to find an optimal point.",
+      title: t("advice.nearProbeLimit"),
+      body: t("advice.nearProbeLimitBody"),
       kind: "tip",
     });
   }
@@ -72,8 +74,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.baseline_artifact_ratio > target * 0.5 && d.baseline_artifact_ratio > 0) {
     advice.push({
       icon: "\u26A0",
-      title: "High baseline artifacts",
-      body: `The resize step alone produces ${(d.baseline_artifact_ratio * 100).toFixed(2)}% artifacts before any sharpening. This content may be too detailed for the target resolution. Try a larger output size or a smoother resize kernel (Gaussian).`,
+      title: t("advice.highBaseline"),
+      body: t("advice.highBaselineBody", { value: (d.baseline_artifact_ratio * 100).toFixed(2) }),
       kind: "warning",
     });
   }
@@ -81,8 +83,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.sharpen_mode === "rgb" && !recKinds.has("switch_to_lightness")) {
     advice.push({
       icon: "\u2192",
-      title: "Consider Lightness mode",
-      body: "RGB mode sharpens all color channels independently, which can amplify color fringing. Lightness mode only sharpens luminance — it typically produces fewer color artifacts.",
+      title: t("advice.considerLightness"),
+      body: t("advice.considerLightnessBody"),
       kind: "tip",
     });
   }
@@ -90,8 +92,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.fit_quality && d.fit_quality.r_squared < 0.85 && !recKinds.has("widen_probe_range")) {
     advice.push({
       icon: "\u223C",
-      title: "Poor polynomial fit",
-      body: `R\u00b2 = ${d.fit_quality.r_squared.toFixed(3)} is below 0.85. The cubic model doesn't closely match probe data. Try adding more probe points or widening the probe range for a better fit.`,
+      title: t("advice.poorFit"),
+      body: t("advice.poorFitBody", { value: d.fit_quality.r_squared.toFixed(3) }),
       kind: "warning",
     });
   }
@@ -99,8 +101,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (d.robustness && !d.robustness.loo_stable) {
     advice.push({
       icon: "\u2248",
-      title: "Result is noise-sensitive",
-      body: "Leave-one-out analysis shows the selected strength shifts significantly when any single probe is removed. Adding more probe samples will stabilize the result.",
+      title: t("advice.noiseSensitive"),
+      body: t("advice.noiseSensitiveBody"),
       kind: "tip",
     });
   }
@@ -112,16 +114,16 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
       && !recKinds.has("lower_strong_edge_gain")) {
       advice.push({
         icon: "\u25CB",
-        title: "High halo-risk content",
-        body: `${(rc.risky_halo_zone_fraction * 100).toFixed(0)}% of the image is in the halo risk zone (strong edges next to flat areas). Consider Content Adaptive strategy with reduced strong_edge gain, or lower sigma.`,
+        title: t("advice.highHaloRisk"),
+        body: t("advice.highHaloRiskBody", { value: (rc.risky_halo_zone_fraction * 100).toFixed(0) }),
         kind: "tip",
       });
     }
     if (rc.flat_fraction > 0.7) {
       advice.push({
         icon: "\u2014",
-        title: "Mostly flat image",
-        body: "Over 70% of the image is flat regions. Sharpening has little to enhance — the result should be clean. If you see noise amplification, reduce sigma.",
+        title: t("advice.mostlyFlat"),
+        body: t("advice.mostlyFlatBody"),
         kind: "tip",
       });
     }
@@ -130,8 +132,8 @@ function buildAdvice(d: AutoSharpDiagnostics): Advice[] {
   if (advice.length === 0 && (!d.recommendations || d.recommendations.length === 0)) {
     advice.push({
       icon: "\u2713",
-      title: "Looking good",
-      body: "No issues detected. The current settings appear well-suited for this image.",
+      title: t("advice.lookingGood"),
+      body: t("advice.lookingGoodBody"),
       kind: "success",
     });
   }
@@ -178,17 +180,18 @@ const REC_SEVERITY_STYLES: Record<RecSeverity, { border: string; bg: string; tit
   },
 };
 
-const REC_KIND_LABELS: Record<RecommendationKind, string> = {
-  switch_to_content_adaptive: "Content-adaptive sharpening recommended",
-  lower_strong_edge_gain: "Reduce strong-edge gain",
-  raise_artifact_budget: "Raise artifact budget",
-  switch_to_lightness: "Switch to lightness mode",
-  widen_probe_range: "Widen probe range",
-  lower_sigma: "Lower blur sigma",
-  switch_to_hybrid: "Switch to hybrid selection policy",
+const REC_KIND_KEYS: Record<RecommendationKind, string> = {
+  switch_to_content_adaptive: "recommendations.switchToContentAdaptive",
+  lower_strong_edge_gain: "recommendations.lowerStrongEdgeGain",
+  raise_artifact_budget: "recommendations.raiseArtifactBudget",
+  switch_to_lightness: "recommendations.switchToLightness",
+  widen_probe_range: "recommendations.widenProbeRange",
+  lower_sigma: "recommendations.lowerSigma",
+  switch_to_hybrid: "recommendations.switchToHybrid",
 };
 
 function RecommendationCards({ recommendations }: { recommendations: Recommendation[] }) {
+  const { t } = useTranslation();
   const updateParams = useProcessorStore((s) => s.updateParams);
 
   if (recommendations.length === 0) return null;
@@ -222,7 +225,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
               </span>
               <div className="space-y-1 min-w-0 flex-1">
                 <div className={`text-[12px] font-mono font-medium ${s.title}`}>
-                  {REC_KIND_LABELS[rec.kind] ?? rec.kind}
+                  {t(REC_KIND_KEYS[rec.kind] ?? rec.kind)}
                 </div>
                 <p className="text-[12px] text-muted-foreground leading-relaxed">
                   {rec.reason}
@@ -232,7 +235,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
                   className="text-[11px] font-mono font-medium text-primary hover:text-primary/80 transition-colors mt-0.5"
                   onClick={() => applyPatch(rec)}
                 >
-                  Apply
+                  {t("advice.apply")}
                 </button>
               </div>
             </div>
@@ -245,7 +248,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
           className="w-full text-[11px] font-mono font-medium text-primary/70 hover:text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 rounded-md transition-colors text-center py-1.5"
           onClick={applyAll}
         >
-          Apply all recommendations
+          {t("advice.applyAll")}
         </button>
       )}
     </>
@@ -253,9 +256,11 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
 }
 
 export function AdviceTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-2 mt-3">
-      {buildAdvice(diagnostics).map((item, i) => {
+      {buildAdvice(diagnostics, t).map((item, i) => {
         const s = ADVICE_STYLES[item.kind];
         return (
           <div key={i} className={`rounded-sm border ${s.border} ${s.bg} px-3 py-2.5`}>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { AutoSharpDiagnostics, RobustnessFlags } from "@/types/wasm-types";
 import { StatusChip } from "./shared";
 import type { ChipVariant } from "./utils";
@@ -38,6 +39,7 @@ function PolyCoeffTable({
 }
 
 function R2Gauge({ value }: { value: number }) {
+  const { t } = useTranslation();
   const THRESHOLD = 0.85;
   const ok = value >= THRESHOLD;
   const pct = Math.min(100, Math.max(0, value * 100));
@@ -58,7 +60,7 @@ function R2Gauge({ value }: { value: number }) {
                 : "text-destructive/80 border-destructive/25 bg-destructive/5"
             }`}
           >
-            {ok ? "ok" : "low"}
+            {ok ? t("diagnostics.fitTab.ok") : t("diagnostics.fitTab.low")}
           </span>
         </div>
       </div>
@@ -88,46 +90,49 @@ function R2Gauge({ value }: { value: number }) {
 }
 
 function PivotBadge({ pivot }: { pivot: number }) {
+  const { t } = useTranslation();
   const ok = pivot > 1e-8;
   const marginal = pivot > 1e-12;
   if (ok)
     return (
       <span className="text-[10px] font-mono text-chart-3/70 border border-chart-3/20 bg-chart-3/5 px-1 py-px rounded">
-        stable
+        {t("diagnostics.fitTab.stable")}
       </span>
     );
   if (marginal)
     return (
       <span className="text-[10px] font-mono text-primary/80 border border-primary/20 bg-primary/5 px-1 py-px rounded">
-        marginal
+        {t("diagnostics.fitTab.marginal")}
       </span>
     );
   return (
     <span className="text-[10px] font-mono text-destructive/80 border border-destructive/25 bg-destructive/5 px-1 py-px rounded">
-      ill-cond.
+      {t("diagnostics.fitTab.illCond")}
     </span>
   );
 }
 
 type RobCheckKey = "monotonic" | "quasi_monotonic" | "r_squared_ok" | "well_conditioned" | "loo_stable";
 
-const ROBUSTNESS_CHECKS: { key: RobCheckKey; short: string; full: string }[] = [
-  { key: "monotonic",       short: "mono",  full: "Strict monotonicity"       },
-  { key: "quasi_monotonic", short: "quasi", full: "Quasi-monotonicity"        },
-  { key: "r_squared_ok",    short: "R²≥.85",full: "Fit R² ≥ 0.85"            },
-  { key: "well_conditioned",short: "cond.", full: "Matrix conditioning"       },
-  { key: "loo_stable",      short: "LOO",   full: "Leave-one-out stability"   },
-];
-
-const ROBUSTNESS_FAIL_HINTS: Record<RobCheckKey, string> = {
-  monotonic:       "P(s) decreased at some probe — mild curve irregularity.",
-  quasi_monotonic: "Multiple inversions in P(s) — cubic model is unreliable for this data.",
-  r_squared_ok:    "R² < 0.85 — add more probes or widen the probe range.",
-  well_conditioned:"min_pivot ≤ 1e-8 — probe spacings cause numerical instability in the solve.",
-  loo_stable:      "Removing any single probe shifts s* significantly — result is noise-sensitive.",
-};
-
 function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
+  const { t } = useTranslation();
+
+  const ROBUSTNESS_CHECKS: { key: RobCheckKey; short: string; full: string }[] = [
+    { key: "monotonic",       short: t("diagnostics.fitTab.mono"),  full: t("diagnostics.fitTab.strictMonotonicity") },
+    { key: "quasi_monotonic", short: t("diagnostics.fitTab.quasi"), full: t("diagnostics.fitTab.quasiMonotonicity") },
+    { key: "r_squared_ok",    short: t("diagnostics.fitTab.rSquared"), full: t("diagnostics.fitTab.fitR2") },
+    { key: "well_conditioned",short: t("diagnostics.fitTab.cond"),  full: t("diagnostics.fitTab.matrixConditioning") },
+    { key: "loo_stable",      short: t("diagnostics.fitTab.loo"),   full: t("diagnostics.fitTab.looStability") },
+  ];
+
+  const ROBUSTNESS_FAIL_HINTS: Record<RobCheckKey, string> = {
+    monotonic:       t("diagnostics.robustnessHints.monotonic"),
+    quasi_monotonic: t("diagnostics.robustnessHints.quasiMonotonic"),
+    r_squared_ok:    t("diagnostics.robustnessHints.rSquaredOk"),
+    well_conditioned: t("diagnostics.robustnessHints.wellConditioned"),
+    loo_stable:      t("diagnostics.robustnessHints.looStable"),
+  };
+
   const failedKeys = ROBUSTNESS_CHECKS.filter(({ key }) => !robustness[key]).map(
     ({ key }) => key
   );
@@ -167,7 +172,7 @@ function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
       </div>
 
       <div className="flex items-center justify-between text-[11px] font-mono py-0.5">
-        <span className="text-muted-foreground/60">Max LOO Δs*</span>
+        <span className="text-muted-foreground/60">{t("diagnostics.fitTab.maxLooDs")}</span>
         <span
           className={`tabular-nums ${
             !robustness.loo_stable ? "text-destructive" : "text-foreground/70"
@@ -214,11 +219,13 @@ function crossingStatusVariant(status: string): ChipVariant {
 }
 
 export function FitTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
+  const { t } = useTranslation();
+
   return (
     <div className="space-y-3 mt-3">
       <div className="flex gap-2">
         <StatusChip
-          heading="Fit"
+          heading={t("diagnostics.fit")}
           value={diagnostics.fit_status?.status ?? "unknown"}
           variant={fitStatusVariant(diagnostics.fit_status?.status)}
         />
@@ -246,24 +253,24 @@ export function FitTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
       {diagnostics.fit_quality && (
         <div className="border-t border-border/30 pt-3 space-y-2">
           <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
-            Quality
+            {t("diagnostics.fitTab.quality")}
           </div>
           <R2Gauge value={diagnostics.fit_quality.r_squared} />
           <div className="space-y-0.5 pt-1">
             <div className="flex items-center justify-between text-[11px] font-mono py-0.5">
-              <span className="text-muted-foreground">Max residual</span>
+              <span className="text-muted-foreground">{t("diagnostics.fitTab.maxResidual")}</span>
               <span className="tabular-nums text-foreground/75">
                 {diagnostics.fit_quality.max_residual.toExponential(3)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[11px] font-mono py-0.5">
-              <span className="text-muted-foreground">RSS</span>
+              <span className="text-muted-foreground">{t("diagnostics.fitTab.rss")}</span>
               <span className="tabular-nums text-foreground/75">
                 {diagnostics.fit_quality.residual_sum_of_squares.toExponential(3)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[11px] font-mono py-0.5">
-              <span className="text-muted-foreground">Min pivot</span>
+              <span className="text-muted-foreground">{t("diagnostics.fitTab.minPivot")}</span>
               <div className="flex items-center gap-1.5">
                 <span className="tabular-nums text-foreground/75">
                   {diagnostics.fit_quality.min_pivot.toExponential(3)}
@@ -278,7 +285,7 @@ export function FitTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
       {diagnostics.robustness && (
         <div className="border-t border-border/30 pt-3 space-y-2">
           <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
-            Robustness
+            {t("diagnostics.robustness.title")}
           </div>
           <RobustnessGrid robustness={diagnostics.robustness} />
         </div>

@@ -1,10 +1,13 @@
 import { Lock, Pipette, Scaling, Sparkles, Target } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { LogoMark } from "./LogoMark";
 import { ImageUpload } from "./ImageUpload";
 import BlurText from "./BlurText";
 import ShinyText from "./ShinyText";
 
 export function WelcomeHero() {
+  const { t } = useTranslation();
+
   return (
     <div className="flex-1 flex items-center justify-center px-6">
       <div className="flex flex-col items-center gap-8 max-w-lg w-full -mt-10">
@@ -18,7 +21,7 @@ export function WelcomeHero() {
               r3sizer
             </h2>
             <BlurText
-              text="Precision downscaling with automatic sharpness optimization."
+              text={t("app.subtitle")}
               className="text-sm text-muted-foreground max-w-xs justify-center"
               animateBy="words"
               direction="bottom"
@@ -34,7 +37,7 @@ export function WelcomeHero() {
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-green-500/25 bg-green-500/[0.06] text-xs font-mono tracking-wide">
               <Lock className="h-3 w-3 text-green-400/80" />
               <ShinyText
-                text="Runs entirely in your browser"
+                text={t("app.badge")}
                 speed={3.5}
                 delay={1}
                 color="oklch(0.72 0.15 145)"
@@ -55,13 +58,13 @@ export function WelcomeHero() {
         </div>
         {/* Pipeline hint — hidden on narrow screens */}
         <div className="hidden sm:flex items-center gap-4 text-[11px] font-mono text-muted-foreground/50 animate-fade-up delay-400">
-          <span className="inline-flex items-center gap-1"><Pipette className="h-3 w-3" />linearize</span>
+          <span className="inline-flex items-center gap-1"><Pipette className="h-3 w-3" />{t("pipeline.linearize")}</span>
           <span className="text-primary/30">&rarr;</span>
-          <span className="inline-flex items-center gap-1"><Scaling className="h-3 w-3" />downscale</span>
+          <span className="inline-flex items-center gap-1"><Scaling className="h-3 w-3" />{t("pipeline.downscale")}</span>
           <span className="text-primary/30">&rarr;</span>
-          <span className="inline-flex items-center gap-1"><Sparkles className="h-3 w-3" />sharpen</span>
+          <span className="inline-flex items-center gap-1"><Sparkles className="h-3 w-3" />{t("pipeline.sharpen")}</span>
           <span className="text-primary/30">&rarr;</span>
-          <span className="inline-flex items-center gap-1"><Target className="h-3 w-3" />optimize</span>
+          <span className="inline-flex items-center gap-1"><Target className="h-3 w-3" />{t("pipeline.optimize")}</span>
         </div>
       </div>
     </div>
