@@ -47,19 +47,24 @@ pub(crate) fn classify_features(
 }
 
 // ---------------------------------------------------------------------------
-// Pass 1: Sobel gradient magnitude (unnormalized, edge-replicate)
+// Pass 1: Sobel gradient (unnormalized, edge-replicate)
 // ---------------------------------------------------------------------------
 
-/// Unnormalized 3×3 Sobel gradient magnitude on single-channel data.
-///
-/// L2 norm: `g = sqrt(Gx² + Gy²)`. Theoretical max for luminance in [0,1]: 4√2 ≈ 5.66.
-/// Border handling: edge-replicate (clamp pixel coordinates to valid range).
+/// Shared Sobel gradient returning magnitude, dx, and dy.
 ///
 /// Split into border (clamped) and interior (unchecked) loops for performance.
 /// The interior loop has no bounds checks, enabling auto-vectorization.
-fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f32> {
+///
+/// Used by both the classifier (magnitude only) and the edge profiler (all three).
+pub(crate) fn sobel_gradient_full(
+    luma: &[f32],
+    width: usize,
+    height: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let n = width * height;
-    let mut grad = vec![0.0_f32; n];
+    let mut mag = vec![0.0_f32; n];
+    let mut dx = vec![0.0_f32; n];
+    let mut dy = vec![0.0_f32; n];
 
     // Clamped version for border pixels.
     let clamp_x = |x: isize| -> usize { (x.max(0) as usize).min(width - 1) };
@@ -67,33 +72,42 @@ fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f3
     let px = |x: isize, y: isize| -> f32 { luma[clamp_y(y) * width + clamp_x(x)] };
 
     #[inline(always)]
-    fn sobel_clamped(px: impl Fn(isize, isize) -> f32, xi: isize, yi: isize) -> f32 {
+    fn sobel_clamped(px: impl Fn(isize, isize) -> f32, xi: isize, yi: isize) -> (f32, f32, f32) {
         let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
             - 2.0 * px(xi - 1, yi) + 2.0 * px(xi + 1, yi)
             - px(xi - 1, yi + 1) + px(xi + 1, yi + 1);
         let gy = -px(xi - 1, yi - 1) - 2.0 * px(xi, yi - 1) - px(xi + 1, yi - 1)
             + px(xi - 1, yi + 1) + 2.0 * px(xi, yi + 1) + px(xi + 1, yi + 1);
-        (gx * gx + gy * gy).sqrt()
+        ((gx * gx + gy * gy).sqrt(), gx, gy)
     }
 
     // Top border row (y == 0)
-    #[allow(clippy::needless_range_loop)] // x used both as grad index and Sobel coordinate
+    #[allow(clippy::needless_range_loop)]
     if height > 0 {
         for x in 0..width {
-            grad[x] = sobel_clamped(px, x as isize, 0);
+            let (m, gx, gy) = sobel_clamped(px, x as isize, 0);
+            mag[x] = m;
+            dx[x] = gx;
+            dy[x] = gy;
         }
     }
 
     // Left and right border columns + interior for rows 1..height-1
     for y in 1..height.saturating_sub(1) {
         // Left border pixel
-        grad[y * width] = sobel_clamped(px, 0, y as isize);
+        let idx = y * width;
+        let (m, gx, gy) = sobel_clamped(px, 0, y as isize);
+        mag[idx] = m;
+        dx[idx] = gx;
+        dy[idx] = gy;
 
         // Interior: direct indexing, no bounds checks
         let prev_row = &luma[(y - 1) * width..y * width];
         let curr_row = &luma[y * width..(y + 1) * width];
         let next_row = &luma[(y + 1) * width..(y + 2) * width];
-        let out_row = &mut grad[y * width..(y + 1) * width];
+        let out_mag = &mut mag[y * width..(y + 1) * width];
+        let out_dx = &mut dx[y * width..(y + 1) * width];
+        let out_dy = &mut dy[y * width..(y + 1) * width];
         for x in 1..width.saturating_sub(1) {
             let tl = prev_row[x - 1];
             let tc = prev_row[x];
@@ -106,12 +120,18 @@ fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f3
 
             let gx = -tl + tr - 2.0 * ml + 2.0 * mr - bl + br;
             let gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br;
-            out_row[x] = (gx * gx + gy * gy).sqrt();
+            out_mag[x] = (gx * gx + gy * gy).sqrt();
+            out_dx[x] = gx;
+            out_dy[x] = gy;
         }
 
         // Right border pixel
         if width > 1 {
-            grad[y * width + width - 1] = sobel_clamped(px, (width - 1) as isize, y as isize);
+            let idx = y * width + width - 1;
+            let (m, gx, gy) = sobel_clamped(px, (width - 1) as isize, y as isize);
+            mag[idx] = m;
+            dx[idx] = gx;
+            dy[idx] = gy;
         }
     }
 
@@ -119,11 +139,20 @@ fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f3
     if height > 1 {
         let y = height - 1;
         for x in 0..width {
-            grad[y * width + x] = sobel_clamped(px, x as isize, y as isize);
+            let idx = y * width + x;
+            let (m, gx, gy) = sobel_clamped(px, x as isize, y as isize);
+            mag[idx] = m;
+            dx[idx] = gx;
+            dy[idx] = gy;
         }
     }
 
-    grad
+    (mag, dx, dy)
+}
+
+/// Convenience wrapper: returns only gradient magnitude.
+fn sobel_gradient_magnitude(luma: &[f32], width: usize, height: usize) -> Vec<f32> {
+    sobel_gradient_full(luma, width, height).0
 }
 
 // ---------------------------------------------------------------------------

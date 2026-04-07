@@ -596,6 +596,19 @@ pub fn apply_detail_rgb(src: &LinearRgbImage, detail: &[f32], amount: f32) -> Li
         .expect("data length must match src dimensions")
 }
 
+/// Like [`apply_detail_rgb`] but writes into a pre-allocated `LinearRgbImage`.
+///
+/// `out` must have the same dimensions as `src`.
+pub fn apply_detail_rgb_into(src: &LinearRgbImage, detail: &[f32], amount: f32, out: &mut LinearRgbImage) {
+    let src_px = src.pixels();
+    let dst = out.pixels_mut();
+    debug_assert_eq!(detail.len(), src_px.len());
+    debug_assert_eq!(dst.len(), src_px.len());
+    for i in 0..src_px.len() {
+        dst[i] = src_px[i] + amount * detail[i];
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

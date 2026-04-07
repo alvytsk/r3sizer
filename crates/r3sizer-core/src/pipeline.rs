@@ -952,14 +952,15 @@ fn probe_strengths(
             #[cfg(not(feature = "parallel"))]
             {
                 let n = w * h;
-                let mut scratch = vec![0.0f32; n];
+                let mut luma_scratch = vec![0.0f32; n];
+                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
                 let mut results = Vec::with_capacity(strengths.len());
                 for &s in strengths {
-                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut scratch);
-                    let image = color::reconstruct_rgb_from_lightness_with_luma(
-                        base, &scratch, Some(lum),
+                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut luma_scratch);
+                    color::reconstruct_rgb_from_lightness_into(
+                        base, &luma_scratch, lum, &mut rgb_scratch,
                     );
-                    let p_total = measure(&image);
+                    let p_total = measure(&rgb_scratch);
                     let metric_value =
                         compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
                     results.push(ProbeSample {
@@ -999,10 +1000,11 @@ fn probe_strengths(
 
             #[cfg(not(feature = "parallel"))]
             {
+                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
                 let mut results = Vec::with_capacity(strengths.len());
                 for &s in strengths {
-                    let image = sharpen::apply_detail_rgb(base, &detail, s);
-                    let p_total = measure(&image);
+                    sharpen::apply_detail_rgb_into(base, &detail, s, &mut rgb_scratch);
+                    let p_total = measure(&rgb_scratch);
                     let metric_value =
                         compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
                     results.push(ProbeSample {
@@ -1464,12 +1466,22 @@ fn run_two_pass_probing(
         SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
     };
 
+    // Scratch buffers reused across all coarse + dense probes.
+    let w = base.width() as usize;
+    let h = base.height() as usize;
+    let mut luma_scratch = match sharpen_mode {
+        SharpenMode::Lightness => vec![0.0f32; w * h],
+        SharpenMode::Rgb => Vec::new(),
+    };
+    let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
+
     // Phase 1: coarse with early stopping
     let mut coarse_samples = Vec::with_capacity(coarse_count);
     for &s in &coarse_strengths {
-        let sample = probe_one_from_detail(
+        let sample = probe_one_reuse(
             base, base_luminance, &detail, sharpen_mode,
             s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
+            &mut luma_scratch, &mut rgb_scratch,
         );
         coarse_samples.push(sample);
 
@@ -1489,17 +1501,16 @@ fn run_two_pass_probing(
     let (dense_lo, dense_hi) =
         find_dense_window(&coarse_samples, p0, coarse_min, coarse_max, window_margin);
 
-    // Phase 2: dense — reuse the precomputed detail
+    // Phase 2: dense — reuse the precomputed detail and scratch buffers
     let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
-    let dense_samples: Vec<ProbeSample> = dense_strengths
-        .iter()
-        .map(|&s| {
-            probe_one_from_detail(
-                base, base_luminance, &detail, sharpen_mode,
-                s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
-            )
-        })
-        .collect();
+    let mut dense_samples = Vec::with_capacity(dense_count);
+    for &s in &dense_strengths {
+        dense_samples.push(probe_one_reuse(
+            base, base_luminance, &detail, sharpen_mode,
+            s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
+            &mut luma_scratch, &mut rgb_scratch,
+        ));
+    }
 
     // Merge, sort, remove near-duplicates (within 1e-5 of each other)
     let mut all: Vec<ProbeSample> = coarse_samples;
@@ -1547,6 +1558,47 @@ fn probe_one_from_detail(
     let p_total = match metric_override {
         Some(f) => f(&image),
         None => crate::metrics::compute_selection_metric(&image, artifact_metric),
+    };
+    let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+    ProbeSample { strength, artifact_ratio: p_total, metric_value, breakdown: None }
+}
+
+/// Like [`probe_one_from_detail`] but reuses pre-allocated scratch buffers.
+///
+/// `luma_scratch` is used for Lightness mode (length >= W×H).
+/// `rgb_scratch` is the output image reused across probes (same dimensions as `base`).
+#[allow(clippy::too_many_arguments)]
+fn probe_one_reuse(
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    detail: &[f32],
+    sharpen_mode: SharpenMode,
+    strength: f32,
+    artifact_metric: ArtifactMetric,
+    baseline_artifact_ratio: f32,
+    metric_mode: MetricMode,
+    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    luma_scratch: &mut [f32],
+    rgb_scratch: &mut LinearRgbImage,
+) -> ProbeSample {
+    use crate::sharpen;
+
+    match sharpen_mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance required for Lightness mode");
+            sharpen::apply_detail_single_channel_into(lum, detail, strength, luma_scratch);
+            color::reconstruct_rgb_from_lightness_into(
+                base, luma_scratch, lum, rgb_scratch,
+            );
+        }
+        SharpenMode::Rgb => {
+            sharpen::apply_detail_rgb_into(base, detail, strength, rgb_scratch);
+        }
+    }
+
+    let p_total = match metric_override {
+        Some(f) => f(rgb_scratch),
+        None => crate::metrics::compute_selection_metric(rgb_scratch, artifact_metric),
     };
     let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
     ProbeSample { strength, artifact_ratio: p_total, metric_value, breakdown: None }

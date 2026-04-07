@@ -32,7 +32,8 @@ pub fn extract_edge_profiles(
         return Vec::new();
     }
 
-    let (grad_mag, grad_dx, grad_dy) = sobel_gradient(luma_original, width, height);
+    // Use the shared optimized Sobel from classifier (split border/interior loops).
+    let (grad_mag, grad_dx, grad_dy) = crate::classifier::sobel_gradient_full(luma_original, width, height);
 
     let mut profiles = Vec::new();
 
@@ -66,42 +67,6 @@ pub fn extract_edge_profiles(
     }
 
     profiles
-}
-
-/// Sobel gradient: returns (magnitude, dx, dy) arrays.
-fn sobel_gradient(
-    luma: &[f32],
-    width: usize,
-    height: usize,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let n = width * height;
-    let mut mag = vec![0.0_f32; n];
-    let mut dx = vec![0.0_f32; n];
-    let mut dy = vec![0.0_f32; n];
-
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let tl = luma[(y - 1) * width + (x - 1)];
-            let tc = luma[(y - 1) * width + x];
-            let tr = luma[(y - 1) * width + (x + 1)];
-            let ml = luma[y * width + (x - 1)];
-            let mr = luma[y * width + (x + 1)];
-            let bl = luma[(y + 1) * width + (x - 1)];
-            let bc = luma[(y + 1) * width + x];
-            let br = luma[(y + 1) * width + (x + 1)];
-
-            let gx = -tl + tr - 2.0 * ml + 2.0 * mr - bl + br;
-            let gy = -tl - 2.0 * tc - tr + bl + 2.0 * bc + br;
-            let m = (gx * gx + gy * gy).sqrt();
-
-            let idx = y * width + x;
-            dx[idx] = gx;
-            dy[idx] = gy;
-            mag[idx] = m;
-        }
-    }
-
-    (mag, dx, dy)
 }
 
 /// Bilinear interpolation on a single-channel image.
@@ -193,7 +158,7 @@ mod tests {
                 luma[y * 5 + x] = 1.0;
             }
         }
-        let (mag, _dx, _dy) = sobel_gradient(&luma, 5, 5);
+        let (mag, _dx, _dy) = crate::classifier::sobel_gradient_full(&luma, 5, 5);
         let edge_mag = mag[2 * 5 + 2];
         assert!(edge_mag > 0.1, "edge magnitude should be significant: {edge_mag}");
     }
