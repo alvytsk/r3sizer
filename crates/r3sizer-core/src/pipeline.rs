@@ -228,13 +228,18 @@ pub fn prepare_base(
     // Luminance extraction (always extract — cheap, needed for both probing and metrics)
     let base_luminance = Some(color::extract_luminance(&base));
 
-    // Evaluator
+    // Evaluator — use precomputed luminance to avoid redundant extraction + full
+    // feature computation.  `suggest_strength_from_luma` only computes Sobel
+    // edge density (the single feature the strength heuristic uses).
     on_stage("evaluating");
     let t0 = Instant::now();
     let evaluator_cap = match &params.evaluator_config {
         Some(crate::types::EvaluatorConfig::Heuristic) => {
             let eval = crate::evaluator::HeuristicEvaluator;
-            crate::evaluator::QualityEvaluator::suggest_strength(&eval, &base, 0.8)
+            let luma = base_luminance.as_ref().unwrap();
+            crate::evaluator::QualityEvaluator::suggest_strength_from_luma(
+                &eval, luma, base.width() as usize, base.height() as usize,
+            )
         }
         None => None,
     };
@@ -429,15 +434,28 @@ pub fn run_probes_from_detail(
     baseline_artifact_ratio: f32,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
+    let w = width as usize;
+    let h = height as usize;
+    let ctx = ProbeContext {
+        base: &base,
+        base_luminance: Some(base_luminance),
+        detail,
+        sharpen_mode: params.sharpen_mode,
+        artifact_metric: params.artifact_metric,
+        baseline_artifact_ratio,
+        metric_mode: params.metric_mode,
+        metric_override: None,
+    };
+    let mut scratch = ProbeScratch {
+        luma: match params.sharpen_mode {
+            SharpenMode::Lightness => vec![0.0f32; w * h],
+            SharpenMode::Rgb => Vec::new(),
+        },
+        rgb: LinearRgbImage::zeros(width, height)?,
+    };
     let results = strengths
         .iter()
-        .map(|&s| {
-            probe_one_from_detail(
-                &base, Some(base_luminance), detail,
-                params.sharpen_mode, s, params.artifact_metric,
-                baseline_artifact_ratio, params.metric_mode, None,
-            )
-        })
+        .map(|&s| probe_one_reuse(&ctx, s, &mut scratch))
         .collect();
     Ok(results)
 }
@@ -717,6 +735,7 @@ fn finish_pipeline(
 
     // Evaluator (full diagnostics only — purely diagnostic, does not
     // alter the selection path or the output image).
+    // Uses precomputed base luminance to avoid redundant extraction.
     let (_evaluator_result, _evaluator_process_us) = {
         if full_diagnostics {
             if let Some(ref eval_config) = params.evaluator_config {
@@ -724,7 +743,11 @@ fn finish_pipeline(
                 let result = match eval_config {
                     crate::types::EvaluatorConfig::Heuristic => {
                         let eval = crate::evaluator::HeuristicEvaluator;
-                        crate::evaluator::QualityEvaluator::evaluate(&eval, base, &final_image, selected_strength)
+                        let luma = prepared.base_luminance.as_deref()
+                            .expect("base_luminance is always set in prepare_base");
+                        crate::evaluator::QualityEvaluator::evaluate_with_luma(
+                            &eval, base, luma, &final_image, selected_strength,
+                        )
                     }
                 };
                 let us = t0.elapsed().as_micros() as u64;
@@ -952,14 +975,15 @@ fn probe_strengths(
             #[cfg(not(feature = "parallel"))]
             {
                 let n = w * h;
-                let mut scratch = vec![0.0f32; n];
+                let mut luma_scratch = vec![0.0f32; n];
+                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
                 let mut results = Vec::with_capacity(strengths.len());
                 for &s in strengths {
-                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut scratch);
-                    let image = color::reconstruct_rgb_from_lightness_with_luma(
-                        base, &scratch, Some(lum),
+                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut luma_scratch);
+                    color::reconstruct_rgb_from_lightness_into(
+                        base, &luma_scratch, lum, &mut rgb_scratch,
                     );
-                    let p_total = measure(&image);
+                    let p_total = measure(&rgb_scratch);
                     let metric_value =
                         compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
                     results.push(ProbeSample {
@@ -999,10 +1023,11 @@ fn probe_strengths(
 
             #[cfg(not(feature = "parallel"))]
             {
+                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
                 let mut results = Vec::with_capacity(strengths.len());
                 for &s in strengths {
-                    let image = sharpen::apply_detail_rgb(base, &detail, s);
-                    let p_total = measure(&image);
+                    sharpen::apply_detail_rgb_into(base, &detail, s, &mut rgb_scratch);
+                    let p_total = measure(&rgb_scratch);
                     let metric_value =
                         compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
                     results.push(ProbeSample {
@@ -1464,14 +1489,31 @@ fn run_two_pass_probing(
         SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
     };
 
+    // Scratch buffers and context reused across all coarse + dense probes.
+    let w = base.width() as usize;
+    let h = base.height() as usize;
+    let ctx = ProbeContext {
+        base,
+        base_luminance,
+        detail: &detail,
+        sharpen_mode,
+        artifact_metric,
+        baseline_artifact_ratio,
+        metric_mode,
+        metric_override,
+    };
+    let mut scratch = ProbeScratch {
+        luma: match sharpen_mode {
+            SharpenMode::Lightness => vec![0.0f32; w * h],
+            SharpenMode::Rgb => Vec::new(),
+        },
+        rgb: LinearRgbImage::zeros(base.width(), base.height())?,
+    };
+
     // Phase 1: coarse with early stopping
     let mut coarse_samples = Vec::with_capacity(coarse_count);
     for &s in &coarse_strengths {
-        let sample = probe_one_from_detail(
-            base, base_luminance, &detail, sharpen_mode,
-            s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
-        );
-        coarse_samples.push(sample);
+        coarse_samples.push(probe_one_reuse(&ctx, s, &mut scratch));
 
         // Early-stop: once we have enough probes and a P0 bracket, skip the rest.
         if coarse_samples.len() >= MIN_COARSE_BEFORE_EARLY_STOP {
@@ -1489,17 +1531,12 @@ fn run_two_pass_probing(
     let (dense_lo, dense_hi) =
         find_dense_window(&coarse_samples, p0, coarse_min, coarse_max, window_margin);
 
-    // Phase 2: dense — reuse the precomputed detail
+    // Phase 2: dense — reuse the precomputed detail and scratch buffers
     let dense_strengths = linspace(dense_lo, dense_hi, dense_count);
-    let dense_samples: Vec<ProbeSample> = dense_strengths
-        .iter()
-        .map(|&s| {
-            probe_one_from_detail(
-                base, base_luminance, &detail, sharpen_mode,
-                s, artifact_metric, baseline_artifact_ratio, metric_mode, metric_override,
-            )
-        })
-        .collect();
+    let mut dense_samples = Vec::with_capacity(dense_count);
+    for &s in &dense_strengths {
+        dense_samples.push(probe_one_reuse(&ctx, s, &mut scratch));
+    }
 
     // Merge, sort, remove near-duplicates (within 1e-5 of each other)
     let mut all: Vec<ProbeSample> = coarse_samples;
@@ -1520,34 +1557,53 @@ fn run_two_pass_probing(
     Ok((all, Some(diag)))
 }
 
-/// Evaluate a single probe from precomputed detail.
-#[allow(clippy::too_many_arguments)]
-fn probe_one_from_detail(
-    base: &LinearRgbImage,
-    base_luminance: Option<&[f32]>,
-    detail: &[f32],
+/// Immutable context shared across all probes in a single probing phase.
+struct ProbeContext<'a> {
+    base: &'a LinearRgbImage,
+    base_luminance: Option<&'a [f32]>,
+    detail: &'a [f32],
     sharpen_mode: SharpenMode,
-    strength: f32,
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     metric_mode: MetricMode,
-    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    metric_override: Option<&'a (dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+}
+
+/// Mutable scratch buffers reused across probes to avoid per-probe allocation.
+///
+/// - `luma`: intermediate sharpened luminance buffer; only written in
+///   Lightness mode (must have length >= W×H). Empty in RGB mode.
+/// - `rgb`: output image buffer. Must have the same dimensions as `base`.
+struct ProbeScratch {
+    luma: Vec<f32>,
+    rgb: LinearRgbImage,
+}
+
+/// Evaluate a single probe from precomputed detail, reusing scratch buffers.
+fn probe_one_reuse(
+    ctx: &ProbeContext<'_>,
+    strength: f32,
+    scratch: &mut ProbeScratch,
 ) -> ProbeSample {
     use crate::sharpen;
 
-    let image = match sharpen_mode {
+    match ctx.sharpen_mode {
         SharpenMode::Lightness => {
-            let lum = base_luminance.expect("base_luminance required for Lightness mode");
-            let sharpened_l = sharpen::apply_detail_single_channel(lum, detail, strength);
-            color::reconstruct_rgb_from_lightness_with_luma(base, &sharpened_l, Some(lum))
+            let lum = ctx.base_luminance.expect("base_luminance required for Lightness mode");
+            sharpen::apply_detail_single_channel_into(lum, ctx.detail, strength, &mut scratch.luma);
+            color::reconstruct_rgb_from_lightness_into(
+                ctx.base, &scratch.luma, lum, &mut scratch.rgb,
+            );
         }
-        SharpenMode::Rgb => sharpen::apply_detail_rgb(base, detail, strength),
-    };
+        SharpenMode::Rgb => {
+            sharpen::apply_detail_rgb_into(ctx.base, ctx.detail, strength, &mut scratch.rgb);
+        }
+    }
 
-    let p_total = match metric_override {
-        Some(f) => f(&image),
-        None => crate::metrics::compute_selection_metric(&image, artifact_metric),
+    let p_total = match ctx.metric_override {
+        Some(f) => f(&scratch.rgb),
+        None => crate::metrics::compute_selection_metric(&scratch.rgb, ctx.artifact_metric),
     };
-    let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+    let metric_value = compute_metric_value(p_total, ctx.baseline_artifact_ratio, ctx.metric_mode);
     ProbeSample { strength, artifact_ratio: p_total, metric_value, breakdown: None }
 }

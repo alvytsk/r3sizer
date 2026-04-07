@@ -1,5 +1,5 @@
 use r3sizer_core::{CoreError, LinearRgbImage};
-use r3sizer_core::color::linear_to_srgb;
+use r3sizer_core::color::linear_to_srgb_fast;
 
 // ---------------------------------------------------------------------------
 // Exact u8→linear LUT (256 entries, no interpolation needed)
@@ -61,9 +61,9 @@ pub fn linear_to_rgba_u8(img: &LinearRgbImage) -> Vec<u8> {
     let mut out = Vec::with_capacity(pixel_count * 4);
 
     for chunk in img.pixels().chunks_exact(3) {
-        let r = (linear_to_srgb(chunk[0]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-        let g = (linear_to_srgb(chunk[1]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
-        let b = (linear_to_srgb(chunk[2]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+        let r = (linear_to_srgb_fast(chunk[0]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+        let g = (linear_to_srgb_fast(chunk[1]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
+        let b = (linear_to_srgb_fast(chunk[2]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
         out.push(r);
         out.push(g);
         out.push(b);

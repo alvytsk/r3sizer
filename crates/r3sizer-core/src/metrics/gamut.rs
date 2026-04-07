@@ -6,6 +6,11 @@
 use crate::types::LinearRgbImage;
 
 /// Per-channel clipping ratio. Denominator = W * H * 3.
+///
+/// Uses branchless counting: `(v < 0.0 || v > 1.0)` compiles to two
+/// comparisons + OR, no branch — LLVM auto-vectorizes this into SIMD
+/// compare + horizontal reduce on supported targets.
+#[allow(clippy::manual_range_contains)] // Intentional: manual form generates branchless SIMD code
 pub fn channel_clipping_ratio(img: &LinearRgbImage) -> f32 {
     let pixels = img.pixels();
     let total = pixels.len();
@@ -14,12 +19,15 @@ pub fn channel_clipping_ratio(img: &LinearRgbImage) -> f32 {
     }
     let out_of_range: u32 = pixels
         .iter()
-        .map(|&v| (!(0.0..=1.0).contains(&v)) as u32)
+        .map(|&v| (v < 0.0 || v > 1.0) as u32)
         .sum();
     out_of_range as f32 / total as f32
 }
 
 /// Per-pixel out-of-gamut ratio. Denominator = W * H.
+///
+/// Uses branchless per-channel checks OR'd together.
+#[allow(clippy::manual_range_contains)] // Intentional: branchless form for SIMD auto-vectorization
 pub fn pixel_out_of_gamut_ratio(img: &LinearRgbImage) -> f32 {
     let pixels = img.pixels();
     let total_pixels = pixels.len() / 3;
@@ -28,7 +36,12 @@ pub fn pixel_out_of_gamut_ratio(img: &LinearRgbImage) -> f32 {
     }
     let oog: u32 = pixels
         .chunks_exact(3)
-        .map(|rgb| rgb.iter().any(|&v| !(0.0..=1.0).contains(&v)) as u32)
+        .map(|rgb| {
+            let bad = (rgb[0] < 0.0 || rgb[0] > 1.0)
+                | (rgb[1] < 0.0 || rgb[1] > 1.0)
+                | (rgb[2] < 0.0 || rgb[2] > 1.0);
+            bad as u32
+        })
         .sum();
     oog as f32 / total_pixels as f32
 }

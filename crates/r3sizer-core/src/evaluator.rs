@@ -27,6 +27,18 @@ pub trait QualityEvaluator: Send + Sync {
         strength: f32,
     ) -> QualityEvaluation;
 
+    /// Evaluate with precomputed base luminance (avoids re-extraction).
+    /// Default delegates to [`evaluate`](Self::evaluate).
+    fn evaluate_with_luma(
+        &self,
+        base: &LinearRgbImage,
+        _base_luma: &[f32],
+        sharpened: &LinearRgbImage,
+        strength: f32,
+    ) -> QualityEvaluation {
+        self.evaluate(base, sharpened, strength)
+    }
+
     /// Suggest an optimal sharpening strength based on image content analysis.
     /// Returns `None` if the evaluator cannot make a suggestion.
     fn suggest_strength(
@@ -34,6 +46,17 @@ pub trait QualityEvaluator: Send + Sync {
         base: &LinearRgbImage,
         target_quality: f32,
     ) -> Option<f32>;
+
+    /// Suggest strength from precomputed luminance (avoids full feature extraction).
+    /// Default delegates to [`suggest_strength`](Self::suggest_strength).
+    fn suggest_strength_from_luma(
+        &self,
+        _luma: &[f32],
+        _w: usize,
+        _h: usize,
+    ) -> Option<f32> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -46,27 +69,36 @@ const EDGE_THRESHOLD: f32 = 0.05;
 /// Number of bins for luminance histogram entropy.
 const HIST_BINS: usize = 64;
 
+/// Compute edge density from luminance (Sobel magnitude > threshold).
+/// This is the only feature `suggest_strength` needs.
+pub fn compute_edge_density(luma: &[f32], w: usize, h: usize) -> f32 {
+    let n = luma.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let gradients = crate::classifier::sobel_gradient_full(luma, w, h).0;
+    let edge_count = gradients.iter().filter(|&&g| g > EDGE_THRESHOLD).count();
+    edge_count as f32 / n as f32
+}
+
 /// Extract image features for quality prediction.
 pub fn extract_features(img: &LinearRgbImage) -> ImageFeatures {
     let luma = extract_luminance(img);
-    let w = img.width() as usize;
-    let h = img.height() as usize;
-    let n = luma.len();
+    extract_features_from_luma(&luma, img.width() as usize, img.height() as usize)
+}
 
+/// Extract features from precomputed luminance and Sobel gradients.
+fn extract_features_from_luma_and_grads(
+    luma: &[f32],
+    gradients: &[f32],
+    w: usize,
+    h: usize,
+) -> ImageFeatures {
+    let n = luma.len();
     if n == 0 {
-        return ImageFeatures {
-            edge_density: 0.0,
-            mean_gradient_magnitude: 0.0,
-            gradient_variance: 0.0,
-            mean_local_variance: 0.0,
-            local_variance_variance: 0.0,
-            laplacian_variance: 0.0,
-            luminance_histogram_entropy: 0.0,
-        };
+        return ImageFeatures::default();
     }
 
-    // --- Sobel gradient ---
-    let gradients = sobel_magnitude(&luma, w, h);
     let edge_count = gradients.iter().filter(|&&g| g > EDGE_THRESHOLD).count();
     let edge_density = edge_count as f32 / n as f32;
     let mean_grad = gradients.iter().copied().sum::<f32>() / n as f32;
@@ -74,18 +106,14 @@ pub fn extract_features(img: &LinearRgbImage) -> ImageFeatures {
         .map(|&g| (g - mean_grad) * (g - mean_grad))
         .sum::<f32>() / n as f32;
 
-    // --- Local variance (5×5) ---
-    let local_vars = local_variance_5x5(&luma, w, h);
+    let local_vars = local_variance_5x5(luma, w, h);
     let mean_lv = local_vars.iter().copied().sum::<f32>() / n as f32;
     let lv_variance = local_vars.iter()
         .map(|&v| (v - mean_lv) * (v - mean_lv))
         .sum::<f32>() / n as f32;
 
-    // --- Laplacian variance (frequency proxy) ---
-    let laplacian_var = laplacian_variance(&luma, w, h);
-
-    // --- Luminance histogram entropy ---
-    let entropy = histogram_entropy(&luma);
+    let laplacian_var = laplacian_variance(luma, w, h);
+    let entropy = histogram_entropy(luma);
 
     ImageFeatures {
         edge_density,
@@ -98,28 +126,13 @@ pub fn extract_features(img: &LinearRgbImage) -> ImageFeatures {
     }
 }
 
-/// Sobel gradient magnitude (simplified, edge-replicate).
-fn sobel_magnitude(luma: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let at = |x: isize, y: isize| -> f32 {
-        let cx = x.clamp(0, w as isize - 1) as usize;
-        let cy = y.clamp(0, h as isize - 1) as usize;
-        luma[cy * w + cx]
-    };
-
-    let mut mag = vec![0.0f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let ix = x as isize;
-            let iy = y as isize;
-            let gx = -at(ix - 1, iy - 1) + at(ix + 1, iy - 1)
-                   - 2.0 * at(ix - 1, iy) + 2.0 * at(ix + 1, iy)
-                   - at(ix - 1, iy + 1) + at(ix + 1, iy + 1);
-            let gy = -at(ix - 1, iy - 1) - 2.0 * at(ix, iy - 1) - at(ix + 1, iy - 1)
-                   + at(ix - 1, iy + 1) + 2.0 * at(ix, iy + 1) + at(ix + 1, iy + 1);
-            mag[y * w + x] = (gx * gx + gy * gy).sqrt();
-        }
+/// Extract features from precomputed luminance (computes Sobel internally).
+fn extract_features_from_luma(luma: &[f32], w: usize, h: usize) -> ImageFeatures {
+    if luma.is_empty() {
+        return ImageFeatures::default();
     }
-    mag
+    let gradients = crate::classifier::sobel_gradient_full(luma, w, h).0;
+    extract_features_from_luma_and_grads(luma, &gradients, w, h)
 }
 
 /// Local variance in a 5×5 window (edge-replicate).
@@ -202,6 +215,20 @@ fn histogram_entropy(luma: &[f32]) -> f32 {
 /// feature-based heuristics.
 pub struct HeuristicEvaluator;
 
+/// Piecewise-linear mapping from edge density to suggested strength.
+fn strength_from_edge_density(edge_density: f32) -> f32 {
+    let s = if edge_density < 0.05 {
+        1.0
+    } else if edge_density < 0.15 {
+        1.0 - (edge_density - 0.05) * 5.0 // 1.0 → 0.5
+    } else if edge_density < 0.40 {
+        0.5 - (edge_density - 0.15) * 1.0 // 0.5 → 0.25
+    } else {
+        0.25
+    };
+    s.clamp(0.1, 2.0)
+}
+
 impl QualityEvaluator for HeuristicEvaluator {
     fn evaluate(
         &self,
@@ -209,35 +236,47 @@ impl QualityEvaluator for HeuristicEvaluator {
         sharpened: &LinearRgbImage,
         strength: f32,
     ) -> QualityEvaluation {
-        let features_base = extract_features(base);
-        let features_sharp = extract_features(sharpened);
-
-        // Gradient correlation between base and sharpened
         let base_luma = extract_luminance(base);
+        self.evaluate_with_luma(base, &base_luma, sharpened, strength)
+    }
+
+    fn evaluate_with_luma(
+        &self,
+        base: &LinearRgbImage,
+        base_luma: &[f32],
+        sharpened: &LinearRgbImage,
+        strength: f32,
+    ) -> QualityEvaluation {
+        let w = base.width() as usize;
+        let h = base.height() as usize;
+
+        // Compute Sobel once per image, reuse for features + correlation.
+        let base_grads = crate::classifier::sobel_gradient_full(base_luma, w, h).0;
         let sharp_luma = extract_luminance(sharpened);
-        let grad_corr = gradient_correlation(&base_luma, &sharp_luma, base.width() as usize, base.height() as usize);
+        let sharp_grads = crate::classifier::sobel_gradient_full(&sharp_luma, w, h).0;
+
+        let features_base = extract_features_from_luma_and_grads(base_luma, &base_grads, w, h);
+        let features_sharp = extract_features_from_luma_and_grads(&sharp_luma, &sharp_grads, w, h);
+
+        // Gradient correlation from already-computed Sobel magnitudes.
+        let grad_corr = pearson_correlation(&base_grads, &sharp_grads);
 
         // Out-of-range penalty
         let oor = sharpened.pixels().iter()
             .filter(|&&v| !(0.0..=1.0).contains(&v))
             .count() as f32 / sharpened.pixels().len().max(1) as f32;
-        let oor_penalty = (oor * 100.0).min(1.0); // 1% oor → full penalty
+        let oor_penalty = (oor * 100.0).min(1.0);
 
-        // Quality = weighted combination
-        // High correlation → good detail preservation
-        // Low oor → few artifacts
-        // Moderate strength → preferred
         let strength_penalty = if strength > 2.0 { (strength - 2.0) * 0.1 } else { 0.0 };
         let quality = (grad_corr * 0.6 + (1.0 - oor_penalty) * 0.3 + (1.0 - strength_penalty.min(1.0)) * 0.1)
             .clamp(0.0, 1.0);
 
-        // Confidence based on image complexity
         let confidence = (features_base.edge_density * 2.0 + features_base.luminance_histogram_entropy / 6.0)
             .clamp(0.1, 0.9);
 
         QualityEvaluation {
             predicted_quality_score: quality,
-            suggested_strength: self.suggest_strength(base, 0.8),
+            suggested_strength: Some(strength_from_edge_density(features_base.edge_density)),
             confidence,
             features: features_sharp,
         }
@@ -248,59 +287,43 @@ impl QualityEvaluator for HeuristicEvaluator {
         base: &LinearRgbImage,
         _target_quality: f32,
     ) -> Option<f32> {
-        let features = extract_features(base);
+        let luma = extract_luminance(base);
+        self.suggest_strength_from_luma(&luma, base.width() as usize, base.height() as usize)
+    }
 
-        // Piecewise-linear mapping from edge density to suggested strength:
-        // High edge density → lower strength (detail-rich images need less)
-        // Low edge density → higher strength (smooth images need more)
-        let s = if features.edge_density < 0.05 {
-            // Very smooth → suggest moderate-high strength
-            1.0
-        } else if features.edge_density < 0.15 {
-            // Moderate detail → linear interpolation
-            1.0 - (features.edge_density - 0.05) * 5.0 // 1.0 → 0.5
-        } else if features.edge_density < 0.40 {
-            // High detail → lower strength
-            0.5 - (features.edge_density - 0.15) * 1.0 // 0.5 → 0.25
-        } else {
-            // Very high detail → minimum
-            0.25
-        };
-
-        Some(s.clamp(0.1, 2.0))
+    fn suggest_strength_from_luma(
+        &self,
+        luma: &[f32],
+        w: usize,
+        h: usize,
+    ) -> Option<f32> {
+        let edge_density = compute_edge_density(luma, w, h);
+        Some(strength_from_edge_density(edge_density))
     }
 }
 
-/// Compute Pearson correlation between Sobel gradient magnitudes of two images.
-fn gradient_correlation(
-    luma_a: &[f32],
-    luma_b: &[f32],
-    w: usize,
-    h: usize,
-) -> f32 {
-    let grads_a = sobel_magnitude(luma_a, w, h);
-    let grads_b = sobel_magnitude(luma_b, w, h);
-
-    let n = grads_a.len() as f64;
+/// Pearson correlation between two equal-length gradient vectors.
+fn pearson_correlation(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len() as f64;
     if n == 0.0 { return 0.0; }
 
-    let mean_a = grads_a.iter().copied().map(|v| v as f64).sum::<f64>() / n;
-    let mean_b = grads_b.iter().copied().map(|v| v as f64).sum::<f64>() / n;
+    let mean_a = a.iter().copied().map(|v| v as f64).sum::<f64>() / n;
+    let mean_b = b.iter().copied().map(|v| v as f64).sum::<f64>() / n;
 
     let mut cov = 0.0f64;
     let mut var_a = 0.0f64;
     let mut var_b = 0.0f64;
 
-    for (&a, &b) in grads_a.iter().zip(grads_b.iter()) {
-        let da = a as f64 - mean_a;
-        let db = b as f64 - mean_b;
+    for (&va, &vb) in a.iter().zip(b.iter()) {
+        let da = va as f64 - mean_a;
+        let db = vb as f64 - mean_b;
         cov += da * db;
         var_a += da * da;
         var_b += db * db;
     }
 
     let denom = (var_a * var_b).sqrt();
-    if denom < 1e-12 { return 1.0; } // both constant → perfect correlation
+    if denom < 1e-12 { return 1.0; }
     (cov / denom) as f32
 }
 
@@ -372,9 +395,9 @@ mod tests {
     }
 
     #[test]
-    fn gradient_correlation_identical_is_one() {
-        let luma = vec![0.1, 0.5, 0.9, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6];
-        let corr = gradient_correlation(&luma, &luma, 3, 3);
+    fn pearson_correlation_identical_is_one() {
+        let vals = vec![0.1, 0.5, 0.9, 0.3, 0.7, 0.2, 0.8, 0.4, 0.6];
+        let corr = pearson_correlation(&vals, &vals);
         assert!((corr - 1.0).abs() < 1e-5, "corr={corr}");
     }
 
