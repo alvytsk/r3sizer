@@ -1609,7 +1609,7 @@ pub enum EvaluatorConfig {
 }
 
 /// Features extracted from an image for quality prediction.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct ImageFeatures {
     /// Fraction of pixels classified as edges (Sobel magnitude > threshold).
