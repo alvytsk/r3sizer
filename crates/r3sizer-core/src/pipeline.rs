@@ -429,13 +429,21 @@ pub fn run_probes_from_detail(
     baseline_artifact_ratio: f32,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
+    let w = width as usize;
+    let h = height as usize;
+    let mut luma_scratch = match params.sharpen_mode {
+        SharpenMode::Lightness => vec![0.0f32; w * h],
+        SharpenMode::Rgb => Vec::new(),
+    };
+    let mut rgb_scratch = LinearRgbImage::zeros(width, height)?;
     let results = strengths
         .iter()
         .map(|&s| {
-            probe_one_from_detail(
+            probe_one_reuse(
                 &base, Some(base_luminance), detail,
                 params.sharpen_mode, s, params.artifact_metric,
                 baseline_artifact_ratio, params.metric_mode, None,
+                &mut luma_scratch, &mut rgb_scratch,
             )
         })
         .collect();
@@ -1531,42 +1539,12 @@ fn run_two_pass_probing(
     Ok((all, Some(diag)))
 }
 
-/// Evaluate a single probe from precomputed detail.
-#[allow(clippy::too_many_arguments)]
-fn probe_one_from_detail(
-    base: &LinearRgbImage,
-    base_luminance: Option<&[f32]>,
-    detail: &[f32],
-    sharpen_mode: SharpenMode,
-    strength: f32,
-    artifact_metric: ArtifactMetric,
-    baseline_artifact_ratio: f32,
-    metric_mode: MetricMode,
-    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
-) -> ProbeSample {
-    use crate::sharpen;
-
-    let image = match sharpen_mode {
-        SharpenMode::Lightness => {
-            let lum = base_luminance.expect("base_luminance required for Lightness mode");
-            let sharpened_l = sharpen::apply_detail_single_channel(lum, detail, strength);
-            color::reconstruct_rgb_from_lightness_with_luma(base, &sharpened_l, Some(lum))
-        }
-        SharpenMode::Rgb => sharpen::apply_detail_rgb(base, detail, strength),
-    };
-
-    let p_total = match metric_override {
-        Some(f) => f(&image),
-        None => crate::metrics::compute_selection_metric(&image, artifact_metric),
-    };
-    let metric_value = compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-    ProbeSample { strength, artifact_ratio: p_total, metric_value, breakdown: None }
-}
-
-/// Like [`probe_one_from_detail`] but reuses pre-allocated scratch buffers.
+/// Evaluate a single probe from precomputed detail, reusing scratch buffers.
 ///
-/// `luma_scratch` is used for Lightness mode (length >= W×H).
-/// `rgb_scratch` is the output image reused across probes (same dimensions as `base`).
+/// - `luma_scratch`: intermediate sharpened luminance buffer; only written in
+///   Lightness mode (must have length >= W×H). Unused in RGB mode.
+/// - `rgb_scratch`: output image buffer reused across probes. Must have the
+///   same dimensions as `base`.
 #[allow(clippy::too_many_arguments)]
 fn probe_one_reuse(
     base: &LinearRgbImage,

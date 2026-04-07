@@ -294,6 +294,8 @@ pub fn reconstruct_rgb_from_lightness_with_luma(
 /// Like [`reconstruct_rgb_from_lightness_with_luma`] but writes into a
 /// pre-allocated output image, avoiding allocation on the hot probe path.
 ///
+/// `original_luminance` is required (not optional) because this function
+/// targets the probe loop where luminance is always pre-computed.
 /// `out` must have the same dimensions as `original`.
 pub fn reconstruct_rgb_from_lightness_into(
     original: &LinearRgbImage,
