@@ -16,7 +16,7 @@
 use web_time::Instant;
 
 use crate::{
-    classifier::{classify, gain_map_from_region_map},
+    classifier::gain_map_from_region_map,
     color,
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::{check_monotonicity, fit_cubic, fit_cubic_with_quality},
@@ -195,13 +195,20 @@ pub fn prepare_base(
     apply_contrast_leveling(&mut base, &cl_params)?;
     let contrast_us = t0.elapsed().as_micros() as u64;
 
-    // Classification
+    // Luminance extraction — moved before classification so the classifier
+    // can reuse it instead of extracting its own copy.
+    let base_luminance = Some(color::extract_luminance(&base));
+
+    // Classification — reuses pre-extracted luminance via classify_with_luminance.
     on_stage("classifying");
     let t0 = Instant::now();
     let (gain_map, region_map, region_coverage, classification_us) =
         match &params.sharpen_strategy {
             SharpenStrategy::ContentAdaptive { classification, gain_table, .. } => {
-                let rmap = classify(&base, classification);
+                let luma = base_luminance.as_ref().unwrap();
+                let rmap = crate::classifier::classify_with_luminance(
+                    luma, base.width(), base.height(), classification,
+                );
                 let gmap = gain_map_from_region_map(&rmap, gain_table);
                 let cov = RegionCoverage::from_region_map(&rmap);
                 let us = t0.elapsed().as_micros() as u64;
@@ -224,9 +231,6 @@ pub fn prepare_base(
         }
     };
     let baseline_us = t0.elapsed().as_micros() as u64;
-
-    // Luminance extraction (always extract — cheap, needed for both probing and metrics)
-    let base_luminance = Some(color::extract_luminance(&base));
 
     // Evaluator — use precomputed luminance to avoid redundant extraction + full
     // feature computation.  `suggest_strength_from_luma` only computes Sobel
@@ -952,24 +956,38 @@ fn probe_strengths(
             #[cfg(feature = "parallel")]
             {
                 use rayon::prelude::*;
-                strengths
+                let bw = base.width();
+                let bh = base.height();
+                let results: Vec<ProbeSample> = strengths
                     .par_iter()
-                    .map(|&s| {
-                        let sharpened_l = sharpen::apply_detail_single_channel(lum, &detail, s);
-                        let image = color::reconstruct_rgb_from_lightness_with_luma(
-                            base, &sharpened_l, Some(lum),
-                        );
-                        let p_total = measure(&image);
-                        let metric_value =
-                            compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                        Ok(ProbeSample {
-                            strength: s,
-                            artifact_ratio: p_total,
-                            metric_value,
-                            breakdown: None,
-                        })
-                    })
-                    .collect()
+                    .map_init(
+                        || {
+                            // Per-thread scratch: avoids allocating per probe.
+                            (
+                                vec![0.0f32; w * h],
+                                LinearRgbImage::zeros(bw, bh).unwrap(),
+                            )
+                        },
+                        |(luma_scratch, rgb_scratch), &s| {
+                            sharpen::apply_detail_single_channel_into(
+                                lum, &detail, s, luma_scratch,
+                            );
+                            color::reconstruct_rgb_from_lightness_into(
+                                base, luma_scratch, lum, rgb_scratch,
+                            );
+                            let p_total = measure(rgb_scratch);
+                            let metric_value =
+                                compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                            ProbeSample {
+                                strength: s,
+                                artifact_ratio: p_total,
+                                metric_value,
+                                breakdown: None,
+                            }
+                        },
+                    )
+                    .collect();
+                Ok(results)
             }
 
             #[cfg(not(feature = "parallel"))]
@@ -1004,21 +1022,27 @@ fn probe_strengths(
             #[cfg(feature = "parallel")]
             {
                 use rayon::prelude::*;
-                strengths
+                let bw = base.width();
+                let bh = base.height();
+                let results: Vec<ProbeSample> = strengths
                     .par_iter()
-                    .map(|&s| {
-                        let image = sharpen::apply_detail_rgb(base, &detail, s);
-                        let p_total = measure(&image);
-                        let metric_value =
-                            compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                        Ok(ProbeSample {
-                            strength: s,
-                            artifact_ratio: p_total,
-                            metric_value,
-                            breakdown: None,
-                        })
-                    })
-                    .collect()
+                    .map_init(
+                        || LinearRgbImage::zeros(bw, bh).unwrap(),
+                        |rgb_scratch, &s| {
+                            sharpen::apply_detail_rgb_into(base, &detail, s, rgb_scratch);
+                            let p_total = measure(rgb_scratch);
+                            let metric_value =
+                                compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
+                            ProbeSample {
+                                strength: s,
+                                artifact_ratio: p_total,
+                                metric_value,
+                                breakdown: None,
+                            }
+                        },
+                    )
+                    .collect();
+                Ok(results)
             }
 
             #[cfg(not(feature = "parallel"))]

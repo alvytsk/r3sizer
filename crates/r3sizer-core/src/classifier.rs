@@ -173,15 +173,44 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
     let inv_count = 1.0 / count;
 
     // Build edge-replicated padded buffer.
+    //
+    // Interior rows use bulk copy (`copy_from_slice`) for the core pixels,
+    // then replicate the edge values into the left/right padding columns.
+    // Top/bottom padding rows replicate the first/last source row.
     let pw = width + 2 * half;  // padded width
     let ph = height + 2 * half; // padded height
     let mut padded = vec![0.0_f32; pw * ph];
-    for py in 0..ph {
-        let sy = py.saturating_sub(half).min(height - 1);
-        for px in 0..pw {
-            let sx = px.saturating_sub(half).min(width - 1);
-            padded[py * pw + px] = luma[sy * width + sx];
-        }
+
+    // Helper: fill a padded row from a source row with edge replication.
+    let fill_row = |padded_row: &mut [f32], src_row: &[f32]| {
+        // Left padding: replicate leftmost pixel
+        let left_val = src_row[0];
+        for p in &mut padded_row[..half] { *p = left_val; }
+        // Interior: bulk copy
+        padded_row[half..half + width].copy_from_slice(src_row);
+        // Right padding: replicate rightmost pixel
+        let right_val = src_row[width - 1];
+        for p in &mut padded_row[half + width..] { *p = right_val; }
+    };
+
+    // Top padding rows: replicate first source row
+    let first_row = &luma[..width];
+    for py in 0..half {
+        let row = &mut padded[py * pw..(py + 1) * pw];
+        fill_row(row, first_row);
+    }
+    // Interior rows: direct copy from source
+    for sy in 0..height {
+        let py = sy + half;
+        let src_row = &luma[sy * width..(sy + 1) * width];
+        let row = &mut padded[py * pw..(py + 1) * pw];
+        fill_row(row, src_row);
+    }
+    // Bottom padding rows: replicate last source row
+    let last_row = &luma[(height - 1) * width..height * width];
+    for py in (half + height)..ph {
+        let row = &mut padded[py * pw..(py + 1) * pw];
+        fill_row(row, last_row);
     }
 
     // Build SATs for sum and sum-of-squares.
@@ -261,11 +290,32 @@ pub fn classify(
         .map(|rgb| luminance(rgb[0], rgb[1], rgb[2]))
         .collect();
 
+    classify_from_luminance(&luma, w, h, params)
+}
+
+/// Like [`classify`] but accepts pre-extracted luminance, avoiding a
+/// redundant per-pixel luminance pass when the caller already has it.
+pub fn classify_with_luminance(
+    luma: &[f32],
+    width: u32,
+    height: u32,
+    params: &ClassificationParams,
+) -> RegionMap {
+    classify_from_luminance(luma, width as usize, height as usize, params)
+}
+
+/// Shared classification from a luminance buffer.
+fn classify_from_luminance(
+    luma: &[f32],
+    w: usize,
+    h: usize,
+    params: &ClassificationParams,
+) -> RegionMap {
     // Pass 1: Sobel gradient magnitude
-    let grad = sobel_gradient_magnitude(&luma, w, h);
+    let grad = sobel_gradient_magnitude(luma, w, h);
 
     // Pass 2: local variance
-    let var = local_variance(&luma, w, h, params.variance_window);
+    let var = local_variance(luma, w, h, params.variance_window);
 
     // Pass 3: per-pixel classification
     let data: Vec<RegionClass> = grad
@@ -274,7 +324,7 @@ pub fn classify(
         .map(|(&g, &v)| classify_features(g, v, params))
         .collect();
 
-    RegionMap::new(image.width(), image.height(), data).unwrap()
+    RegionMap::new(w as u32, h as u32, data).unwrap()
 }
 
 /// Produce a per-pixel gain map from a region map and gain table.

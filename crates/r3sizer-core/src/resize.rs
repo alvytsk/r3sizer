@@ -10,6 +10,7 @@
 /// is applied here; callers are responsible for ensuring the image is already in
 /// linear light before calling [`downscale`].
 use fast_image_resize as fir;
+use fir::pixels::F32x3;
 
 use crate::{CoreError, LinearRgbImage, ImageSize};
 
@@ -64,52 +65,50 @@ pub fn downscale_with_info(
 }
 
 /// Resize a `LinearRgbImage` using `fast_image_resize`.
+///
+/// Uses the typed API (`resize_typed<F32x3>`) so only F32x3 convolution code
+/// is monomorphized — the u8/u16 pixel-type code is never compiled, saving
+/// ~250 KB in the WASM binary.
 fn fir_resize(
     src: &LinearRgbImage,
     dst_w: u32,
     dst_h: u32,
     alg: fir::ResizeAlg,
 ) -> Result<LinearRgbImage, CoreError> {
-    let src_bytes = f32_slice_as_bytes(src.pixels());
-    let src_image = fir::images::ImageRef::new(
+    let src_pixels = f32_slice_as_f32x3(src.pixels());
+    let src_image = fir::images::TypedImageRef::<F32x3>::new(
         src.width(),
         src.height(),
-        src_bytes,
-        fir::PixelType::F32x3,
+        src_pixels,
     ).map_err(|e| CoreError::InvalidParams(format!("fir source image: {e}")))?;
 
-    let mut dst_image = fir::images::Image::new(dst_w, dst_h, fir::PixelType::F32x3);
+    let mut dst_image = fir::images::TypedImage::<F32x3>::new(dst_w, dst_h);
 
     let mut resizer = fir::Resizer::new();
-    resizer.resize(&src_image, &mut dst_image, Some(&fir::ResizeOptions::new().resize_alg(alg)))
+    resizer.resize_typed(&src_image, &mut dst_image, Some(&fir::ResizeOptions::new().resize_alg(alg)))
         .map_err(|e| CoreError::InvalidParams(format!("fir resize: {e}")))?;
 
-    let dst_floats = bytes_vec_to_f32_vec(dst_image.into_vec());
+    let dst_floats = f32x3_slice_to_vec(dst_image.pixels());
     LinearRgbImage::new(dst_w, dst_h, dst_floats)
 }
 
-/// View `&[f32]` as `&[u8]` without copying.
-fn f32_slice_as_bytes(floats: &[f32]) -> &[u8] {
-    let ptr = floats.as_ptr() as *const u8;
-    let len = std::mem::size_of_val(floats);
-    // SAFETY: f32 has no invalid bit patterns for reading as bytes.
+/// View `&[f32]` (length divisible by 3) as `&[F32x3]` without copying.
+fn f32_slice_as_f32x3(floats: &[f32]) -> &[F32x3] {
+    assert_eq!(floats.len() % 3, 0, "buffer length not a multiple of 3");
+    let pixel_count = floats.len() / 3;
+    let ptr = floats.as_ptr() as *const F32x3;
+    // SAFETY: F32x3 is repr(transparent) over [f32; 3] — same layout, no padding.
     // The lifetime is tied to `floats`.
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+    unsafe { std::slice::from_raw_parts(ptr, pixel_count) }
 }
 
-/// Convert a `Vec<u8>` (from fir output) to `Vec<f32>` without element-wise copy.
-fn bytes_vec_to_f32_vec(bytes: Vec<u8>) -> Vec<f32> {
-    let byte_len = bytes.len();
-    assert_eq!(byte_len % 4, 0, "buffer length not a multiple of 4");
-    let float_len = byte_len / 4;
-    let ptr = bytes.as_ptr();
-    assert_eq!(ptr as usize % std::mem::align_of::<f32>(), 0, "buffer not f32-aligned");
-    // SAFETY: fir allocates aligned buffers for F32x3. We verified alignment and length.
-    // We consume `bytes` (forget prevents drop) and reconstruct as Vec<f32>.
-    let float_ptr = ptr as *mut f32;
-    let cap = bytes.capacity() / 4;
-    std::mem::forget(bytes);
-    unsafe { Vec::from_raw_parts(float_ptr, float_len, cap) }
+/// Copy `&[F32x3]` into a flat `Vec<f32>`.
+fn f32x3_slice_to_vec(pixels: &[F32x3]) -> Vec<f32> {
+    let ptr = pixels.as_ptr() as *const f32;
+    let len = pixels.len() * 3;
+    // SAFETY: F32x3 is repr(transparent) over [f32; 3] — reading as f32 slice is valid.
+    let flat = unsafe { std::slice::from_raw_parts(ptr, len) };
+    flat.to_vec()
 }
 
 // ---------------------------------------------------------------------------

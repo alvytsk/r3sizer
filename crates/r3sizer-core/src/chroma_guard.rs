@@ -27,6 +27,23 @@ use crate::types::{
 use crate::CoreError;
 
 // ---------------------------------------------------------------------------
+// Fast powf for common gamma values used in saturation guard
+// ---------------------------------------------------------------------------
+
+/// Specialised `powf` that avoids the general-purpose `f32::powf` for the
+/// most common gamma values (1.0 and 2.0).  Falls back to `powf` otherwise.
+#[inline]
+fn fast_powf_gamma(base: f32, gamma: f32) -> f32 {
+    if gamma == 1.0 {
+        base
+    } else if gamma == 2.0 {
+        base * base
+    } else {
+        base.powf(gamma)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Chroma-guarded sharpening
 // ---------------------------------------------------------------------------
 
@@ -95,7 +112,7 @@ pub fn sharpen_with_chroma_guard(
 
         // Chroma shift magnitude
         let (dr, dg, db) = (cr_new - cr_orig, cg_new - cg_orig, cb_new - cb_orig);
-        let shift = (dr * dr + dg * dg + db * db).sqrt();
+        let shift_sq = dr * dr + dg * dg + db * db;
         let orig_mag = (cr_orig * cr_orig + cg_orig * cg_orig + cb_orig * cb_orig).sqrt();
 
         // --- Context-aware threshold modulation ---
@@ -111,7 +128,7 @@ pub fn sharpen_with_chroma_guard(
         let sat_factor = match saturation_guard {
             Some(sp) => {
                 let sat_norm = (r.max(g).max(b) - r.min(g).min(b)).clamp(0.0, 1.0);
-                1.0 - (1.0 - sp.min_scale) * sat_norm.powf(sp.gamma)
+                1.0 - (1.0 - sp.min_scale) * fast_powf_gamma(sat_norm, sp.gamma)
             }
             None => 1.0,
         };
@@ -125,7 +142,12 @@ pub fn sharpen_with_chroma_guard(
         if effective_threshold > eff_max { eff_max = effective_threshold; }
         eff_sum += effective_threshold as f64;
 
-        // Accumulate global stats
+        // Defer sqrt to where it's needed — the comparison uses squared values.
+        let threshold_sq = effective_threshold * effective_threshold;
+        let needs_clamp = shift_sq > threshold_sq;
+
+        // Compute actual shift only when needed for diagnostics or blending.
+        let shift = shift_sq.sqrt();
         total_shift += shift as f64;
         if shift > max_shift_global { max_shift_global = shift; }
 
@@ -137,13 +159,13 @@ pub fn sharpen_with_chroma_guard(
             region_counts[cls] += 1;
             region_shift_sum[cls] += shift as f64;
             if shift > region_shift_max[cls] { region_shift_max[cls] = shift; }
-            if shift > effective_threshold {
+            if needs_clamp {
                 region_clamped[cls] += 1;
             }
         }
 
         // Apply soft clamp
-        if shift > effective_threshold {
+        if needs_clamp {
             let blend = effective_threshold / shift;
             let cr = cr_orig + blend * (cr_new - cr_orig);
             let cg = cg_orig + blend * (cg_new - cg_orig);
@@ -244,7 +266,7 @@ pub fn apply_chroma_guard(
         let (cr_new, cg_new, cb_new) = (r2 - l_new, g2 - l_new, b2 - l_new);
 
         let (dr, dg, db) = (cr_new - cr_orig, cg_new - cg_orig, cb_new - cb_orig);
-        let shift = (dr * dr + dg * dg + db * db).sqrt();
+        let shift_sq = dr * dr + dg * dg + db * db;
         let orig_mag = (cr_orig * cr_orig + cg_orig * cg_orig + cb_orig * cb_orig).sqrt();
 
         let region_factor = match (region_map, region_factors) {
@@ -258,7 +280,7 @@ pub fn apply_chroma_guard(
         let sat_factor = match saturation_guard {
             Some(sp) => {
                 let sat_norm = (r.max(g).max(b) - r.min(g).min(b)).clamp(0.0, 1.0);
-                1.0 - (1.0 - sp.min_scale) * sat_norm.powf(sp.gamma)
+                1.0 - (1.0 - sp.min_scale) * fast_powf_gamma(sat_norm, sp.gamma)
             }
             None => 1.0,
         };
@@ -268,6 +290,11 @@ pub fn apply_chroma_guard(
         if effective_threshold < eff_min { eff_min = effective_threshold; }
         if effective_threshold > eff_max { eff_max = effective_threshold; }
         eff_sum += effective_threshold as f64;
+
+        // Compare in squared space to defer sqrt
+        let threshold_sq = effective_threshold * effective_threshold;
+        let needs_clamp = shift_sq > threshold_sq;
+        let shift = shift_sq.sqrt();
 
         total_shift += shift as f64;
         if shift > max_shift_global { max_shift_global = shift; }
@@ -279,12 +306,12 @@ pub fn apply_chroma_guard(
             region_counts[cls] += 1;
             region_shift_sum[cls] += shift as f64;
             if shift > region_shift_max[cls] { region_shift_max[cls] = shift; }
-            if shift > effective_threshold {
+            if needs_clamp {
                 region_clamped[cls] += 1;
             }
         }
 
-        if shift > effective_threshold {
+        if needs_clamp {
             let blend = effective_threshold / shift;
             let cr = cr_orig + blend * (cr_new - cr_orig);
             let cg = cg_orig + blend * (cg_new - cg_orig);

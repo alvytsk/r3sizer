@@ -8,15 +8,19 @@ FROM rust:1.94-bullseye AS wasm-builder
 # Cache cargo registry and git checkouts across rebuilds
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo install wasm-pack
+    cargo install wasm-pack wasm-opt --locked
 
 WORKDIR /workspace
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
 # Cache the Rust build target directory; output goes to /wasm-out (not in target)
+# --no-opt: skip wasm-pack's bundled wasm-opt (it lacks SIMD/bulk-memory support
+# needed by the LTO build); we run our own wasm-opt right after.
 RUN --mount=type=cache,target=/workspace/target \
-    wasm-pack build crates/r3sizer-wasm --target web --out-dir /wasm-out
+    wasm-pack build crates/r3sizer-wasm --target web --out-dir /wasm-out --no-opt && \
+    wasm-opt --enable-simd --enable-bulk-memory --enable-nontrapping-float-to-int \
+        -Oz -o /wasm-out/r3sizer_wasm_bg.wasm /wasm-out/r3sizer_wasm_bg.wasm
 
 # Generate TypeScript type definitions from Rust types (ts-rs).
 # Output goes to web/src/types/generated.ts which is copied in stage 2.
