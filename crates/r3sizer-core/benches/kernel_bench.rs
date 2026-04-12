@@ -113,6 +113,14 @@ fn bench_classifier(c: &mut Criterion) {
         });
     });
 
+    // Benchmark with pre-extracted luminance (avoids redundant extraction).
+    let luma = color::extract_luminance(&img);
+    group.bench_function("classify_with_luminance_540p", |b| {
+        b.iter(|| {
+            classifier::classify_with_luminance(&luma, W, H, &params);
+        });
+    });
+
     group.finish();
 }
 
@@ -198,6 +206,46 @@ fn bench_chroma_guard(c: &mut Criterion) {
 }
 
 // ---------------------------------------------------------------------------
+// Probe-loop benchmark (detail + N probes with metric)
+// ---------------------------------------------------------------------------
+
+fn bench_probe_loop(c: &mut Criterion) {
+    let mut group = c.benchmark_group("probe_loop");
+
+    let img = synthetic_image(W, H);
+    let luma = color::extract_luminance(&img);
+    let kernel = sharpen::make_kernel(1.0).unwrap();
+    let detail = sharpen::compute_detail_single_channel(
+        &luma, W as usize, H as usize, &kernel,
+    );
+    let strengths: Vec<f32> = vec![0.1, 0.3, 0.5, 0.8, 1.0, 1.3, 1.6, 2.0, 2.5, 3.0];
+
+    // Full probe loop: apply detail + reconstruct RGB + metric per probe
+    group.bench_function("10_probes_lightness_540p", |b| {
+        b.iter(|| {
+            let w = W as usize;
+            let h = H as usize;
+            let mut luma_scratch = vec![0.0f32; w * h];
+            let mut rgb_scratch = LinearRgbImage::zeros(W, H).unwrap();
+            let mut results = Vec::with_capacity(strengths.len());
+            for &s in &strengths {
+                sharpen::apply_detail_single_channel_into(
+                    &luma, &detail, s, &mut luma_scratch,
+                );
+                color::reconstruct_rgb_from_lightness_into(
+                    &img, &luma_scratch, &luma, &mut rgb_scratch,
+                );
+                let ratio = channel_clipping_ratio(&rgb_scratch);
+                results.push((s, ratio));
+            }
+            results
+        });
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
@@ -209,5 +257,6 @@ criterion_group!(
     bench_metrics,
     bench_sharpen_apply,
     bench_chroma_guard,
+    bench_probe_loop,
 );
 criterion_main!(benches);

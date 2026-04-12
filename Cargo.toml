@@ -20,3 +20,11 @@ image       = { version = "0.25", default-features = false }
 fast_image_resize = "6"
 web-time    = "1"
 ts-rs       = { version = "12", features = ["serde-compat"] }
+
+# ---------------------------------------------------------------------------
+# Release profile — critical for WASM binary size
+# ---------------------------------------------------------------------------
+[profile.release]
+lto = "thin"           # cross-crate dead-code elimination (strips unused fir/serde monomorphs)
+codegen-units = 1      # better optimization at the cost of compile time
+strip = true           # strip debug symbols

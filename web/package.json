@@ -4,7 +4,7 @@
   "version": "0.7.0",
   "type": "module",
   "scripts": {
-    "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg",
+    "build:wasm": "wasm-pack build ../crates/r3sizer-wasm --target web --out-dir ../../web/src/wasm-pkg --no-opt && wasm-opt --enable-simd --enable-bulk-memory --enable-nontrapping-float-to-int -Oz -o src/wasm-pkg/r3sizer_wasm_bg.wasm src/wasm-pkg/r3sizer_wasm_bg.wasm",
     "typegen": "cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture",
     "dev": "vite",
     "build": "npm run build:wasm && tsc -b && vite build && cp dist/index.html dist/404.html",

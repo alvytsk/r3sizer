@@ -6,14 +6,15 @@ license.workspace = true
 description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
 
 [features]
-default     = ["parallel"]
+default     = ["parallel", "formats"]
 parallel    = ["rayon", "image/rayon"]
+formats     = ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/tiff", "image/webp"]
 typegen     = ["ts-rs"]
 
 [dependencies]
 thiserror   = { workspace = true }
 serde       = { workspace = true }
-image       = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
+image       = { workspace = true }
 fast_image_resize = { workspace = true }
 rayon       = { version = "1", optional = true }
 web-time    = { workspace = true }

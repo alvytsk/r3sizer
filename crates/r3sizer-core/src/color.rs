@@ -313,8 +313,12 @@ pub fn reconstruct_rgb_from_lightness_into(
 
 /// Shared index-based inner loop for RGB reconstruction.
 ///
-/// `k = L'/L; RGB' = k * RGB`. Near-black pixels (L < epsilon) are copied unchanged.
-/// The index-based loop with contiguous memory access enables LLVM auto-vectorization.
+/// `k = L'/L; RGB' = k * RGB`. Near-black pixels (L < epsilon) use k=1.0
+/// (identity), which is safe because their RGB components are also near-zero.
+///
+/// Both paths always execute `k * component`, eliminating divergent control
+/// flow so the compiler can emit a conditional-move for `k` and vectorize
+/// the multiply across all three channels.
 #[inline]
 fn reconstruct_rgb_inner(
     src: &[f32],
@@ -338,16 +342,12 @@ fn reconstruct_rgb_inner(
             None => luminance_from_linear_srgb(r, g, b),
         };
         let l_sharp = sharpened_luminance[i];
-        if l_orig.abs() < EPSILON {
-            out[idx] = r;
-            out[idx + 1] = g;
-            out[idx + 2] = b;
-        } else {
-            let k = l_sharp / l_orig;
-            out[idx] = k * r;
-            out[idx + 1] = k * g;
-            out[idx + 2] = k * b;
-        }
+        // Branchless: for near-black pixels k=1.0 preserves the original
+        // (near-zero) values; for normal pixels k = L'/L scales RGB.
+        let k = if l_orig.abs() >= EPSILON { l_sharp / l_orig } else { 1.0 };
+        out[idx] = k * r;
+        out[idx + 1] = k * g;
+        out[idx + 2] = k * b;
     }
 }
 
