@@ -1,71 +1,59 @@
 # r3sizer
 
-A Rust library and CLI for image downscaling with **automatic post-resize sharpness adjustment**.
+**Smart image downscaling with automatic sharpness correction**
 
-The sharpening strength is selected automatically by fitting a cubic model of artifact
-ratios and solving for a target out-of-gamut threshold — not by a generic sharpness
-heuristic.
+Resize your images without losing sharpness. r3sizer mathematically determines the optimal sharpening strength for each image — no manual tweaking, no guesswork.
 
-**[Live demo](https://alvytsk.github.io/r3sizer/)** — runs entirely in the browser via WebAssembly.
+[![Deploy](https://github.com/alvytsk/r3sizer/actions/workflows/deploy.yml/badge.svg)](https://github.com/alvytsk/r3sizer/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-stable-orange.svg)](https://www.rust-lang.org)
+[![WebAssembly](https://img.shields.io/badge/WASM-ready-blueviolet.svg)](https://alvytsk.github.io/r3sizer/)
+
+**[Try the live demo](https://alvytsk.github.io/r3sizer/)** — runs entirely in the browser via WebAssembly.
+
+<!-- TODO: Add screenshot of the web UI here -->
+<!-- ![r3sizer web UI](docs/images/screenshot.png) -->
 
 ---
 
-## Quick start
+## Why r3sizer?
+
+Every image resize loses sharpness. The standard fix — applying a fixed unsharp mask — either over-sharpens (halos, ringing) or under-sharpens (mushy output). Getting it right means tweaking per image, per resolution.
+
+r3sizer solves this automatically. It probes multiple sharpening strengths, fits a mathematical model of artifact levels, and solves for the exact strength that hits your quality budget. The result: **the sharpest possible output without visible artifacts**.
+
+| | Manual sharpening | r3sizer |
+|---|---|---|
+| Strength selection | Trial and error | Computed per-image via cubic model |
+| Artifact control | Hope for the best | Mathematically bounded (P0 threshold) |
+| Content awareness | Same filter everywhere | 5-class region map adapts per-pixel |
+| Consistency | Varies by operator | Reproducible, deterministic |
+| Batch processing | Tedious | One command for entire directories |
+
+---
+
+## Key Features
+
+- **Automatic strength selection** — fits a cubic polynomial to artifact measurements and solves for the optimal sharpening strength. No manual tuning.
+- **Content-adaptive sharpening** — classifies image regions (flat, textured, edges, microtexture, halo-risk) and modulates sharpening per-pixel via a gain map.
+- **Perceptual lightness mode** — sharpens CIE Y luminance instead of raw RGB, preserving color fidelity. Chroma guard prevents oversaturation.
+- **Robust quality control** — R² fit quality, leave-one-out stability, monotonicity checks, and typed fallback reasons. The pipeline always produces a result.
+- **Fast** — SIMD-accelerated Lanczos3 resize, staged bilinear pre-reduce for large shrink ratios, detail precomputation eliminates redundant Gaussian blurs during probing.
+- **Runs anywhere** — pure Rust core with no I/O dependencies. Ships as a CLI, runs in the browser via WASM, and embeds in any Rust application.
+
+---
+
+## Quick Start
+
+### CLI
 
 ```sh
-cargo build --release -p r3sizer-cli
+cargo install --path crates/r3sizer-cli
 
-./target/release/r3sizer \
-  --input photo.jpg \
-  --output out.png \
-  --width 800 \
-  --height 600 \
-  --diagnostics diag.json
+r3sizer -i photo.jpg -o out.png --width 800 --height 600
 ```
 
-Output:
-
-```
-Output size                 : 800x600
-Sharpen mode                : lightness (CIE Y)
-Sharpen model               : practical USM
-Metric mode                 : relative (sharpening-added artifacts)
-Artifact metric             : channel clipping ratio
-Baseline artifact ratio     : 0.000000
-Selected strength           : 1.8472
-Target metric value         : 0.003000
-Measured metric value        : 0.002987
-Measured artifact ratio     : 0.002987
-Budget reachable            : yes
-Fit status                  : success
-Crossing status             : found
-Selection mode              : polynomial root
-
-Fit quality:
-  R²                        : 0.999834
-  Residual sum of squares   : 1.23e-09
-  Max residual              : 2.45e-05
-  Min pivot                 : 3.67e+01
-
-Robustness:
-  Monotonic                 : yes
-  Quasi-monotonic           : yes
-  R² ok                     : yes
-  Well conditioned          : yes
-  LOO stable                : yes
-  Max LOO root change       : 0.0312
-
-Timing (us):
-  Resize                    : 12450
-  Contrast                  : 0
-  Baseline                  : 890
-  Probing                   : 45230
-  Fit                       : 15
-  Robustness                : 98
-  Final sharpen             : 6120
-  Clamp                     : 340
-  Total                     : 65143
-```
+That's it. r3sizer will automatically select the optimal sharpening strength and produce the output.
 
 Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
 
@@ -73,191 +61,122 @@ Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
 r3sizer -i photo.jpg -o out.png --width 800 -p
 ```
 
-### Sweep mode
+Add `--diagnostics diag.json` for a full JSON report of the pipeline decisions.
 
-Process a directory of images and produce an aggregate summary:
+See the [full CLI reference](docs/cli.md) for all options, presets, and sweep mode.
+
+### Web UI
+
+The browser-based diagnostic UI lets you process images interactively with real-time parameter adjustment:
 
 ```sh
-r3sizer \
-  --sweep-dir ./photos \
-  --sweep-output-dir ./out \
-  --sweep-summary summary.json \
-  --width 800 --height 600
+cd web
+npm run build:wasm
+npm run dev
 ```
 
-The summary JSON includes per-file results (selected strength, selection mode, timing)
-and aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+Or visit the **[live demo](https://alvytsk.github.io/r3sizer/)** — no installation required.
+
+### As a library
+
+```rust
+use r3sizer_core::{AutoSharpParams, ProcessOutput, process_auto_sharp_downscale};
+
+let params = AutoSharpParams::photo(800, 600);
+let ProcessOutput { image, diagnostics } =
+    process_auto_sharp_downscale(&input_linear_rgb, &params)?;
+```
+
+For interactive use (e.g., GUI or WASM), the two-phase API avoids recomputing the expensive resize and classification steps:
+
+```rust
+use r3sizer_core::{prepare_base, process_from_prepared};
+
+let base = prepare_base(&input_linear_rgb, &params, &|_| {})?;
+// User adjusts sharpening params without re-resizing...
+let output = process_from_prepared(&base, &params, &|_| {})?;
+```
 
 ---
 
-## Workspace layout
+## How It Works
+
+```
+Input image (sRGB)
+  |
+  |  1. Linearize + downscale (SIMD Lanczos3)
+  |  2. Classify into 5 region types
+  |  3. Measure baseline artifact level
+  v
+Probe multiple sharpening strengths
+  |
+  |  Two-pass adaptive: coarse scan -> find crossing -> dense refinement
+  |  Each probe: sharpen -> chroma guard -> measure artifacts
+  v
+Fit cubic model P(s) to measurements
+  |
+  |  Robustness checks: R², monotonicity, LOO stability
+  v
+Solve P(s*) = P0 for optimal strength
+  |
+  |  Apply final sharpening at s* -> chroma guard -> clamp
+  v
+Output (sRGB)
+```
+
+The key insight: sharpening artifacts (out-of-gamut pixels) follow a smooth cubic curve as strength increases. By fitting this curve and solving for a target threshold, r3sizer finds the sweet spot between sharpness and artifact control — per image, automatically.
+
+See [`docs/algorithm.md`](docs/algorithm.md) for the complete pipeline description.
+
+---
+
+## Architecture
 
 ```
 crates/
-  r3sizer-core/   pure processing (color, resize, sharpen, metrics, fit, solve, pipeline)
-  r3sizer-io/     image I/O (PNG/JPEG load/save via the `image` crate)
-  r3sizer-cli/    command-line interface
-  r3sizer-wasm/   WebAssembly bindings for browser use
-web/              React/Vite diagnostic UI (talks to r3sizer-wasm via Web Worker)
+  r3sizer-core/    Pure processing — no I/O, no dependencies on CLI or WASM
+  r3sizer-io/      Image I/O (PNG/JPEG via the image crate)
+  r3sizer-cli/     Command-line interface (clap)
+  r3sizer-wasm/    WebAssembly bindings (wasm-bindgen)
+web/               React + Vite + Tailwind diagnostic UI
 ```
 
-`r3sizer-core` has no I/O or CLI dependencies and can be embedded in a Tauri GUI or
-compiled to WASM without modification.
+`r3sizer-core` is the heart of the project. It has zero I/O dependencies and can be embedded in a Tauri desktop app, compiled to WASM, or used as a plain Rust library.
+
+The WASM build powers the web UI via a Web Worker architecture with a **parallel probe pool** (up to 6 workers) for real-time interactive processing.
 
 ---
 
-## Algorithm summary
-
-```
-input (sRGB file)
-  ↓ load + normalize
-  ↓ sRGB → linear RGB  (IEC 61966-2-1)
-  ↓ downscale (Lanczos3 or content-adaptive kernel)
-  ↓ classify regions (Flat, Textured, StrongEdge, Microtexture, RiskyHaloZone)
-  ↓ optional contrast leveling
-  ↓ measure baseline artifact ratio P(base)
-  ↓ extract CIE Y luminance, build per-pixel gain map
-  ↓ two-pass adaptive probing:
-      coarse scan → find P0 crossing → dense refinement
-      for each s_i:
-        sharpen luminance(s_i) × gain  →  reconstruct RGB  →  chroma guard  →  measure P(s_i)
-  ↓ fit cubic  P_hat(s) = a·s³ + b·s² + c·s + d  (with fit quality: R², residuals)
-  ↓ robustness checks  (monotonicity, LOO stability, R², condition)
-  ↓ solve  P_hat(s*) = P0  (Photo: P0=0.003, Precision: P0=0.001)
-  ↓ adaptive backoff if budget exceeded
-  ↓ apply final sharpening(s*)  →  chroma guard
-  ↓ clamp to [0,1]
-  ↓ linear RGB → sRGB  →  save + recommendations
-```
-
-See [`docs/algorithm.md`](docs/algorithm.md) for a full pipeline description.
-
----
-
-## CLI reference
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--input` | `-i` | required | Input image path |
-| `--output` | `-o` | required | Output image path |
-| `--width` | `-W` | — | Target width (px) |
-| `--height` | `-H` | — | Target height (px) |
-| `--preserve-aspect-ratio` | `-p` | off | Compute the missing dimension from the input aspect ratio |
-| `--target-artifact-ratio` | | `0.003` | P0 threshold (fraction, not percent) |
-| `--preset` | | — | Named preset: `photo` (default), `precision` |
-| `--diagnostics` | | — | Path to write a JSON diagnostics file |
-| `--diagnostics-level` | | `summary` | `summary` or `full` (per-probe breakdowns) |
-| `--probe-strengths` | | two-pass | Comma-separated explicit probe list |
-| `--sharpen-sigma` | | `1.0` | Gaussian sigma for unsharp mask |
-| `--sharpen-mode` | | `lightness` | `lightness` (CIE Y) or `rgb` |
-| `--metric-mode` | | `relative` | `relative` (sharpening-added) or `absolute` (total) |
-| `--artifact-metric` | | `channel-clipping` | `channel-clipping` or `pixel-out-of-gamut` |
-| `--metric-weights` | | `1.0,0.3,0.3,0.1` | Composite weights: gamut, halo, overshoot, texture |
-| `--selection-policy` | | `gamut-only` | `gamut-only`, `hybrid`, or `composite-only` |
-| `--enable-contrast-leveling` | | off | Enable contrast leveling stage (placeholder) |
-| `--sweep-dir` | | — | Directory of images to process in batch mode |
-| `--sweep-output-dir` | | — | Output directory for processed images (sweep mode) |
-| `--sweep-summary` | | — | Path to write sweep summary JSON |
-| `--sweep-diff` | | — | Compare two sweep summaries: `BASE,CANDIDATE` |
-| `--generate-corpus` | | — | Generate synthetic benchmark corpus in directory |
-
-In single-file mode, `--input` and `--output` are required. Both `--width` and `--height`
-are required unless `--preserve-aspect-ratio` is set, in which case only one is needed.
-
-In sweep mode, `--sweep-dir` replaces `--input`/`--output`. The sweep flags
-(`--sweep-output-dir`, `--sweep-summary`) require `--sweep-dir`.
-
----
-
-## Building and testing
+## Building & Testing
 
 ```sh
-# Build all crates
-cargo build --workspace
-
-# Run all tests
-cargo test --workspace
-
-# Lint (warnings are errors)
-cargo clippy --workspace -- -D warnings
-
-# Benchmarks
-cargo bench -p r3sizer-core
+cargo build --workspace          # Build all crates
+cargo test --workspace           # Run all tests
+cargo clippy --workspace -- -D warnings  # Lint (warnings are errors)
+cargo bench -p r3sizer-core      # Benchmarks
 ```
 
 ### TypeScript type generation
 
-TypeScript types for the web UI are auto-generated from the Rust types in `r3sizer-core`
-using [`ts-rs`](https://crates.io/crates/ts-rs). The generated file lives at
-`web/src/types/generated.ts` and should be regenerated whenever types in `types.rs` change:
+Types for the web UI are auto-generated from Rust via [`ts-rs`](https://crates.io/crates/ts-rs):
 
 ```sh
 cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 ```
 
-This also serializes Rust `Default` impls as TypeScript constants (`DEFAULT_PARAMS`, etc.)
-so the two sides never drift. The web app re-exports everything through
-`web/src/types/wasm-types.ts`, which adds WASM-specific types (`ProcessResult`) and
-any web-only overrides.
-
-### Web UI
-
-The web UI is deployed to **GitHub Pages** at [alvytsk.github.io/r3sizer](https://alvytsk.github.io/r3sizer/) via a GitHub Actions workflow (`.github/workflows/deploy.yml`). Every push to `main` triggers a build (Rust → WASM → Vite bundle) and deploys automatically.
-
-For local development:
-
-```sh
-cd web
-
-# Local development (requires WASM package to be built first)
-npm run build:wasm
-npm run dev
-
-# Production build (builds WASM + TS check + Vite bundle)
-npm run build
-
-# Docker (from repo root)
-docker build -f web/Dockerfile -t r3sizer-web .
-docker run -p 8080:80 r3sizer-web
-```
-
----
-
-## Library usage
-
-`r3sizer-core` exposes the pipeline as a single function (one-shot) or as a two-phase
-API for interactive use:
-
-```rust
-use r3sizer_core::{AutoSharpParams, ProcessOutput, process_auto_sharp_downscale};
-
-// One-shot (CLI / batch)
-let params = AutoSharpParams::photo(800, 600);
-let ProcessOutput { image, diagnostics } =
-    process_auto_sharp_downscale(&input_linear_rgb, &params)?;
-
-// Two-phase (interactive / WASM)
-use r3sizer_core::{prepare_base, process_from_prepared};
-
-let base = prepare_base(&input_linear_rgb, &params, &|_| {})?;
-// ... user adjusts params (non-base-affecting) ...
-let output = process_from_prepared(&base, &params, &|_| {})?;
-```
-
-`AutoSharpDiagnostics` is `Serialize`-able for JSON export and contains the full probe
-data, fit coefficients, selection mode, fit quality metrics (R², residuals), solver
-robustness flags (monotonicity, LOO stability), typed fallback reasons, per-stage timing,
-composite metric breakdowns, region coverage, chroma guard statistics, evaluator results,
-and parameter recommendations.
+This keeps Rust and TypeScript types in sync, including default values.
 
 ---
 
 ## Documentation
 
-- [`docs/algorithm.md`](docs/algorithm.md) — implemented pipeline
-- [`docs/pipeline_implementation.md`](docs/pipeline_implementation.md) — detailed walkthrough with data flow and allocations
-- [`docs/assumptions.md`](docs/assumptions.md) — confirmed vs engineering approximations
-- [`docs/future_work.md`](docs/future_work.md) — next steps and Tauri integration
+| Document | Description |
+|----------|-------------|
+| [`docs/algorithm.md`](docs/algorithm.md) | Full pipeline description with all stages |
+| [`docs/pipeline_implementation.md`](docs/pipeline_implementation.md) | Detailed walkthrough with data flow and allocations |
+| [`docs/cli.md`](docs/cli.md) | Complete CLI flag reference |
+| [`docs/assumptions.md`](docs/assumptions.md) | Confirmed vs. engineering approximations |
+| [`docs/future_work.md`](docs/future_work.md) | Roadmap and next steps |
 
 ---
 
