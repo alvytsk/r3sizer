@@ -1,3 +1,9 @@
+//! Contrast leveling post-process stage.
+//!
+//! **Stability: experimental / placeholder.** The exact algorithm is not yet
+//! confirmed from source material; this stage is disabled by default
+//! (`ContrastLevelingParams::enabled = false`).  The function signature is
+//! fixed but the body will be replaced once the correct formula is known.
 /// Contrast leveling post-process stage.
 ///
 /// **Status:** The exact contrast-leveling algorithm used in the original

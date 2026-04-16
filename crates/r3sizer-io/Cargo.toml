@@ -10,3 +10,6 @@ thiserror     = { workspace = true }
 serde_json    = { workspace = true }
 image         = { workspace = true, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 r3sizer-core = { path = "../r3sizer-core" }
+
+[dev-dependencies]
+tempfile = "3"

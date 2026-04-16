@@ -148,6 +148,52 @@ impl PreparedBase {
     pub fn matches_params(&self, params: &AutoSharpParams) -> bool {
         self.base_key == BaseParamsKey::from_params(params)
     }
+
+    /// Pre-compute the detail signal `D = input − blur(input)` for this base.
+    ///
+    /// The returned buffer has the same layout as the base pixels, but
+    /// channel-count depends on `params.sharpen_mode`:
+    /// - **Lightness**: `W × H` floats (single channel)
+    /// - **RGB**: `W × H × 3` floats (interleaved)
+    ///
+    /// Pass this detail buffer to probe workers so they skip the Gaussian blur
+    /// entirely and call [`run_probes_from_detail`] instead of
+    /// [`run_probes_standalone`].  The detail signal is independent of sharpening
+    /// strength, so it only needs to be computed once per probe phase.
+    pub fn compute_detail(&self, params: &AutoSharpParams) -> Result<Vec<f32>, CoreError> {
+        compute_probe_detail(
+            self.base.pixels(),
+            self.base.width(),
+            self.base.height(),
+            self.base_luminance.as_deref().unwrap_or(&[]),
+            params,
+        )
+    }
+
+    /// Run sharpening probes for the given strengths against this base.
+    ///
+    /// Convenience wrapper around [`run_probes_standalone`] that reads the
+    /// required fields directly from `self`, avoiding the need to pass raw
+    /// pixel slices from call sites.
+    ///
+    /// For higher performance in parallel workers, prefer using
+    /// [`compute_detail`][Self::compute_detail] once and then calling
+    /// [`run_probes_from_detail`] per worker.
+    pub fn run_probes(
+        &self,
+        strengths: &[f32],
+        params: &AutoSharpParams,
+    ) -> Result<Vec<ProbeSample>, CoreError> {
+        run_probes_standalone(
+            self.base.pixels(),
+            self.base.width(),
+            self.base.height(),
+            self.base_luminance.as_deref().unwrap_or(&[]),
+            strengths,
+            params,
+            self.baseline_artifact_ratio,
+        )
+    }
 }
 
 /// Pre-compute all pipeline stages that don't depend on sharpen/probe params.

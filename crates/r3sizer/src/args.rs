@@ -102,6 +102,17 @@ pub struct PipelineArgs {
     /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only".
     #[arg(long, default_value = "gamut-only")]
     pub selection_policy: SelectionPolicyArg,
+
+    /// Maximum image pixel count (width × height) to decode.
+    /// Inputs exceeding this limit are rejected before loading.
+    /// Default: 100 000 000 (100 MP).
+    #[arg(long, value_name = "N", default_value_t = 100_000_000u64)]
+    pub max_pixels: u64,
+
+    /// Maximum image dimension (width or height) to decode.
+    /// Default: 16 384 px.
+    #[arg(long, value_name = "PX", default_value_t = 16_384u32)]
+    pub max_dimension: u32,
 }
 
 // ---------------------------------------------------------------------------

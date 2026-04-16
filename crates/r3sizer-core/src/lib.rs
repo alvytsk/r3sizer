@@ -30,6 +30,8 @@ pub mod evaluator;
 pub mod recommendations;
 pub mod resize_strategy;
 
+pub mod prelude;
+
 // Re-export the complete public surface.
 pub use pipeline::{
     compute_probe_detail, prepare_base, process_auto_sharp_downscale,

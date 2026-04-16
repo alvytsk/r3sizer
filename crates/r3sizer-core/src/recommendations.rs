@@ -1,5 +1,8 @@
 //! Deterministic recommendation engine (v0.5).
 //!
+//! **Stability: experimental.** The recommendation kinds, thresholds, and
+//! output format may change in any minor version.
+//!
 //! Translates pipeline diagnostics + current params into actionable
 //! [`Recommendation`]s.  Each recommendation carries a self-contained
 //! [`ParamPatch`] that the UI can apply directly via `updateParams(patch)`.

@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use r3sizer_core::SelectionMode;
-use r3sizer_io::{load_as_linear, save_from_linear};
+use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
 
 use crate::args::SweepArgs;
 use crate::run::{build_params, resolve_dimensions};
@@ -221,7 +221,11 @@ fn find_images(dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// Process a single file and return the result summary.
 fn process_one(args: &SweepArgs, input_path: &Path) -> Result<FileResult> {
-    let input = load_as_linear(input_path)
+    let limits = DecodeLimits {
+        max_pixels: args.pipeline.max_pixels,
+        max_dimension: args.pipeline.max_dimension,
+    };
+    let input = load_as_linear_with_limits(input_path, &limits)
         .with_context(|| format!("failed to load: {}", input_path.display()))?;
 
     let (tw, th) = resolve_dimensions(&args.pipeline, input.width(), input.height())?;

@@ -1,5 +1,8 @@
 //! Base resize quality scoring (step 4).
 //!
+//! **Stability: experimental.** The scoring formulas and output structure may
+//! change in any minor version as the quality model is refined.
+//!
 //! Computes [`BaseResizeQuality`] from the source and downscaled images immediately
 //! after the resize stage, before any sharpening is applied.
 //!

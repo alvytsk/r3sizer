@@ -1,5 +1,8 @@
 //! Learned evaluator — heuristic quality prediction (v0.4 experimental).
 //!
+//! **Stability: experimental.** This module may change in any minor version.
+//! Feature-flag gating is planned for a future release.
+//!
 //! Branch A: defines a `QualityEvaluator` trait and a hand-crafted
 //! `HeuristicEvaluator` implementation. The evaluator is purely
 //! diagnostic — it does not alter the pipeline's s* selection.

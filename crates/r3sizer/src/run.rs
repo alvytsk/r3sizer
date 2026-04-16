@@ -2,7 +2,7 @@
 use anyhow::{bail, Context, Result};
 
 use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
-use r3sizer_io::{load_as_linear, save_from_linear};
+use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
 
 use crate::{
     args::{OutputFormat, PipelineArgs, ProcessArgs},
@@ -89,7 +89,11 @@ pub fn build_params(args: &PipelineArgs, target_width: u32, target_height: u32) 
 
 pub fn run(args: &ProcessArgs) -> Result<()> {
     // --- Load ---
-    let input = load_as_linear(&args.input)
+    let limits = DecodeLimits {
+        max_pixels: args.pipeline.max_pixels,
+        max_dimension: args.pipeline.max_dimension,
+    };
+    let input = load_as_linear_with_limits(&args.input, &limits)
         .with_context(|| format!("failed to load input file: {}", args.input.display()))?;
 
     // --- Resolve target dimensions ---

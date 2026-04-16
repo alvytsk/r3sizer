@@ -50,7 +50,7 @@ r3sizer solves this automatically. It probes multiple sharpening strengths, fits
 ```sh
 cargo install --path crates/r3sizer
 
-r3sizer -i photo.jpg -o out.png --width 800 --height 600
+r3sizer process -i photo.jpg -o out.png --width 800 --height 600
 ```
 
 That's it. r3sizer will automatically select the optimal sharpening strength and produce the output.
@@ -58,7 +58,7 @@ That's it. r3sizer will automatically select the optimal sharpening strength and
 Use `--preserve-aspect-ratio` (`-p`) when only one dimension is known:
 
 ```sh
-r3sizer -i photo.jpg -o out.png --width 800 -p
+r3sizer process -i photo.jpg -o out.png --width 800 -p
 ```
 
 Add `--diagnostics diag.json` for a full JSON report of the pipeline decisions.
@@ -79,22 +79,40 @@ Or visit the **[live demo](https://alvytsk.github.io/r3sizer/)** — no installa
 
 ### As a library
 
-```rust
-use r3sizer_core::{AutoSharpParams, ProcessOutput, process_auto_sharp_downscale};
+Add `r3sizer-core` and `r3sizer-io` to your `Cargo.toml`, then:
 
-let params = AutoSharpParams::photo(800, 600);
-let ProcessOutput { image, diagnostics } =
-    process_auto_sharp_downscale(&input_linear_rgb, &params)?;
+```rust
+use r3sizer_core::prelude::*;
+use r3sizer_io::{load_as_linear, save_from_linear};
+
+let src = load_as_linear(Path::new("input.jpg"))?;
+let params = AutoSharpParams::photo(800, 600).resolved();
+let result = process_auto_sharp_downscale(&src, &params)?;
+save_from_linear(&result.image, Path::new("output.png"))?;
 ```
 
 For interactive use (e.g., GUI or WASM), the two-phase API avoids recomputing the expensive resize and classification steps:
 
 ```rust
-use r3sizer_core::{prepare_base, process_from_prepared};
+use r3sizer_core::prelude::*;
 
-let base = prepare_base(&input_linear_rgb, &params, &|_| {})?;
-// User adjusts sharpening params without re-resizing...
-let output = process_from_prepared(&base, &params, &|_| {})?;
+// Prepare once at image-load time (resize + classify + baseline ~1.5 s).
+let prepared = prepare_base(&src, &params, &|_| {})?;
+// Process multiple times with different params (probing + fit ~0.5 s each).
+let output = process_from_prepared(&prepared, &params, &|_| {})?;
+```
+
+See [`crates/r3sizer-io/examples/`](crates/r3sizer-io/examples/) for runnable examples:
+
+| Example | Description |
+|---------|-------------|
+| `single_file.rs` | Basic load → process → save, ~40 lines |
+| `two_phase.rs` | Prepare once, run with Fast / Balanced / Quality modes |
+| `custom_params.rs` | Build `AutoSharpParams` by hand, compare Uniform vs ContentAdaptive |
+
+```sh
+cargo run --example single_file --manifest-path crates/r3sizer-io/Cargo.toml \
+    -- photo.jpg out.png 800 600
 ```
 
 ---
@@ -165,6 +183,12 @@ cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --no
 ```
 
 This keeps Rust and TypeScript types in sync, including default values.
+
+---
+
+## Development
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, workflow, and PR expectations.
 
 ---
 
