@@ -47,42 +47,23 @@ fn fast_powf_gamma(base: f32, gamma: f32) -> f32 {
 // Chroma-guarded sharpening
 // ---------------------------------------------------------------------------
 
-/// Sharpen luminance, then apply context-aware soft chroma clamping.
+/// Shared pixel-processing core for chroma guard.
 ///
-/// Algorithm:
-/// 1. Sharpen luminance via existing USM path.
-/// 2. Reconstruct RGB via multiplicative k = L'/L.
-/// 3. Per pixel: compute effective threshold from `max_chroma_shift`,
-///    region class factor, and saturation factor.
-///    If chroma shift exceeds the effective threshold, soft-clamp by
-///    interpolating toward the original chroma.
-#[allow(clippy::too_many_arguments)]
-pub fn sharpen_with_chroma_guard(
-    src: &LinearRgbImage,
-    amount: f32,
-    sigma: f32,
+/// Compares `original` against `processed` pixel-by-pixel, computing chroma
+/// shift and applying context-aware soft clamping where the shift exceeds the
+/// effective threshold.
+fn chroma_guard_pixels(
+    original: &LinearRgbImage,
+    processed: &LinearRgbImage,
     max_chroma_shift: f32,
     region_map: Option<&RegionMap>,
     region_factors: Option<&ChromaRegionFactors>,
     saturation_guard: Option<&SaturationGuardParams>,
 ) -> Result<(LinearRgbImage, ChromaGuardDiagnostics), CoreError> {
-    let w = src.width() as usize;
-    let luminance = extract_luminance(src);
-    let kernel = make_kernel(sigma)?;
-    let sharpened_luma = unsharp_mask_single_channel_with_kernel(
-        &luminance,
-        w,
-        src.height() as usize,
-        amount,
-        &kernel,
-    );
-
-    // Reconstruct RGB from sharpened luminance
-    let reconstructed = reconstruct_rgb_from_lightness(src, &sharpened_luma);
-
-    let src_data = src.pixels();
-    let rec_data = reconstructed.pixels();
-    let n_pixels = w * (src.height() as usize);
+    let w = original.width() as usize;
+    let src_data = original.pixels();
+    let rec_data = processed.pixels();
+    let n_pixels = w * (original.height() as usize);
     let mut out_data = vec![0.0f32; n_pixels * 3];
 
     // Global accumulators
@@ -194,7 +175,7 @@ pub fn sharpen_with_chroma_guard(
         }
     }
 
-    let image = LinearRgbImage::new(src.width(), src.height(), out_data)?;
+    let image = LinearRgbImage::new(original.width(), original.height(), out_data)?;
 
     // Build per-region diagnostics
     let per_region = if has_region {
@@ -257,6 +238,49 @@ pub fn sharpen_with_chroma_guard(
     Ok((image, diag))
 }
 
+/// Sharpen luminance, then apply context-aware soft chroma clamping.
+///
+/// Algorithm:
+/// 1. Sharpen luminance via existing USM path.
+/// 2. Reconstruct RGB via multiplicative k = L'/L.
+/// 3. Per pixel: compute effective threshold from `max_chroma_shift`,
+///    region class factor, and saturation factor.
+///    If chroma shift exceeds the effective threshold, soft-clamp by
+///    interpolating toward the original chroma.
+#[allow(clippy::too_many_arguments)]
+pub fn sharpen_with_chroma_guard(
+    src: &LinearRgbImage,
+    amount: f32,
+    sigma: f32,
+    max_chroma_shift: f32,
+    region_map: Option<&RegionMap>,
+    region_factors: Option<&ChromaRegionFactors>,
+    saturation_guard: Option<&SaturationGuardParams>,
+) -> Result<(LinearRgbImage, ChromaGuardDiagnostics), CoreError> {
+    let w = src.width() as usize;
+    let luminance = extract_luminance(src);
+    let kernel = make_kernel(sigma)?;
+    let sharpened_luma = unsharp_mask_single_channel_with_kernel(
+        &luminance,
+        w,
+        src.height() as usize,
+        amount,
+        &kernel,
+    );
+
+    // Reconstruct RGB from sharpened luminance
+    let reconstructed = reconstruct_rgb_from_lightness(src, &sharpened_luma);
+
+    chroma_guard_pixels(
+        src,
+        &reconstructed,
+        max_chroma_shift,
+        region_map,
+        region_factors,
+        saturation_guard,
+    )
+}
+
 /// Apply chroma guard as a post-process on an already-sharpened image.
 ///
 /// Unlike [`sharpen_with_chroma_guard`], this does **not** re-sharpen.
@@ -271,168 +295,14 @@ pub fn apply_chroma_guard(
     region_factors: Option<&ChromaRegionFactors>,
     saturation_guard: Option<&SaturationGuardParams>,
 ) -> Result<(LinearRgbImage, ChromaGuardDiagnostics), CoreError> {
-    let w = base.width() as usize;
-    let src_data = base.pixels();
-    let rec_data = sharpened.pixels();
-    let n_pixels = w * (base.height() as usize);
-    let mut out_data = vec![0.0f32; n_pixels * 3];
-
-    let mut clamped_count: u32 = 0;
-    let mut total_shift = 0.0f64;
-    let mut max_shift_global = 0.0f32;
-
-    let mut eff_min = f32::INFINITY;
-    let mut eff_max = f32::NEG_INFINITY;
-    let mut eff_sum = 0.0f64;
-
-    let has_region = region_map.is_some() && region_factors.is_some();
-    let mut region_counts = [0u32; REGION_CLASS_COUNT];
-    let mut region_clamped = [0u32; REGION_CLASS_COUNT];
-    let mut region_shift_sum = [0.0f64; REGION_CLASS_COUNT];
-    let mut region_shift_max = [0.0f32; REGION_CLASS_COUNT];
-
-    for i in 0..n_pixels {
-        let idx = i * 3;
-        let (r, g, b) = (src_data[idx], src_data[idx + 1], src_data[idx + 2]);
-        let (r2, g2, b2) = (rec_data[idx], rec_data[idx + 1], rec_data[idx + 2]);
-
-        let l_orig = luminance_from_linear_srgb(r, g, b);
-        let l_new = luminance_from_linear_srgb(r2, g2, b2);
-
-        let (cr_orig, cg_orig, cb_orig) = (r - l_orig, g - l_orig, b - l_orig);
-        let (cr_new, cg_new, cb_new) = (r2 - l_new, g2 - l_new, b2 - l_new);
-
-        let (dr, dg, db) = (cr_new - cr_orig, cg_new - cg_orig, cb_new - cb_orig);
-        let shift_sq = dr * dr + dg * dg + db * db;
-        let orig_mag = (cr_orig * cr_orig + cg_orig * cg_orig + cb_orig * cb_orig).sqrt();
-
-        let region_factor = match (region_map, region_factors) {
-            (Some(rmap), Some(factors)) => {
-                let (px, py) = ((i % w) as u32, (i / w) as u32);
-                factors.factor_for(rmap.get(px, py))
-            }
-            _ => 1.0,
-        };
-
-        let sat_factor = match saturation_guard {
-            Some(sp) => {
-                let sat_norm = (r.max(g).max(b) - r.min(g).min(b)).clamp(0.0, 1.0);
-                1.0 - (1.0 - sp.min_scale) * fast_powf_gamma(sat_norm, sp.gamma)
-            }
-            None => 1.0,
-        };
-
-        let effective_threshold =
-            max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
-
-        if effective_threshold < eff_min {
-            eff_min = effective_threshold;
-        }
-        if effective_threshold > eff_max {
-            eff_max = effective_threshold;
-        }
-        eff_sum += effective_threshold as f64;
-
-        // Compare in squared space to defer sqrt
-        let threshold_sq = effective_threshold * effective_threshold;
-        let needs_clamp = shift_sq > threshold_sq;
-        let shift = shift_sq.sqrt();
-
-        total_shift += shift as f64;
-        if shift > max_shift_global {
-            max_shift_global = shift;
-        }
-
-        if has_region {
-            let rmap = region_map.unwrap();
-            let (px, py) = ((i % w) as u32, (i / w) as u32);
-            let cls = rmap.get(px, py) as usize;
-            region_counts[cls] += 1;
-            region_shift_sum[cls] += shift as f64;
-            if shift > region_shift_max[cls] {
-                region_shift_max[cls] = shift;
-            }
-            if needs_clamp {
-                region_clamped[cls] += 1;
-            }
-        }
-
-        if needs_clamp {
-            let blend = effective_threshold / shift;
-            let cr = cr_orig + blend * (cr_new - cr_orig);
-            let cg = cg_orig + blend * (cg_new - cg_orig);
-            let cb = cb_orig + blend * (cb_new - cb_orig);
-            out_data[idx] = l_new + cr;
-            out_data[idx + 1] = l_new + cg;
-            out_data[idx + 2] = l_new + cb;
-            clamped_count += 1;
-        } else {
-            out_data[idx] = r2;
-            out_data[idx + 1] = g2;
-            out_data[idx + 2] = b2;
-        }
-    }
-
-    let image = LinearRgbImage::new(base.width(), base.height(), out_data)?;
-
-    let per_region = if has_region {
-        let mk = |cls: usize| -> ChromaRegionClampStats {
-            let cnt = region_counts[cls];
-            ChromaRegionClampStats {
-                pixel_count: cnt,
-                clamped_count: region_clamped[cls],
-                clamped_fraction: if cnt > 0 {
-                    region_clamped[cls] as f32 / cnt as f32
-                } else {
-                    0.0
-                },
-                mean_shift: if cnt > 0 {
-                    (region_shift_sum[cls] / cnt as f64) as f32
-                } else {
-                    0.0
-                },
-                max_shift: region_shift_max[cls],
-            }
-        };
-        Some(ChromaPerRegionDiagnostics {
-            flat: mk(RegionClass::Flat as usize),
-            textured: mk(RegionClass::Textured as usize),
-            strong_edge: mk(RegionClass::StrongEdge as usize),
-            microtexture: mk(RegionClass::Microtexture as usize),
-            risky_halo_zone: mk(RegionClass::RiskyHaloZone as usize),
-        })
-    } else {
-        None
-    };
-
-    let has_modulation = region_factors.is_some() || saturation_guard.is_some();
-    let diag = ChromaGuardDiagnostics {
-        pixels_clamped_fraction: clamped_count as f32 / n_pixels.max(1) as f32,
-        mean_chroma_shift: if n_pixels > 0 {
-            (total_shift / n_pixels as f64) as f32
-        } else {
-            0.0
-        },
-        max_chroma_shift: max_shift_global,
-        effective_threshold_min: if has_modulation && n_pixels > 0 {
-            Some(eff_min)
-        } else {
-            None
-        },
-        effective_threshold_mean: if has_modulation && n_pixels > 0 {
-            Some((eff_sum / n_pixels as f64) as f32)
-        } else {
-            None
-        },
-        effective_threshold_max: if has_modulation && n_pixels > 0 {
-            Some(eff_max)
-        } else {
-            None
-        },
-        per_region,
-    };
-
-    Ok((image, diag))
+    chroma_guard_pixels(
+        base,
+        sharpened,
+        max_chroma_shift,
+        region_map,
+        region_factors,
+        saturation_guard,
+    )
 }
 
 // ---------------------------------------------------------------------------

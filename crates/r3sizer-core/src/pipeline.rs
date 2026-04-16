@@ -639,6 +639,33 @@ fn run_probes_for_prepared(
     })
 }
 
+/// Apply the configured clamp/normalize policy to the image.
+fn apply_clamp_policy(image: &mut LinearRgbImage, policy: ClampPolicy) {
+    match policy {
+        ClampPolicy::Clamp => {
+            for v in image.pixels_mut() {
+                *v = v.clamp(0.0, 1.0);
+            }
+        }
+        ClampPolicy::Normalize => {
+            let max_val = image
+                .pixels()
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
+            if max_val > 0.0 {
+                for v in image.pixels_mut() {
+                    *v = (*v / max_val).max(0.0);
+                }
+            } else {
+                for v in image.pixels_mut() {
+                    *v = 0.0;
+                }
+            }
+        }
+    }
+}
+
 /// Post-probing pipeline: fit → solve → sharpen → metrics → diagnostics.
 fn finish_pipeline(
     prepared: &PreparedBase,
@@ -954,29 +981,7 @@ fn finish_pipeline(
     // --- Clamp ---
     on_stage("finalizing");
     let t0 = Instant::now();
-    match params.output_clamp {
-        ClampPolicy::Clamp => {
-            for v in final_image.pixels_mut() {
-                *v = v.clamp(0.0, 1.0);
-            }
-        }
-        ClampPolicy::Normalize => {
-            let max_val = final_image
-                .pixels()
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
-            if max_val > 0.0 {
-                for v in final_image.pixels_mut() {
-                    *v = (*v / max_val).max(0.0);
-                }
-            } else {
-                for v in final_image.pixels_mut() {
-                    *v = 0.0;
-                }
-            }
-        }
-    }
+    apply_clamp_policy(&mut final_image, params.output_clamp);
     let clamp_us = t0.elapsed().as_micros() as u64;
     let total_us = pipeline_start.elapsed().as_micros() as u64;
 
@@ -1135,139 +1140,65 @@ fn probe_strengths(
 ) -> Result<Vec<ProbeSample>, CoreError> {
     use crate::sharpen;
 
-    let measure = |img: &LinearRgbImage| -> f32 {
-        match metric_override {
-            Some(f) => f(img),
-            None => crate::metrics::compute_selection_metric(img, artifact_metric),
-        }
-    };
+    let w = base.width() as usize;
+    let h = base.height() as usize;
 
-    match sharpen_mode {
+    // One blur — the expensive part. Mode-dependent detail computation.
+    let detail = match sharpen_mode {
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
-            let w = base.width() as usize;
-            let h = base.height() as usize;
-
-            // One blur — the expensive part.
-            let detail = sharpen::compute_detail_single_channel(lum, w, h, kernel);
-
-            #[cfg(feature = "parallel")]
-            {
-                use rayon::prelude::*;
-                let bw = base.width();
-                let bh = base.height();
-                let results: Vec<ProbeSample> = strengths
-                    .par_iter()
-                    .map_init(
-                        || {
-                            // Per-thread scratch: avoids allocating per probe.
-                            (vec![0.0f32; w * h], LinearRgbImage::zeros(bw, bh).unwrap())
-                        },
-                        |(luma_scratch, rgb_scratch), &s| {
-                            sharpen::apply_detail_single_channel_into(
-                                lum,
-                                &detail,
-                                s,
-                                luma_scratch,
-                            );
-                            color::reconstruct_rgb_from_lightness_into(
-                                base,
-                                luma_scratch,
-                                lum,
-                                rgb_scratch,
-                            );
-                            let p_total = measure(rgb_scratch);
-                            let metric_value =
-                                compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                            ProbeSample {
-                                strength: s,
-                                artifact_ratio: p_total,
-                                metric_value,
-                                breakdown: None,
-                            }
-                        },
-                    )
-                    .collect();
-                Ok(results)
-            }
-
-            #[cfg(not(feature = "parallel"))]
-            {
-                let n = w * h;
-                let mut luma_scratch = vec![0.0f32; n];
-                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
-                let mut results = Vec::with_capacity(strengths.len());
-                for &s in strengths {
-                    sharpen::apply_detail_single_channel_into(lum, &detail, s, &mut luma_scratch);
-                    color::reconstruct_rgb_from_lightness_into(
-                        base,
-                        &luma_scratch,
-                        lum,
-                        &mut rgb_scratch,
-                    );
-                    let p_total = measure(&rgb_scratch);
-                    let metric_value =
-                        compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                    results.push(ProbeSample {
-                        strength: s,
-                        artifact_ratio: p_total,
-                        metric_value,
-                        breakdown: None,
-                    });
-                }
-                Ok(results)
-            }
+            sharpen::compute_detail_single_channel(lum, w, h, kernel)
         }
+        SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
+    };
 
-        SharpenMode::Rgb => {
-            // One blur — the expensive part.
-            let detail = sharpen::compute_detail_rgb(base, kernel);
+    let ctx = ProbeContext {
+        base,
+        base_luminance,
+        detail: &detail,
+        sharpen_mode,
+        artifact_metric,
+        baseline_artifact_ratio,
+        metric_mode,
+        metric_override,
+    };
 
-            #[cfg(feature = "parallel")]
-            {
-                use rayon::prelude::*;
-                let bw = base.width();
-                let bh = base.height();
-                let results: Vec<ProbeSample> = strengths
-                    .par_iter()
-                    .map_init(
-                        || LinearRgbImage::zeros(bw, bh).unwrap(),
-                        |rgb_scratch, &s| {
-                            sharpen::apply_detail_rgb_into(base, &detail, s, rgb_scratch);
-                            let p_total = measure(rgb_scratch);
-                            let metric_value =
-                                compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                            ProbeSample {
-                                strength: s,
-                                artifact_ratio: p_total,
-                                metric_value,
-                                breakdown: None,
-                            }
-                        },
-                    )
-                    .collect();
-                Ok(results)
-            }
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        let bw = base.width();
+        let bh = base.height();
+        let mode = sharpen_mode;
+        let results: Vec<ProbeSample> = strengths
+            .par_iter()
+            .map_init(
+                move || ProbeScratch {
+                    luma: match mode {
+                        SharpenMode::Lightness => vec![0.0f32; w * h],
+                        SharpenMode::Rgb => Vec::new(),
+                    },
+                    rgb: LinearRgbImage::zeros(bw, bh).unwrap(),
+                },
+                |scratch, &s| probe_one_reuse(&ctx, s, scratch),
+            )
+            .collect();
+        Ok(results)
+    }
 
-            #[cfg(not(feature = "parallel"))]
-            {
-                let mut rgb_scratch = LinearRgbImage::zeros(base.width(), base.height())?;
-                let mut results = Vec::with_capacity(strengths.len());
-                for &s in strengths {
-                    sharpen::apply_detail_rgb_into(base, &detail, s, &mut rgb_scratch);
-                    let p_total = measure(&rgb_scratch);
-                    let metric_value =
-                        compute_metric_value(p_total, baseline_artifact_ratio, metric_mode);
-                    results.push(ProbeSample {
-                        strength: s,
-                        artifact_ratio: p_total,
-                        metric_value,
-                        breakdown: None,
-                    });
-                }
-                Ok(results)
-            }
-        }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut scratch = ProbeScratch {
+            luma: match sharpen_mode {
+                SharpenMode::Lightness => vec![0.0f32; w * h],
+                SharpenMode::Rgb => Vec::new(),
+            },
+            rgb: LinearRgbImage::zeros(base.width(), base.height())?,
+        };
+        let results = strengths
+            .iter()
+            .map(|&s| probe_one_reuse(&ctx, s, &mut scratch))
+            .collect();
+        Ok(results)
     }
 }
 
@@ -1393,6 +1324,78 @@ fn determine_fallback_reason(
 // Adaptive sharpen + validate + backoff (Stage 9 + 9.5)
 // ---------------------------------------------------------------------------
 
+/// Run the adaptive sharpening backoff loop.
+///
+/// Calls `apply_at_scale(1.0)` first. If the metric exceeds `target_p0`,
+/// iteratively reduces the scale by `backoff_factor` until budget is met
+/// or `max_backoff` iterations are exhausted.
+fn adaptive_backoff_loop(
+    apply_at_scale: &dyn Fn(f32) -> LinearRgbImage,
+    measure: &dyn Fn(&LinearRgbImage) -> f32,
+    target_p0: f32,
+    max_backoff: u8,
+    backoff_factor: f32,
+) -> (
+    LinearRgbImage,
+    Option<AdaptiveValidationOutcome>,
+    Option<u64>,
+) {
+    let result = apply_at_scale(1.0);
+    let p = measure(&result);
+
+    let t_val = Instant::now();
+
+    if p <= target_p0 {
+        let val_us = t_val.elapsed().as_micros() as u64;
+        return (
+            result,
+            Some(AdaptiveValidationOutcome::PassedDirect { measured_metric: p }),
+            Some(val_us),
+        );
+    }
+
+    let mut best_scale = 1.0_f32;
+    let mut best_metric = p;
+    let mut best_result = result;
+    let mut scale = 1.0_f32;
+
+    for i in 1..=max_backoff {
+        scale *= backoff_factor;
+        let result = apply_at_scale(scale);
+        let p = measure(&result);
+
+        if p < best_metric {
+            best_metric = p;
+            best_scale = scale;
+            best_result = result;
+        }
+
+        if p <= target_p0 {
+            let val_us = t_val.elapsed().as_micros() as u64;
+            return (
+                best_result,
+                Some(AdaptiveValidationOutcome::PassedAfterBackoff {
+                    iterations: i,
+                    final_scale: scale,
+                    measured_metric: p,
+                }),
+                Some(val_us),
+            );
+        }
+    }
+
+    let val_us = t_val.elapsed().as_micros() as u64;
+    (
+        best_result,
+        Some(AdaptiveValidationOutcome::FailedBudgetExceeded {
+            iterations: max_backoff,
+            best_scale,
+            best_metric,
+        }),
+        Some(val_us),
+    )
+}
+
 /// Adaptive sharpen with validation and backoff loop.
 ///
 /// Computes detail buffers once, then applies adaptive sharpening. If the
@@ -1423,9 +1426,6 @@ fn adaptive_sharpen_with_validation(
     ),
     CoreError,
 > {
-    let w = base.width() as usize;
-    let h = base.height() as usize;
-
     let measure = |img: &LinearRgbImage| -> f32 {
         let raw = if let Some(cs) = evaluation_color_space {
             crate::chroma_guard::evaluate_in_color_space(img, cs)
@@ -1444,6 +1444,8 @@ fn adaptive_sharpen_with_validation(
         SharpenMode::Lightness => {
             let luma = base_luminance.expect("luminance required for lightness mode");
             let kernel = make_kernel(sigma)?;
+            let w = base.width() as usize;
+            let h = base.height() as usize;
             let blurred = crate::sharpen::gaussian_blur_single_channel(luma, w, h, &kernel);
             let detail: Vec<f32> = luma
                 .iter()
@@ -1465,61 +1467,12 @@ fn adaptive_sharpen_with_validation(
                 )
             };
 
-            // Initial apply at scale=1.0
-            let result = apply_at_scale(1.0);
-            let p = measure(&result);
-
-            let t_val = Instant::now();
-
-            if p <= target_p0 {
-                let val_us = t_val.elapsed().as_micros() as u64;
-                return Ok((
-                    result,
-                    Some(AdaptiveValidationOutcome::PassedDirect { measured_metric: p }),
-                    Some(val_us),
-                ));
-            }
-
-            // Backoff loop
-            let mut best_scale = 1.0_f32;
-            let mut best_metric = p;
-            let mut best_result = result;
-            let mut scale = 1.0_f32;
-
-            for i in 1..=max_backoff {
-                scale *= backoff_factor;
-                let result = apply_at_scale(scale);
-                let p = measure(&result);
-
-                if p < best_metric {
-                    best_metric = p;
-                    best_scale = scale;
-                    best_result = result;
-                }
-
-                if p <= target_p0 {
-                    let val_us = t_val.elapsed().as_micros() as u64;
-                    return Ok((
-                        best_result,
-                        Some(AdaptiveValidationOutcome::PassedAfterBackoff {
-                            iterations: i,
-                            final_scale: scale,
-                            measured_metric: p,
-                        }),
-                        Some(val_us),
-                    ));
-                }
-            }
-
-            let val_us = t_val.elapsed().as_micros() as u64;
-            Ok((
-                best_result,
-                Some(AdaptiveValidationOutcome::FailedBudgetExceeded {
-                    iterations: max_backoff,
-                    best_scale,
-                    best_metric,
-                }),
-                Some(val_us),
+            Ok(adaptive_backoff_loop(
+                &apply_at_scale,
+                &measure,
+                target_p0,
+                max_backoff,
+                backoff_factor,
             ))
         }
 
@@ -1548,59 +1501,12 @@ fn adaptive_sharpen_with_validation(
                 LinearRgbImage::new(base.width(), base.height(), out).unwrap()
             };
 
-            let result = apply_at_scale(1.0);
-            let p = measure(&result);
-
-            let t_val = Instant::now();
-
-            if p <= target_p0 {
-                let val_us = t_val.elapsed().as_micros() as u64;
-                return Ok((
-                    result,
-                    Some(AdaptiveValidationOutcome::PassedDirect { measured_metric: p }),
-                    Some(val_us),
-                ));
-            }
-
-            let mut best_scale = 1.0_f32;
-            let mut best_metric = p;
-            let mut best_result = result;
-            let mut scale = 1.0_f32;
-
-            for i in 1..=max_backoff {
-                scale *= backoff_factor;
-                let result = apply_at_scale(scale);
-                let p = measure(&result);
-
-                if p < best_metric {
-                    best_metric = p;
-                    best_scale = scale;
-                    best_result = result;
-                }
-
-                if p <= target_p0 {
-                    let val_us = t_val.elapsed().as_micros() as u64;
-                    return Ok((
-                        best_result,
-                        Some(AdaptiveValidationOutcome::PassedAfterBackoff {
-                            iterations: i,
-                            final_scale: scale,
-                            measured_metric: p,
-                        }),
-                        Some(val_us),
-                    ));
-                }
-            }
-
-            let val_us = t_val.elapsed().as_micros() as u64;
-            Ok((
-                best_result,
-                Some(AdaptiveValidationOutcome::FailedBudgetExceeded {
-                    iterations: max_backoff,
-                    best_scale,
-                    best_metric,
-                }),
-                Some(val_us),
+            Ok(adaptive_backoff_loop(
+                &apply_at_scale,
+                &measure,
+                target_p0,
+                max_backoff,
+                backoff_factor,
             ))
         }
     }
