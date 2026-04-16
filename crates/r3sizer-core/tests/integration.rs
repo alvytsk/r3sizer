@@ -1386,10 +1386,7 @@ fn saturation_guard_tightens_for_saturated_pixels() {
     // The saturation factor < 1.0 for saturated pixels should pull the mean down.
     let eff_mean = cg.effective_threshold_mean.unwrap();
     let eff_max = cg.effective_threshold_max.unwrap();
-    assert!(
-        eff_mean <= eff_max,
-        "mean should be <= max"
-    );
+    assert!(eff_mean <= eff_max, "mean should be <= max");
     assert!(eff_mean.is_finite());
 }
 

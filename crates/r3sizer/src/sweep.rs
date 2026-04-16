@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use r3sizer_core::SelectionMode;
 use r3sizer_io::{load_as_linear, save_from_linear};
 
-use crate::args::Cli;
+use crate::args::SweepArgs;
 use crate::run::{build_params, resolve_dimensions};
 
 /// Supported image extensions for sweep mode.
@@ -97,22 +97,21 @@ pub struct SweepSummary {
 }
 
 /// Run sweep mode: process all images in a directory.
-pub fn run_sweep(args: &Cli) -> Result<()> {
-    let sweep_dir = args.sweep_dir.as_ref().expect("sweep_dir is required");
-    if !sweep_dir.is_dir() {
+pub fn run_sweep(args: &SweepArgs) -> Result<()> {
+    if !args.in_dir.is_dir() {
         bail!(
-            "--sweep-dir path is not a directory: {}",
-            sweep_dir.display()
+            "--in-dir path is not a directory: {}",
+            args.in_dir.display()
         );
     }
 
-    let files = find_images(sweep_dir)?;
+    let files = find_images(&args.in_dir)?;
     if files.is_empty() {
-        bail!("no image files found in {}", sweep_dir.display());
+        bail!("no image files found in {}", args.in_dir.display());
     }
 
     // Create output directory if specified.
-    if let Some(ref out_dir) = args.sweep_output_dir {
+    if let Some(ref out_dir) = args.out_dir {
         std::fs::create_dir_all(out_dir)
             .with_context(|| format!("failed to create output directory: {}", out_dir.display()))?;
     }
@@ -120,7 +119,7 @@ pub fn run_sweep(args: &Cli) -> Result<()> {
     println!(
         "Sweep: processing {} files from {}",
         files.len(),
-        sweep_dir.display()
+        args.in_dir.display()
     );
 
     let mut results = Vec::new();
@@ -175,7 +174,7 @@ pub fn run_sweep(args: &Cli) -> Result<()> {
     );
 
     // Write summary JSON.
-    if let Some(ref summary_path) = args.sweep_summary {
+    if let Some(ref summary_path) = args.summary {
         let summary = SweepSummary {
             aggregate,
             results,
@@ -221,18 +220,18 @@ fn find_images(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Process a single file and return the result summary.
-fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
+fn process_one(args: &SweepArgs, input_path: &Path) -> Result<FileResult> {
     let input = load_as_linear(input_path)
         .with_context(|| format!("failed to load: {}", input_path.display()))?;
 
-    let (tw, th) = resolve_dimensions(args, input.width(), input.height())?;
-    let params = build_params(args, tw, th);
+    let (tw, th) = resolve_dimensions(&args.pipeline, input.width(), input.height())?;
+    let params = build_params(&args.pipeline, tw, th);
 
     let output =
         r3sizer_core::process_auto_sharp_downscale(&input, &params).context("pipeline failed")?;
 
-    // Save output image if sweep_output_dir is set.
-    let output_path = if let Some(ref out_dir) = args.sweep_output_dir {
+    // Save output image if out_dir is set.
+    let output_path = if let Some(ref out_dir) = args.out_dir {
         let stem = input_path.file_stem().unwrap_or_default();
         let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
         save_from_linear(&output.image, &out_file)

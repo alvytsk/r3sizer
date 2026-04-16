@@ -24,11 +24,11 @@ cargo clippy --workspace -- -D warnings
 cargo bench -p r3sizer-core
 
 # Run the CLI (single file)
-cargo run -p r3sizer -- --input <FILE> --output <FILE> --width <N> --height <N>
-cargo run -p r3sizer -- --input photo.jpg --output out.png --width 800 --height 600 --diagnostics diag.json
+cargo run -p r3sizer -- process --input <FILE> --output <FILE> --width <N> --height <N>
+cargo run -p r3sizer -- process -i photo.jpg -o out.png --width 800 --height 600 --diagnostics diag.json
 
 # Run the CLI (sweep mode)
-cargo run -p r3sizer -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
+cargo run -p r3sizer -- sweep --in-dir ./photos --out-dir ./out --summary summary.json --width 800 --height 600
 
 # Regenerate TypeScript types from Rust (after changing types.rs)
 cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture

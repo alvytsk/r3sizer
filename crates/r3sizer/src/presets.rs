@@ -9,6 +9,7 @@
 ///   - **v3-adaptive**: Content-adaptive sharpening with default gain table
 ///   - **v5-full**: Full v5 pipeline — adaptive sharpen + chroma guard + saturation guard + evaluator
 ///   - **v5-two-pass**: Same as v5-full but with two-pass adaptive probing
+use anyhow::Result;
 use r3sizer_core::{
     AutoSharpParams, ChromaRegionFactors, ClassificationParams, EvaluatorConfig,
     ExperimentalSharpenMode, GainTable, ProbeConfig, SaturationGuardParams, SharpenStrategy,
@@ -104,4 +105,31 @@ pub fn preset_params(name: &str, tw: u32, th: u32) -> Result<AutoSharpParams, St
             PRESET_NAMES.join(", ")
         )),
     }
+}
+
+/// Print all preset names to stdout.
+pub fn list_presets() -> Result<()> {
+    println!("Available presets:");
+    println!();
+    println!("  Stable:");
+    println!("    photo       P0=0.003 — natural photographic content (default)");
+    println!("    precision   P0=0.001 — text, UI, architecture, hard edges");
+    println!();
+    println!("  Legacy (for A/B comparison):");
+    println!("    baseline    Minimal: uniform sharpen, no chroma guard, no evaluator");
+    println!("    v3-adaptive Content-adaptive sharpening with default gain table");
+    println!("    v5-full     Full v5 pipeline: adaptive + chroma guard + saturation guard");
+    println!("    v5-two-pass Same as v5-full with two-pass adaptive probing");
+    Ok(())
+}
+
+/// Show the configuration for a named preset.
+pub fn show_preset(name: &str) -> Result<()> {
+    // Use a small dummy size to get representable params; sizes are not part of the preset.
+    let params = preset_params(name, 800, 600).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let json = serde_json::to_string_pretty(&params)
+        .map_err(|e| anyhow::anyhow!("failed to serialise preset: {e}"))?;
+    println!("Preset '{name}':");
+    println!("{json}");
+    Ok(())
 }

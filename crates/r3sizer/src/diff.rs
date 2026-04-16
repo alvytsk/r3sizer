@@ -3,7 +3,7 @@
 /// Reads two sweep summary JSON files and produces a structured diff report
 /// showing per-file and aggregate changes.
 ///
-/// Usage: `r3sizer --sweep-diff baseline.json,candidate.json`
+/// Usage: `r3sizer diff baseline.json candidate.json`
 use std::path::Path;
 
 use anyhow::{Context, Result};

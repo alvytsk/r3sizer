@@ -1,4 +1,5 @@
 /// Formatted stdout output.
+use anyhow::{Context, Result};
 use r3sizer_core::{
     ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus,
     MetricComponent, MetricMode, SelectionMode, SharpenMode,
@@ -147,6 +148,13 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         println!("  Clamp                     : {}", t.clamp_us);
         println!("  Total                     : {}", t.total_us);
     }
+}
+
+/// Serialize the diagnostics as JSON and print to stdout.
+pub fn print_summary_json(diag: &AutoSharpDiagnostics) -> Result<()> {
+    let json = serde_json::to_string_pretty(diag).context("failed to serialise diagnostics")?;
+    println!("{json}");
+    Ok(())
 }
 
 fn sharpen_mode_label(m: SharpenMode) -> &'static str {

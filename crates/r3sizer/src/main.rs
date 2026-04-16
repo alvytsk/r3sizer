@@ -9,16 +9,17 @@ mod sweep;
 use clap::Parser;
 
 fn main() {
-    let args = args::Cli::parse();
+    let cli = args::Cli::parse();
 
-    let result = if let Some(ref dir) = args.generate_corpus {
-        corpus::generate_corpus(dir)
-    } else if let Some(ref paths) = args.sweep_diff {
-        diff::run_diff(&paths[0], &paths[1])
-    } else if args.sweep_dir.is_some() {
-        sweep::run_sweep(&args)
-    } else {
-        run::run(&args)
+    let result = match cli.command {
+        args::Commands::Process(ref args) => run::run(args),
+        args::Commands::Sweep(ref args) => sweep::run_sweep(args),
+        args::Commands::Diff(ref args) => diff::run_diff(&args.baseline, &args.candidate),
+        args::Commands::Corpus(ref args) => corpus::generate_corpus(&args.output_dir),
+        args::Commands::Presets(ref cmd) => match cmd {
+            args::PresetsCommand::List => presets::list_presets(),
+            args::PresetsCommand::Show { name } => presets::show_preset(name),
+        },
     };
 
     if let Err(e) = result {

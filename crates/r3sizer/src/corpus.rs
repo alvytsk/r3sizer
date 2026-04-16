@@ -5,7 +5,7 @@
 /// high-frequency texture, color bars, concentric circles, thin lines,
 /// seeded noise (foliage proxy), and mixed-region content.
 ///
-/// Usage: `r3sizer --generate-corpus ./corpus`
+/// Usage: `r3sizer corpus ./corpus`
 use std::path::Path;
 
 use anyhow::{Context, Result};
