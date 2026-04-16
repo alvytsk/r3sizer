@@ -1,9 +1,16 @@
 use r3sizer_core::{
-    AutoSharpParams, DiagnosticsLevel, LinearRgbImage,
     process_auto_sharp_downscale,
+    AutoSharpParams,
+    DiagnosticsLevel,
+    EvaluationColorSpace,
     // Experimental types
-    EvaluatorConfig, EvaluationColorSpace, ExperimentalSharpenMode,
-    InputColorSpace, KernelTable, ResizeKernel, ResizeStrategy,
+    EvaluatorConfig,
+    ExperimentalSharpenMode,
+    InputColorSpace,
+    KernelTable,
+    LinearRgbImage,
+    ResizeKernel,
+    ResizeStrategy,
 };
 
 // ---------------------------------------------------------------------------
@@ -61,7 +68,8 @@ fn input_color_space_srgb_matches_default() {
     let out_srgb = process_auto_sharp_downscale(&src, &params_srgb).unwrap();
     // Same selected strength
     assert!(
-        (out_default.diagnostics.selected_strength - out_srgb.diagnostics.selected_strength).abs() < 1e-6,
+        (out_default.diagnostics.selected_strength - out_srgb.diagnostics.selected_strength).abs()
+            < 1e-6,
     );
 }
 
@@ -126,13 +134,17 @@ fn resize_uniform_lanczos3_matches_default() {
     let src = gradient_image(16, 16);
     let params_default = default_params(4, 4);
     let params_lanczos = AutoSharpParams {
-        resize_strategy: Some(ResizeStrategy::Uniform { kernel: ResizeKernel::Lanczos3 }),
+        resize_strategy: Some(ResizeStrategy::Uniform {
+            kernel: ResizeKernel::Lanczos3,
+        }),
         ..default_params(4, 4)
     };
     let out_default = process_auto_sharp_downscale(&src, &params_default).unwrap();
     let out_lanczos = process_auto_sharp_downscale(&src, &params_lanczos).unwrap();
     assert!(
-        (out_default.diagnostics.selected_strength - out_lanczos.diagnostics.selected_strength).abs() < 1e-6,
+        (out_default.diagnostics.selected_strength - out_lanczos.diagnostics.selected_strength)
+            .abs()
+            < 1e-6,
     );
 }
 
@@ -216,7 +228,10 @@ fn chroma_guard_produces_valid_output() {
 fn chroma_guard_on_by_default() {
     let src = gradient_image(16, 16);
     let out = process_auto_sharp_downscale(&src, &default_params(4, 4)).unwrap();
-    let cg = out.diagnostics.chroma_guard.expect("chroma guard should be on by default");
+    let cg = out
+        .diagnostics
+        .chroma_guard
+        .expect("chroma guard should be on by default");
     assert!(cg.pixels_clamped_fraction.is_finite());
     assert!(cg.mean_chroma_shift.is_finite());
     assert!(cg.max_chroma_shift.is_finite());
@@ -233,7 +248,8 @@ fn evaluation_color_space_rgb_matches_default() {
     let out_default = process_auto_sharp_downscale(&src, &params_default).unwrap();
     let out_rgb = process_auto_sharp_downscale(&src, &params_rgb).unwrap();
     assert!(
-        (out_default.diagnostics.selected_strength - out_rgb.diagnostics.selected_strength).abs() < 1e-6,
+        (out_default.diagnostics.selected_strength - out_rgb.diagnostics.selected_strength).abs()
+            < 1e-6,
     );
 }
 
@@ -252,7 +268,8 @@ fn evaluation_luma_only_produces_valid_result() {
     // LumaOnly metric should differ from default RGB metric
     // (different color-space evaluation → different artifact ratios → different fitted strength)
     let diff = (out_default.diagnostics.measured_artifact_ratio
-        - out_luma.diagnostics.measured_artifact_ratio).abs();
+        - out_luma.diagnostics.measured_artifact_ratio)
+        .abs();
     // They may coincide for some images, but at minimum both must be finite
     assert!(out_luma.diagnostics.measured_artifact_ratio.is_finite());
     assert!(diff.is_finite());
@@ -273,7 +290,8 @@ fn evaluation_lab_approx_produces_valid_result() {
     // LabApprox metric should differ from default RGB metric
     assert!(out_lab.diagnostics.measured_artifact_ratio.is_finite());
     let diff = (out_default.diagnostics.measured_artifact_ratio
-        - out_lab.diagnostics.measured_artifact_ratio).abs();
+        - out_lab.diagnostics.measured_artifact_ratio)
+        .abs();
     assert!(diff.is_finite());
 }
 
@@ -309,7 +327,10 @@ fn evaluator_on_by_default() {
         ..default_params(4, 4)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let ev = out.diagnostics.evaluator_result.expect("evaluator should run in Full diagnostics mode");
+    let ev = out
+        .diagnostics
+        .evaluator_result
+        .expect("evaluator should run in Full diagnostics mode");
     assert!((0.0..=1.0).contains(&ev.predicted_quality_score));
     assert!((0.0..=1.0).contains(&ev.confidence));
 }
@@ -336,7 +357,10 @@ fn evaluator_suggested_strength_in_range() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let eval = out.diagnostics.evaluator_result.unwrap();
     if let Some(s) = eval.suggested_strength {
-        assert!((0.1..=2.0).contains(&s), "suggested strength {s} out of range");
+        assert!(
+            (0.1..=2.0).contains(&s),
+            "suggested strength {s} out of range"
+        );
     }
 }
 
@@ -349,7 +373,9 @@ fn all_experimental_features_together() {
     let src = gradient_image(16, 16);
     let params = AutoSharpParams {
         input_color_space: Some(InputColorSpace::LinearRgb),
-        resize_strategy: Some(ResizeStrategy::Uniform { kernel: ResizeKernel::CatmullRom }),
+        resize_strategy: Some(ResizeStrategy::Uniform {
+            kernel: ResizeKernel::CatmullRom,
+        }),
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.15,
             chroma_region_factors: None,
@@ -391,7 +417,9 @@ fn experimental_json_round_trip() {
     let src = gradient_image(16, 16);
     let params = AutoSharpParams {
         input_color_space: Some(InputColorSpace::RawLinear),
-        resize_strategy: Some(ResizeStrategy::Uniform { kernel: ResizeKernel::Gaussian }),
+        resize_strategy: Some(ResizeStrategy::Uniform {
+            kernel: ResizeKernel::Gaussian,
+        }),
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.10,
             chroma_region_factors: None,
@@ -417,7 +445,16 @@ fn experimental_json_round_trip() {
     assert!(diag_deser.chroma_guard.is_some());
     assert!(diag_deser.evaluator_result.is_some());
     let eval = diag_deser.evaluator_result.unwrap();
-    assert!((eval.predicted_quality_score - out.diagnostics.evaluator_result.unwrap().predicted_quality_score).abs() < 1e-6);
+    assert!(
+        (eval.predicted_quality_score
+            - out
+                .diagnostics
+                .evaluator_result
+                .unwrap()
+                .predicted_quality_score)
+            .abs()
+            < 1e-6
+    );
 }
 
 #[test]
@@ -432,7 +469,9 @@ fn evaluator_features_vary_across_image_types() {
     // Gradient image should have higher edge density
     assert!(features_gradient.edge_density >= features_solid.edge_density);
     // Gradient image should have higher entropy
-    assert!(features_gradient.luminance_histogram_entropy >= features_solid.luminance_histogram_entropy);
+    assert!(
+        features_gradient.luminance_histogram_entropy >= features_solid.luminance_histogram_entropy
+    );
 }
 
 #[test]

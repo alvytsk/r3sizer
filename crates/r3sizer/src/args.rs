@@ -33,7 +33,7 @@ pub struct Cli {
     #[arg(long, short = 'p')]
     pub preserve_aspect_ratio: bool,
 
-    /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
+    /// Target artifact ratio P0 (fraction of channel values outside \[0,1\]).
     /// Default: 0.003 (= 0.3 %, "photo" preset).
     #[arg(long, default_value_t = 0.003)]
     pub target_artifact_ratio: f32,
@@ -94,7 +94,6 @@ pub struct Cli {
     pub selection_policy: SelectionPolicyArg,
 
     // --- Sweep mode ---
-
     /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
     #[arg(long, value_name = "DIR")]
     pub sweep_dir: Option<PathBuf>,
@@ -108,16 +107,19 @@ pub struct Cli {
     pub sweep_summary: Option<PathBuf>,
 
     // --- Corpus generation ---
-
     /// Generate a synthetic benchmark corpus in the given directory and exit.
     #[arg(long, value_name = "DIR")]
     pub generate_corpus: Option<PathBuf>,
 
     // --- Sweep comparison ---
-
     /// Compare two sweep summary JSON files: baseline,candidate.
     /// Produces a diff report showing per-file and aggregate changes.
-    #[arg(long, value_delimiter = ',', num_args = 2, value_name = "BASE,CANDIDATE")]
+    #[arg(
+        long,
+        value_delimiter = ',',
+        num_args = 2,
+        value_name = "BASE,CANDIDATE"
+    )]
     pub sweep_diff: Option<Vec<PathBuf>>,
 }
 
@@ -164,8 +166,12 @@ pub enum ArtifactMetricArg {
 impl From<ArtifactMetricArg> for r3sizer_core::ArtifactMetric {
     fn from(val: ArtifactMetricArg) -> Self {
         match val {
-            ArtifactMetricArg::ChannelClipping => r3sizer_core::ArtifactMetric::ChannelClippingRatio,
-            ArtifactMetricArg::PixelOutOfGamut => r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio,
+            ArtifactMetricArg::ChannelClipping => {
+                r3sizer_core::ArtifactMetric::ChannelClippingRatio
+            }
+            ArtifactMetricArg::PixelOutOfGamut => {
+                r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio
+            }
         }
     }
 }

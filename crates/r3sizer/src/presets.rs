@@ -10,14 +10,18 @@
 ///   - **v5-full**: Full v5 pipeline — adaptive sharpen + chroma guard + saturation guard + evaluator
 ///   - **v5-two-pass**: Same as v5-full but with two-pass adaptive probing
 use r3sizer_core::{
-    AutoSharpParams, ClassificationParams, ChromaRegionFactors, ExperimentalSharpenMode,
-    EvaluatorConfig, GainTable, ProbeConfig, SaturationGuardParams, SharpenStrategy,
+    AutoSharpParams, ChromaRegionFactors, ClassificationParams, EvaluatorConfig,
+    ExperimentalSharpenMode, GainTable, ProbeConfig, SaturationGuardParams, SharpenStrategy,
 };
 
 /// List of available preset names (for help text / validation).
 pub const PRESET_NAMES: &[&str] = &[
-    "photo", "precision",
-    "baseline", "v3-adaptive", "v5-full", "v5-two-pass",
+    "photo",
+    "precision",
+    "baseline",
+    "v3-adaptive",
+    "v5-full",
+    "v5-two-pass",
 ];
 
 /// Build pipeline params from a named preset.

@@ -347,7 +347,9 @@ pub(crate) fn gaussian_blur_single_channel_into(
 /// [`unsharp_mask_single_channel_with_kernel`].
 pub fn make_kernel(sigma: f32) -> Result<Vec<f32>, CoreError> {
     if sigma <= 0.0 {
-        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+        return Err(CoreError::InvalidParams(
+            "sharpen_sigma must be positive".into(),
+        ));
     }
     Ok(gaussian_kernel(sigma))
 }
@@ -401,7 +403,9 @@ pub fn unsharp_mask_single_channel(
     sigma: f32,
 ) -> Result<Vec<f32>, CoreError> {
     let kernel = make_kernel(sigma)?;
-    Ok(unsharp_mask_single_channel_with_kernel(data, width, height, amount, &kernel))
+    Ok(unsharp_mask_single_channel_with_kernel(
+        data, width, height, amount, &kernel,
+    ))
 }
 
 /// Like [`unsharp_mask_single_channel`] but accepts a pre-built kernel.
@@ -423,7 +427,6 @@ pub fn unsharp_mask_single_channel_with_kernel(
     blurred
 }
 
-
 // ---------------------------------------------------------------------------
 // Adaptive sharpening (v0.3)
 // ---------------------------------------------------------------------------
@@ -443,7 +446,10 @@ pub fn adaptive_sharpen_lightness(
     gain_map: &GainMap,
     sigma: f32,
 ) -> Result<LinearRgbImage, CoreError> {
-    debug_assert_eq!(luminance.len(), (src.width() as usize) * (src.height() as usize));
+    debug_assert_eq!(
+        luminance.len(),
+        (src.width() as usize) * (src.height() as usize)
+    );
     debug_assert_eq!(gain_map.width, src.width());
     debug_assert_eq!(gain_map.height, src.height());
 
@@ -454,12 +460,17 @@ pub fn adaptive_sharpen_lightness(
     let blurred = gaussian_blur_single_channel(luminance, w, h, &kernel);
 
     // Detail layer: D = L - blur(L)
-    let detail: Vec<f32> = luminance.iter().zip(blurred.iter())
+    let detail: Vec<f32> = luminance
+        .iter()
+        .zip(blurred.iter())
         .map(|(&l, &b)| l - b)
         .collect();
 
     let sharpened_l = apply_adaptive_lightness_from_detail(luminance, &detail, strength, gain_map);
-    Ok(crate::color::reconstruct_rgb_from_lightness(src, &sharpened_l))
+    Ok(crate::color::reconstruct_rgb_from_lightness(
+        src,
+        &sharpened_l,
+    ))
 }
 
 /// Apply adaptive sharpening from pre-computed detail buffer.
@@ -474,7 +485,10 @@ pub fn apply_adaptive_lightness_from_detail(
     gain_map: &GainMap,
 ) -> Vec<f32> {
     let gain_data = gain_map.data();
-    luminance.iter().zip(detail.iter()).zip(gain_data.iter())
+    luminance
+        .iter()
+        .zip(detail.iter())
+        .zip(gain_data.iter())
         .map(|((&l, &d), &g)| l + strength * g * d)
         .collect()
 }
@@ -501,7 +515,8 @@ pub fn adaptive_sharpen_rgb(
     let blur_px = blurred.pixels();
     let gain_data = gain_map.data();
 
-    let out: Vec<f32> = src_px.chunks_exact(3)
+    let out: Vec<f32> = src_px
+        .chunks_exact(3)
         .zip(blur_px.chunks_exact(3))
         .zip(gain_data.iter())
         .flat_map(|((s, b), &g)| {
@@ -537,7 +552,10 @@ pub fn compute_detail_single_channel(
     kernel: &[f32],
 ) -> Vec<f32> {
     let blurred = gaussian_blur_single_channel(data, width, height, kernel);
-    data.iter().zip(blurred.iter()).map(|(&d, &b)| d - b).collect()
+    data.iter()
+        .zip(blurred.iter())
+        .map(|(&d, &b)| d - b)
+        .collect()
 }
 
 /// Compute the RGB detail signal: `D = src - blur(src)`.
@@ -568,7 +586,12 @@ pub fn apply_detail_single_channel(input: &[f32], detail: &[f32], amount: f32) -
 ///
 /// `out` must have length >= `input.len()`.  `detail` must also be at least as
 /// long as `input`.
-pub fn apply_detail_single_channel_into(input: &[f32], detail: &[f32], amount: f32, out: &mut [f32]) {
+pub fn apply_detail_single_channel_into(
+    input: &[f32],
+    detail: &[f32],
+    amount: f32,
+    out: &mut [f32],
+) {
     debug_assert!(out.len() >= input.len(), "out buffer too short");
     debug_assert!(detail.len() >= input.len(), "detail buffer too short");
     for ((o, &i), &d) in out.iter_mut().zip(input.iter()).zip(detail.iter()) {
@@ -599,7 +622,12 @@ pub fn apply_detail_rgb(src: &LinearRgbImage, detail: &[f32], amount: f32) -> Li
 /// Like [`apply_detail_rgb`] but writes into a pre-allocated `LinearRgbImage`.
 ///
 /// `out` must have the same dimensions as `src`.
-pub fn apply_detail_rgb_into(src: &LinearRgbImage, detail: &[f32], amount: f32, out: &mut LinearRgbImage) {
+pub fn apply_detail_rgb_into(
+    src: &LinearRgbImage,
+    detail: &[f32],
+    amount: f32,
+    out: &mut LinearRgbImage,
+) {
     let src_px = src.pixels();
     let dst = out.pixels_mut();
     debug_assert_eq!(detail.len(), src_px.len());
@@ -669,7 +697,7 @@ mod tests {
     fn large_amount_produces_out_of_range_values() {
         // A sharp edge in the input should produce ringing (values outside [0,1])
         // when sharpening amount is large enough.
-        let mut data = vec![0.0f32; 32 * 1 * 3];
+        let mut data = vec![0.0_f32; 32 * 3];
         // Create a hard edge: left half = 0, right half = 1
         for x in 16..32_usize {
             data[x * 3] = 1.0;
@@ -678,8 +706,11 @@ mod tests {
         }
         let src = LinearRgbImage::new(32, 1, data).unwrap();
         let out = unsharp_mask(&src, 5.0, 1.0).unwrap();
-        let has_oob = out.pixels().iter().any(|&v| v < 0.0 || v > 1.0);
-        assert!(has_oob, "expected out-of-range values for strong sharpening on an edge");
+        let has_oob = out.pixels().iter().any(|&v| !(0.0..=1.0).contains(&v));
+        assert!(
+            has_oob,
+            "expected out-of-range values for strong sharpening on an edge"
+        );
     }
 
     #[test]
@@ -700,14 +731,14 @@ mod tests {
     #[test]
     fn adaptive_lightness_gain_one_matches_uniform() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 1.0);
         let adaptive = adaptive_sharpen_lightness(&src, &luma, 1.5, &gain_map, 1.0).unwrap();
-        let uniform = unsharp_mask_single_channel(
-            &luma, 16, 16, 1.5, 1.0,
-        ).unwrap();
+        let uniform = unsharp_mask_single_channel(&luma, 16, 16, 1.5, 1.0).unwrap();
         let uniform_img = crate::color::reconstruct_rgb_from_lightness(&src, &uniform);
         for (a, b) in adaptive.pixels().iter().zip(uniform_img.pixels().iter()) {
             assert_abs_diff_eq!(a, b, epsilon = 1e-4);
@@ -717,7 +748,9 @@ mod tests {
     #[test]
     fn adaptive_lightness_gain_zero_is_identity() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 0.0);
@@ -750,7 +783,7 @@ mod tests {
 
     #[test]
     fn adaptive_preserves_out_of_range_values() {
-        let mut data = vec![0.0f32; 32 * 1 * 3];
+        let mut data = vec![0.0_f32; 32 * 3];
         for x in 16..32_usize {
             data[x * 3] = 1.0;
             data[x * 3 + 1] = 1.0;
@@ -759,8 +792,11 @@ mod tests {
         let src = LinearRgbImage::new(32, 1, data).unwrap();
         let gain_map = make_gain_map(32, 1, 1.5);
         let out = adaptive_sharpen_rgb(&src, 5.0, &gain_map, 1.0).unwrap();
-        let has_oob = out.pixels().iter().any(|&v| v < 0.0 || v > 1.0);
-        assert!(has_oob, "expected out-of-range values for strong adaptive sharpening");
+        let has_oob = out.pixels().iter().any(|&v| !(0.0..=1.0).contains(&v));
+        assert!(
+            has_oob,
+            "expected out-of-range values for strong adaptive sharpening"
+        );
     }
 
     #[test]
@@ -781,7 +817,9 @@ mod tests {
         // Applying precomputed detail at strength s must produce the same
         // result as the one-shot unsharp_mask_single_channel_with_kernel.
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -814,7 +852,9 @@ mod tests {
     #[test]
     fn detail_single_channel_into_matches() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -835,7 +875,9 @@ mod tests {
         // Verify that reusing detail for multiple strengths gives consistent
         // results with independent USM calls.
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);

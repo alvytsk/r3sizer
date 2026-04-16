@@ -1,10 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use r3sizer_core::{
-    metrics::channel_clipping_ratio,
-    sharpen::unsharp_mask,
+    metrics::channel_clipping_ratio, process_auto_sharp_downscale, sharpen::unsharp_mask,
     ArtifactMetric, AutoSharpParams, ClampPolicy, FitStrategy, LinearRgbImage, MetricMode,
-    PipelineMode, ProbeConfig, SharpenMode, process_auto_sharp_downscale,
+    PipelineMode, ProbeConfig, SharpenMode,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -74,7 +73,8 @@ fn bench_pipeline_modes(c: &mut Criterion) {
         let params = AutoSharpParams {
             pipeline_mode: Some(mode),
             ..AutoSharpParams::photo(960, 540)
-        }.resolved();
+        }
+        .resolved();
 
         group.bench_function(name, |b| {
             b.iter(|| {
@@ -91,7 +91,8 @@ fn bench_staged_shrink(c: &mut Criterion) {
     let params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Fast),
         ..AutoSharpParams::photo(640, 360)
-    }.resolved();
+    }
+    .resolved();
 
     c.bench_function("pipeline_4k_to_360p_fast", |b| {
         b.iter(|| {

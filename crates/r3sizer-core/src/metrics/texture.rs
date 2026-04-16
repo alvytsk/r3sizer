@@ -41,7 +41,11 @@ pub fn texture_flattening_score(
                 continue;
             }
             let vs = var_sharp[idx];
-            let ratio = if vs < 1e-12 { 1e-12 / vo as f64 } else { vs as f64 / vo as f64 };
+            let ratio = if vs < 1e-12 {
+                1e-12 / vo as f64
+            } else {
+                vs as f64 / vo as f64
+            };
             total_log_ratio += ratio.log2().abs();
             textured_count += 1;
         }
@@ -75,13 +79,9 @@ fn local_variance(data: &[f32], width: usize, height: usize) -> Vec<f32> {
         for x in 0..width {
             let v = data[y * width + x] as f64;
             let idx = (y + 1) * sat_w + (x + 1);
-            sat_sum[idx] = v
-                + sat_sum[y * sat_w + (x + 1)]
-                + sat_sum[(y + 1) * sat_w + x]
+            sat_sum[idx] = v + sat_sum[y * sat_w + (x + 1)] + sat_sum[(y + 1) * sat_w + x]
                 - sat_sum[y * sat_w + x];
-            sat_sq[idx] = v * v
-                + sat_sq[y * sat_w + (x + 1)]
-                + sat_sq[(y + 1) * sat_w + x]
+            sat_sq[idx] = v * v + sat_sq[y * sat_w + (x + 1)] + sat_sq[(y + 1) * sat_w + x]
                 - sat_sq[y * sat_w + x];
         }
     }
@@ -96,13 +96,9 @@ fn local_variance(data: &[f32], width: usize, height: usize) -> Vec<f32> {
             let y1 = cy + HALF_WIN + 1; // bottom row + 1
             let x1 = cx + HALF_WIN + 1;
 
-            let s = sat_sum[y1 * sat_w + x1]
-                - sat_sum[y0 * sat_w + x1]
-                - sat_sum[y1 * sat_w + x0]
+            let s = sat_sum[y1 * sat_w + x1] - sat_sum[y0 * sat_w + x1] - sat_sum[y1 * sat_w + x0]
                 + sat_sum[y0 * sat_w + x0];
-            let sq = sat_sq[y1 * sat_w + x1]
-                - sat_sq[y0 * sat_w + x1]
-                - sat_sq[y1 * sat_w + x0]
+            let sq = sat_sq[y1 * sat_w + x1] - sat_sq[y0 * sat_w + x1] - sat_sq[y1 * sat_w + x0]
                 + sat_sq[y0 * sat_w + x0];
 
             let mean = s * inv_n;
@@ -155,7 +151,10 @@ mod tests {
             }
         }
         let score = texture_flattening_score(&orig, &sharp, 8, 8, DEFAULT_TEXTURE_THRESHOLD);
-        assert!(score > 0.5, "score should be roughly 1.0 for doubled variance: {score}");
+        assert!(
+            score > 0.5,
+            "score should be roughly 1.0 for doubled variance: {score}"
+        );
     }
 
     #[test]
@@ -168,14 +167,17 @@ mod tests {
         }
         let sharp = vec![0.5_f32; 8 * 8];
         let score = texture_flattening_score(&orig, &sharp, 8, 8, DEFAULT_TEXTURE_THRESHOLD);
-        assert!(score > 0.0, "flattening should produce positive score: {score}");
+        assert!(
+            score > 0.0,
+            "flattening should produce positive score: {score}"
+        );
     }
 
     #[test]
     fn score_is_finite() {
         let mut orig = vec![0.5_f32; 10 * 10];
-        for i in 0..100 {
-            orig[i] = (i as f32 / 100.0) * 0.8 + 0.1;
+        for (i, v) in orig.iter_mut().enumerate() {
+            *v = (i as f32 / 100.0) * 0.8 + 0.1;
         }
         let sharp = orig.iter().map(|&v| v * 1.5).collect::<Vec<_>>();
         let score = texture_flattening_score(&orig, &sharp, 10, 10, DEFAULT_TEXTURE_THRESHOLD);

@@ -1,9 +1,9 @@
 mod convert;
 
+use r3sizer_core::{process_auto_sharp_downscale_with_progress, AutoSharpParams, LinearRgbImage};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use r3sizer_core::{AutoSharpParams, LinearRgbImage, process_auto_sharp_downscale_with_progress};
 
 /// Deserialize params JSON and apply `pipeline_mode` overrides if set.
 fn parse_params(json: &str) -> Result<AutoSharpParams, JsValue> {
@@ -27,11 +27,7 @@ thread_local! {
 /// next `process_image` call that matches in dimensions, avoiding a redundant
 /// colour-space conversion.
 #[wasm_bindgen]
-pub fn prepare_image(
-    srgb_rgba_data: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<(), JsValue> {
+pub fn prepare_image(srgb_rgba_data: &[u8], width: u32, height: u32) -> Result<(), JsValue> {
     let input = convert::rgba_u8_to_linear(srgb_rgba_data, width, height)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     CACHED_INPUT.with(|c| *c.borrow_mut() = Some(input));
@@ -57,7 +53,9 @@ pub fn prepare_base(
 
     // Fast path: cached base already matches these params — skip re-preparation.
     let already_cached = CACHED_BASE.with(|c| {
-        c.borrow().as_ref().is_some_and(|b| b.matches_params(&params))
+        c.borrow()
+            .as_ref()
+            .is_some_and(|b| b.matches_params(&params))
     });
     if already_cached {
         post_progress("base_ready");
@@ -192,14 +190,10 @@ pub fn process_image(
     let cached_base = take_matching_base(&params);
 
     let output = match cached_base.as_ref() {
-        Some(prepared) => {
-            r3sizer_core::process_from_prepared(prepared, &params, &post_progress)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
-        }
-        None => {
-            process_auto_sharp_downscale_with_progress(&input, &params, &post_progress)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?
-        }
+        Some(prepared) => r3sizer_core::process_from_prepared(prepared, &params, &post_progress)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?,
+        None => process_auto_sharp_downscale_with_progress(&input, &params, &post_progress)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?,
     };
 
     // Re-cache for subsequent calls.
@@ -237,10 +231,26 @@ pub fn get_base_data() -> JsValue {
 
         let _ = js_sys::Reflect::set(&result, &"basePixels".into(), &base_px);
         let _ = js_sys::Reflect::set(&result, &"luminance".into(), &luma);
-        let _ = js_sys::Reflect::set(&result, &"width".into(), &JsValue::from(prepared.base_width()));
-        let _ = js_sys::Reflect::set(&result, &"height".into(), &JsValue::from(prepared.base_height()));
-        let _ = js_sys::Reflect::set(&result, &"baseline".into(), &JsValue::from(prepared.baseline_artifact_ratio()));
-        let _ = js_sys::Reflect::set(&result, &"effectiveP0".into(), &JsValue::from(prepared.effective_p0()));
+        let _ = js_sys::Reflect::set(
+            &result,
+            &"width".into(),
+            &JsValue::from(prepared.base_width()),
+        );
+        let _ = js_sys::Reflect::set(
+            &result,
+            &"height".into(),
+            &JsValue::from(prepared.base_height()),
+        );
+        let _ = js_sys::Reflect::set(
+            &result,
+            &"baseline".into(),
+            &JsValue::from(prepared.baseline_artifact_ratio()),
+        );
+        let _ = js_sys::Reflect::set(
+            &result,
+            &"effectiveP0".into(),
+            &JsValue::from(prepared.effective_p0()),
+        );
 
         result.into()
     })
@@ -265,8 +275,15 @@ pub fn probe_batch(
         .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
 
     let samples = r3sizer_core::run_probes_standalone(
-        base_pixels, width, height, luminance, &strengths, &params, baseline,
-    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        base_pixels,
+        width,
+        height,
+        luminance,
+        &strengths,
+        &params,
+        baseline,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     serde_json::to_string(&samples)
         .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
@@ -285,14 +302,20 @@ pub fn compute_probe_detail(params_json: &str) -> Result<js_sys::Float32Array, J
 
     CACHED_BASE.with(|c| {
         let cache = c.borrow();
-        let prepared = cache.as_ref()
+        let prepared = cache
+            .as_ref()
             .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
-        let luma = prepared.luminance()
+        let luma = prepared
+            .luminance()
             .ok_or_else(|| JsValue::from_str("luminance unavailable"))?;
         let detail = r3sizer_core::compute_probe_detail(
-            prepared.base_pixels(), prepared.base_width(), prepared.base_height(),
-            luma, &params,
-        ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+            prepared.base_pixels(),
+            prepared.base_width(),
+            prepared.base_height(),
+            luma,
+            &params,
+        )
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(js_sys::Float32Array::from(detail.as_slice()))
     })
 }
@@ -317,9 +340,16 @@ pub fn probe_batch_with_detail(
         .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
 
     let samples = r3sizer_core::run_probes_from_detail(
-        base_pixels, width, height, luminance, detail,
-        &strengths, &params, baseline,
-    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        base_pixels,
+        width,
+        height,
+        luminance,
+        detail,
+        &strengths,
+        &params,
+        baseline,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     serde_json::to_string(&samples)
         .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
@@ -344,18 +374,28 @@ pub fn process_from_probes(
         if pass_diagnostics_json.is_empty() || pass_diagnostics_json == "null" {
             None
         } else {
-            Some(serde_json::from_str(pass_diagnostics_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid pass diagnostics JSON: {e}")))?)
+            Some(
+                serde_json::from_str(pass_diagnostics_json).map_err(|e| {
+                    JsValue::from_str(&format!("invalid pass diagnostics JSON: {e}"))
+                })?,
+            )
         };
 
     // Must have a cached PreparedBase.
     let cached_base = take_matching_base(&params);
-    let prepared = cached_base.as_ref()
+    let prepared = cached_base
+        .as_ref()
         .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
 
     let output = r3sizer_core::process_from_prepared_with_probes(
-        prepared, &params, probe_samples, probing_us as u64, pass_diagnostics, &post_progress,
-    ).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        prepared,
+        &params,
+        probe_samples,
+        probing_us as u64,
+        pass_diagnostics,
+        &post_progress,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Re-cache base only (input is not needed for this path).
     if let Some(base) = cached_base {

@@ -3,7 +3,7 @@
 ## Installation
 
 ```sh
-cargo build --release -p r3sizer-cli
+cargo build --release -p r3sizer
 ```
 
 The binary is written to `./target/release/r3sizer`.

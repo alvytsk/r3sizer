@@ -70,7 +70,11 @@ pub fn sharpen_with_chroma_guard(
     let luminance = extract_luminance(src);
     let kernel = make_kernel(sigma)?;
     let sharpened_luma = unsharp_mask_single_channel_with_kernel(
-        &luminance, w, src.height() as usize, amount, &kernel,
+        &luminance,
+        w,
+        src.height() as usize,
+        amount,
+        &kernel,
     );
 
     // Reconstruct RGB from sharpened luminance
@@ -135,11 +139,16 @@ pub fn sharpen_with_chroma_guard(
 
         // Floor at 0.01 so near-achromatic pixels still have a small absolute
         // threshold rather than collapsing to zero.
-        let effective_threshold = max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
+        let effective_threshold =
+            max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
 
         // Accumulate effective threshold stats
-        if effective_threshold < eff_min { eff_min = effective_threshold; }
-        if effective_threshold > eff_max { eff_max = effective_threshold; }
+        if effective_threshold < eff_min {
+            eff_min = effective_threshold;
+        }
+        if effective_threshold > eff_max {
+            eff_max = effective_threshold;
+        }
         eff_sum += effective_threshold as f64;
 
         // Defer sqrt to where it's needed — the comparison uses squared values.
@@ -149,7 +158,9 @@ pub fn sharpen_with_chroma_guard(
         // Compute actual shift only when needed for diagnostics or blending.
         let shift = shift_sq.sqrt();
         total_shift += shift as f64;
-        if shift > max_shift_global { max_shift_global = shift; }
+        if shift > max_shift_global {
+            max_shift_global = shift;
+        }
 
         // Accumulate per-region stats
         if has_region {
@@ -158,7 +169,9 @@ pub fn sharpen_with_chroma_guard(
             let cls = rmap.get(px, py) as usize;
             region_counts[cls] += 1;
             region_shift_sum[cls] += shift as f64;
-            if shift > region_shift_max[cls] { region_shift_max[cls] = shift; }
+            if shift > region_shift_max[cls] {
+                region_shift_max[cls] = shift;
+            }
             if needs_clamp {
                 region_clamped[cls] += 1;
             }
@@ -190,8 +203,16 @@ pub fn sharpen_with_chroma_guard(
             ChromaRegionClampStats {
                 pixel_count: cnt,
                 clamped_count: region_clamped[cls],
-                clamped_fraction: if cnt > 0 { region_clamped[cls] as f32 / cnt as f32 } else { 0.0 },
-                mean_shift: if cnt > 0 { (region_shift_sum[cls] / cnt as f64) as f32 } else { 0.0 },
+                clamped_fraction: if cnt > 0 {
+                    region_clamped[cls] as f32 / cnt as f32
+                } else {
+                    0.0
+                },
+                mean_shift: if cnt > 0 {
+                    (region_shift_sum[cls] / cnt as f64) as f32
+                } else {
+                    0.0
+                },
                 max_shift: region_shift_max[cls],
             }
         };
@@ -209,11 +230,27 @@ pub fn sharpen_with_chroma_guard(
     let has_modulation = region_factors.is_some() || saturation_guard.is_some();
     let diag = ChromaGuardDiagnostics {
         pixels_clamped_fraction: clamped_count as f32 / n_pixels.max(1) as f32,
-        mean_chroma_shift: if n_pixels > 0 { (total_shift / n_pixels as f64) as f32 } else { 0.0 },
+        mean_chroma_shift: if n_pixels > 0 {
+            (total_shift / n_pixels as f64) as f32
+        } else {
+            0.0
+        },
         max_chroma_shift: max_shift_global,
-        effective_threshold_min: if has_modulation && n_pixels > 0 { Some(eff_min) } else { None },
-        effective_threshold_mean: if has_modulation && n_pixels > 0 { Some((eff_sum / n_pixels as f64) as f32) } else { None },
-        effective_threshold_max: if has_modulation && n_pixels > 0 { Some(eff_max) } else { None },
+        effective_threshold_min: if has_modulation && n_pixels > 0 {
+            Some(eff_min)
+        } else {
+            None
+        },
+        effective_threshold_mean: if has_modulation && n_pixels > 0 {
+            Some((eff_sum / n_pixels as f64) as f32)
+        } else {
+            None
+        },
+        effective_threshold_max: if has_modulation && n_pixels > 0 {
+            Some(eff_max)
+        } else {
+            None
+        },
         per_region,
     };
 
@@ -285,10 +322,15 @@ pub fn apply_chroma_guard(
             None => 1.0,
         };
 
-        let effective_threshold = max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
+        let effective_threshold =
+            max_chroma_shift * orig_mag.max(0.01) * region_factor * sat_factor;
 
-        if effective_threshold < eff_min { eff_min = effective_threshold; }
-        if effective_threshold > eff_max { eff_max = effective_threshold; }
+        if effective_threshold < eff_min {
+            eff_min = effective_threshold;
+        }
+        if effective_threshold > eff_max {
+            eff_max = effective_threshold;
+        }
         eff_sum += effective_threshold as f64;
 
         // Compare in squared space to defer sqrt
@@ -297,7 +339,9 @@ pub fn apply_chroma_guard(
         let shift = shift_sq.sqrt();
 
         total_shift += shift as f64;
-        if shift > max_shift_global { max_shift_global = shift; }
+        if shift > max_shift_global {
+            max_shift_global = shift;
+        }
 
         if has_region {
             let rmap = region_map.unwrap();
@@ -305,7 +349,9 @@ pub fn apply_chroma_guard(
             let cls = rmap.get(px, py) as usize;
             region_counts[cls] += 1;
             region_shift_sum[cls] += shift as f64;
-            if shift > region_shift_max[cls] { region_shift_max[cls] = shift; }
+            if shift > region_shift_max[cls] {
+                region_shift_max[cls] = shift;
+            }
             if needs_clamp {
                 region_clamped[cls] += 1;
             }
@@ -335,8 +381,16 @@ pub fn apply_chroma_guard(
             ChromaRegionClampStats {
                 pixel_count: cnt,
                 clamped_count: region_clamped[cls],
-                clamped_fraction: if cnt > 0 { region_clamped[cls] as f32 / cnt as f32 } else { 0.0 },
-                mean_shift: if cnt > 0 { (region_shift_sum[cls] / cnt as f64) as f32 } else { 0.0 },
+                clamped_fraction: if cnt > 0 {
+                    region_clamped[cls] as f32 / cnt as f32
+                } else {
+                    0.0
+                },
+                mean_shift: if cnt > 0 {
+                    (region_shift_sum[cls] / cnt as f64) as f32
+                } else {
+                    0.0
+                },
                 max_shift: region_shift_max[cls],
             }
         };
@@ -354,11 +408,27 @@ pub fn apply_chroma_guard(
     let has_modulation = region_factors.is_some() || saturation_guard.is_some();
     let diag = ChromaGuardDiagnostics {
         pixels_clamped_fraction: clamped_count as f32 / n_pixels.max(1) as f32,
-        mean_chroma_shift: if n_pixels > 0 { (total_shift / n_pixels as f64) as f32 } else { 0.0 },
+        mean_chroma_shift: if n_pixels > 0 {
+            (total_shift / n_pixels as f64) as f32
+        } else {
+            0.0
+        },
         max_chroma_shift: max_shift_global,
-        effective_threshold_min: if has_modulation && n_pixels > 0 { Some(eff_min) } else { None },
-        effective_threshold_mean: if has_modulation && n_pixels > 0 { Some((eff_sum / n_pixels as f64) as f32) } else { None },
-        effective_threshold_max: if has_modulation && n_pixels > 0 { Some(eff_max) } else { None },
+        effective_threshold_min: if has_modulation && n_pixels > 0 {
+            Some(eff_min)
+        } else {
+            None
+        },
+        effective_threshold_mean: if has_modulation && n_pixels > 0 {
+            Some((eff_sum / n_pixels as f64) as f32)
+        } else {
+            None
+        },
+        effective_threshold_max: if has_modulation && n_pixels > 0 {
+            Some(eff_max)
+        } else {
+            None
+        },
         per_region,
     };
 
@@ -410,17 +480,12 @@ pub fn linear_rgb_to_lab_approx(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 /// Evaluate artifact ratio in the specified color space.
 ///
 /// Returns the fraction of "out-of-range" values according to the color space:
-/// - `Rgb`: standard channel clipping ratio (fraction of channels outside [0,1]).
-/// - `LumaOnly`: fraction of luminance values outside [0,1].
-/// - `LabApprox`: fraction of pixels with L* outside [0,100] or a*/b* beyond ±128.
-pub fn evaluate_in_color_space(
-    img: &LinearRgbImage,
-    color_space: EvaluationColorSpace,
-) -> f32 {
+/// - `Rgb`: standard channel clipping ratio (fraction of channels outside \[0,1\]).
+/// - `LumaOnly`: fraction of luminance values outside \[0,1\].
+/// - `LabApprox`: fraction of pixels with L* outside \[0,100\] or a*/b* beyond ±128.
+pub fn evaluate_in_color_space(img: &LinearRgbImage, color_space: EvaluationColorSpace) -> f32 {
     match color_space {
-        EvaluationColorSpace::Rgb => {
-            crate::metrics::channel_clipping_ratio(img)
-        }
+        EvaluationColorSpace::Rgb => crate::metrics::channel_clipping_ratio(img),
         EvaluationColorSpace::LumaOnly => {
             let luma = extract_luminance(img);
             let out = luma.iter().filter(|&&v| !(0.0..=1.0).contains(&v)).count();
@@ -429,11 +494,16 @@ pub fn evaluate_in_color_space(
         EvaluationColorSpace::LabApprox => {
             let data = img.pixels();
             let n_pixels = data.len() / 3;
-            if n_pixels == 0 { return 0.0; }
+            if n_pixels == 0 {
+                return 0.0;
+            }
             let mut out = 0u32;
             for pixel in data.chunks_exact(3) {
                 let (l, a, b) = linear_rgb_to_lab_approx(pixel[0], pixel[1], pixel[2]);
-                if !(0.0..=100.0).contains(&l) || !(-128.0..=128.0).contains(&a) || !(-128.0..=128.0).contains(&b) {
+                if !(0.0..=100.0).contains(&l)
+                    || !(-128.0..=128.0).contains(&a)
+                    || !(-128.0..=128.0).contains(&b)
+                {
                     out += 1;
                 }
             }

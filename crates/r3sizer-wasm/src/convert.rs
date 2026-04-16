@@ -1,5 +1,5 @@
-use r3sizer_core::{CoreError, LinearRgbImage};
 use r3sizer_core::color::linear_to_srgb_fast;
+use r3sizer_core::{CoreError, LinearRgbImage};
 
 // ---------------------------------------------------------------------------
 // Exact u8→linear LUT (256 entries, no interpolation needed)
@@ -32,7 +32,11 @@ static SRGB_U8_TO_LINEAR: [f32; 256] = {
 ///
 /// The alpha channel is stripped; each sRGB component is linearized via a
 /// 256-entry exact LUT (no interpolation, no `powf` calls).
-pub fn rgba_u8_to_linear(data: &[u8], width: u32, height: u32) -> Result<LinearRgbImage, CoreError> {
+pub fn rgba_u8_to_linear(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<LinearRgbImage, CoreError> {
     let pixel_count = (width as usize) * (height as usize);
     let expected_len = pixel_count * 4;
     if data.len() != expected_len {

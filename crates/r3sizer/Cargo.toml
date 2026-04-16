@@ -1,5 +1,5 @@
 [package]
-name    = "r3sizer-cli"
+name    = "r3sizer"
 version = "0.8.0"
 edition = "2021"
 license.workspace = true

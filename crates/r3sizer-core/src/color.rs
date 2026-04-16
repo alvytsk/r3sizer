@@ -286,7 +286,11 @@ pub fn reconstruct_rgb_from_lightness_with_luma(
     let n = (original.width() as usize) * (original.height() as usize);
     let mut out = vec![0.0f32; n * 3];
     reconstruct_rgb_inner(
-        original.pixels(), sharpened_luminance, original_luminance, n, &mut out,
+        original.pixels(),
+        sharpened_luminance,
+        original_luminance,
+        n,
+        &mut out,
     );
     LinearRgbImage::new(original.width(), original.height(), out).unwrap()
 }
@@ -307,7 +311,11 @@ pub fn reconstruct_rgb_from_lightness_into(
     debug_assert_eq!(out.width(), original.width());
     debug_assert_eq!(out.height(), original.height());
     reconstruct_rgb_inner(
-        original.pixels(), sharpened_luminance, Some(original_luminance), n, out.pixels_mut(),
+        original.pixels(),
+        sharpened_luminance,
+        Some(original_luminance),
+        n,
+        out.pixels_mut(),
     );
 }
 
@@ -344,7 +352,11 @@ fn reconstruct_rgb_inner(
         let l_sharp = sharpened_luminance[i];
         // Branchless: for near-black pixels k=1.0 preserves the original
         // (near-zero) values; for normal pixels k = L'/L scales RGB.
-        let k = if l_orig.abs() >= EPSILON { l_sharp / l_orig } else { 1.0 };
+        let k = if l_orig.abs() >= EPSILON {
+            l_sharp / l_orig
+        } else {
+            1.0
+        };
         out[idx] = k * r;
         out[idx + 1] = k * g;
         out[idx + 2] = k * b;
@@ -422,11 +434,23 @@ mod tests {
     #[test]
     fn luminance_known_values() {
         // Pure red
-        assert_abs_diff_eq!(luminance_from_linear_srgb(1.0, 0.0, 0.0), 0.2126, epsilon = 1e-4);
+        assert_abs_diff_eq!(
+            luminance_from_linear_srgb(1.0, 0.0, 0.0),
+            0.2126,
+            epsilon = 1e-4
+        );
         // Pure green
-        assert_abs_diff_eq!(luminance_from_linear_srgb(0.0, 1.0, 0.0), 0.7152, epsilon = 1e-4);
+        assert_abs_diff_eq!(
+            luminance_from_linear_srgb(0.0, 1.0, 0.0),
+            0.7152,
+            epsilon = 1e-4
+        );
         // Pure blue
-        assert_abs_diff_eq!(luminance_from_linear_srgb(0.0, 0.0, 1.0), 0.0722, epsilon = 1e-4);
+        assert_abs_diff_eq!(
+            luminance_from_linear_srgb(0.0, 0.0, 1.0),
+            0.0722,
+            epsilon = 1e-4
+        );
     }
 
     #[test]
@@ -449,7 +473,10 @@ mod tests {
         let sharpened_l = vec![0.1f32; 4]; // L' > 0, but original L = 0
         let out = reconstruct_rgb_from_lightness(&img, &sharpened_l);
         for &v in out.pixels() {
-            assert!(v.is_finite(), "non-finite pixel in reconstructed black image");
+            assert!(
+                v.is_finite(),
+                "non-finite pixel in reconstructed black image"
+            );
             assert_abs_diff_eq!(v, 0.0, epsilon = 1e-6);
         }
     }
@@ -460,7 +487,10 @@ mod tests {
         let below = srgb_to_linear(0.04044);
         let above = srgb_to_linear(0.04046);
         // Smooth — difference should be tiny (linear region slope ≈ 0.0772).
-        assert!((above - below).abs() < 1e-4, "discontinuity at boundary: {below} vs {above}");
+        assert!(
+            (above - below).abs() < 1e-4,
+            "discontinuity at boundary: {below} vs {above}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -499,7 +529,10 @@ mod tests {
             assert!(
                 curr >= prev,
                 "monotonicity violated: fast({}) = {} < fast({}) = {}",
-                v, curr, (i - 1) as f32 / 100_000.0, prev
+                v,
+                curr,
+                (i - 1) as f32 / 100_000.0,
+                prev
             );
             prev = curr;
         }
@@ -519,9 +552,7 @@ mod tests {
         for &v in &[0.0_f32, 0.001, 0.01, 0.02, 0.04, 0.04045] {
             let exact = srgb_to_linear(v);
             let fast = srgb_to_linear_fast(v);
-            assert_abs_diff_eq!(
-                exact, fast, epsilon = 1e-6,
-            );
+            assert_abs_diff_eq!(exact, fast, epsilon = 1e-6,);
         }
     }
 
@@ -532,9 +563,7 @@ mod tests {
             let srgb = i as f32 / 255.0;
             let linear = srgb_to_linear_fast(srgb);
             let back = linear_to_srgb(linear);
-            assert_abs_diff_eq!(
-                srgb, back, epsilon = 1e-4,
-            );
+            assert_abs_diff_eq!(srgb, back, epsilon = 1e-4,);
         }
     }
 
@@ -590,7 +619,10 @@ mod tests {
             assert!(
                 curr >= prev,
                 "reverse monotonicity violated: fast({}) = {} < fast({}) = {}",
-                v, curr, (i - 1) as f32 / 100_000.0, prev
+                v,
+                curr,
+                (i - 1) as f32 / 100_000.0,
+                prev
             );
             prev = curr;
         }
@@ -609,9 +641,7 @@ mod tests {
             let linear = i as f32 / 255.0;
             let srgb = linear_to_srgb_fast(linear);
             let back = srgb_to_linear_fast(srgb);
-            assert_abs_diff_eq!(
-                linear, back, epsilon = 1e-4,
-            );
+            assert_abs_diff_eq!(linear, back, epsilon = 1e-4,);
         }
     }
 
@@ -622,9 +652,7 @@ mod tests {
             let srgb = i as f32 / 255.0;
             let linear = srgb_to_linear_fast(srgb);
             let back = linear_to_srgb_fast(linear);
-            assert_abs_diff_eq!(
-                srgb, back, epsilon = 1e-4,
-            );
+            assert_abs_diff_eq!(srgb, back, epsilon = 1e-4,);
         }
     }
 }

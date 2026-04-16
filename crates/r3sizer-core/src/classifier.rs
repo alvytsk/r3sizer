@@ -33,13 +33,18 @@ pub(crate) fn classify_features(
     variance: f32,
     params: &ClassificationParams,
 ) -> RegionClass {
-    if gradient_mag >= params.gradient_high_threshold && variance >= params.variance_high_threshold {
+    if gradient_mag >= params.gradient_high_threshold && variance >= params.variance_high_threshold
+    {
         RegionClass::RiskyHaloZone
     } else if gradient_mag >= params.gradient_high_threshold {
         RegionClass::StrongEdge
-    } else if variance >= params.variance_high_threshold && gradient_mag < params.gradient_low_threshold {
+    } else if variance >= params.variance_high_threshold
+        && gradient_mag < params.gradient_low_threshold
+    {
         RegionClass::Microtexture
-    } else if variance >= params.variance_low_threshold || gradient_mag >= params.gradient_low_threshold {
+    } else if variance >= params.variance_low_threshold
+        || gradient_mag >= params.gradient_low_threshold
+    {
         RegionClass::Textured
     } else {
         RegionClass::Flat
@@ -73,11 +78,14 @@ pub(crate) fn sobel_gradient_full(
 
     #[inline(always)]
     fn sobel_clamped(px: impl Fn(isize, isize) -> f32, xi: isize, yi: isize) -> (f32, f32, f32) {
-        let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
-            - 2.0 * px(xi - 1, yi) + 2.0 * px(xi + 1, yi)
-            - px(xi - 1, yi + 1) + px(xi + 1, yi + 1);
+        let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1) - 2.0 * px(xi - 1, yi)
+            + 2.0 * px(xi + 1, yi)
+            - px(xi - 1, yi + 1)
+            + px(xi + 1, yi + 1);
         let gy = -px(xi - 1, yi - 1) - 2.0 * px(xi, yi - 1) - px(xi + 1, yi - 1)
-            + px(xi - 1, yi + 1) + 2.0 * px(xi, yi + 1) + px(xi + 1, yi + 1);
+            + px(xi - 1, yi + 1)
+            + 2.0 * px(xi, yi + 1)
+            + px(xi + 1, yi + 1);
         ((gx * gx + gy * gy).sqrt(), gx, gy)
     }
 
@@ -177,7 +185,7 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
     // Interior rows use bulk copy (`copy_from_slice`) for the core pixels,
     // then replicate the edge values into the left/right padding columns.
     // Top/bottom padding rows replicate the first/last source row.
-    let pw = width + 2 * half;  // padded width
+    let pw = width + 2 * half; // padded width
     let ph = height + 2 * half; // padded height
     let mut padded = vec![0.0_f32; pw * ph];
 
@@ -185,12 +193,16 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
     let fill_row = |padded_row: &mut [f32], src_row: &[f32]| {
         // Left padding: replicate leftmost pixel
         let left_val = src_row[0];
-        for p in &mut padded_row[..half] { *p = left_val; }
+        for p in &mut padded_row[..half] {
+            *p = left_val;
+        }
         // Interior: bulk copy
         padded_row[half..half + width].copy_from_slice(src_row);
         // Right padding: replicate rightmost pixel
         let right_val = src_row[width - 1];
-        for p in &mut padded_row[half + width..] { *p = right_val; }
+        for p in &mut padded_row[half + width..] {
+            *p = right_val;
+        }
     };
 
     // Top padding rows: replicate first source row
@@ -224,13 +236,9 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
         for x in 0..pw {
             let v = padded[y * pw + x] as f64;
             let idx = (y + 1) * sat_w + (x + 1);
-            sat_sum[idx] = v
-                + sat_sum[y * sat_w + (x + 1)]
-                + sat_sum[(y + 1) * sat_w + x]
+            sat_sum[idx] = v + sat_sum[y * sat_w + (x + 1)] + sat_sum[(y + 1) * sat_w + x]
                 - sat_sum[y * sat_w + x];
-            sat_sq[idx] = v * v
-                + sat_sq[y * sat_w + (x + 1)]
-                + sat_sq[(y + 1) * sat_w + x]
+            sat_sq[idx] = v * v + sat_sq[y * sat_w + (x + 1)] + sat_sq[(y + 1) * sat_w + x]
                 - sat_sq[y * sat_w + x];
         }
     }
@@ -248,13 +256,9 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
             let y1 = y + window_size;
             let x1 = x + window_size;
 
-            let s = sat_sum[y1 * sat_w + x1]
-                - sat_sum[y0 * sat_w + x1]
-                - sat_sum[y1 * sat_w + x0]
+            let s = sat_sum[y1 * sat_w + x1] - sat_sum[y0 * sat_w + x1] - sat_sum[y1 * sat_w + x0]
                 + sat_sum[y0 * sat_w + x0];
-            let sq = sat_sq[y1 * sat_w + x1]
-                - sat_sq[y0 * sat_w + x1]
-                - sat_sq[y1 * sat_w + x0]
+            let sq = sat_sq[y1 * sat_w + x1] - sat_sq[y0 * sat_w + x1] - sat_sq[y1 * sat_w + x0]
                 + sat_sq[y0 * sat_w + x0];
 
             let mean = s * inv_count;
@@ -275,11 +279,8 @@ fn local_variance(luma: &[f32], width: usize, height: usize, window_size: usize)
 /// 0. Luminance extraction
 /// 1. Sobel gradient magnitude (unnormalized, edge-replicate border)
 /// 2. Local variance (square window, edge-replicate border)
-/// 3. Per-pixel classification via [`classify_features`]
-pub fn classify(
-    image: &LinearRgbImage,
-    params: &ClassificationParams,
-) -> RegionMap {
+/// 3. Per-pixel classification via `classify_features`
+pub fn classify(image: &LinearRgbImage, params: &ClassificationParams) -> RegionMap {
     let w = image.width() as usize;
     let h = image.height() as usize;
 
@@ -328,10 +329,7 @@ fn classify_from_luminance(
 }
 
 /// Produce a per-pixel gain map from a region map and gain table.
-pub fn gain_map_from_region_map(
-    region_map: &RegionMap,
-    gain_table: &GainTable,
-) -> GainMap {
+pub fn gain_map_from_region_map(region_map: &RegionMap, gain_table: &GainTable) -> GainMap {
     let data: Vec<f32> = region_map
         .data()
         .iter()
@@ -360,39 +358,27 @@ mod tests {
     #[test]
     fn flat_low_gradient_low_variance() {
         let p = default_params();
-        assert_eq!(
-            classify_features(0.01, 0.0005, &p),
-            RegionClass::Flat,
-        );
+        assert_eq!(classify_features(0.01, 0.0005, &p), RegionClass::Flat,);
     }
 
     #[test]
     fn textured_moderate_gradient() {
         let p = default_params();
         // gradient >= gradient_low (0.05), variance below variance_low
-        assert_eq!(
-            classify_features(0.10, 0.0005, &p),
-            RegionClass::Textured,
-        );
+        assert_eq!(classify_features(0.10, 0.0005, &p), RegionClass::Textured,);
     }
 
     #[test]
     fn textured_moderate_variance() {
         let p = default_params();
         // gradient < gradient_low, variance >= variance_low (0.001)
-        assert_eq!(
-            classify_features(0.01, 0.005, &p),
-            RegionClass::Textured,
-        );
+        assert_eq!(classify_features(0.01, 0.005, &p), RegionClass::Textured,);
     }
 
     #[test]
     fn strong_edge_high_gradient_low_variance() {
         let p = default_params();
-        assert_eq!(
-            classify_features(0.50, 0.005, &p),
-            RegionClass::StrongEdge,
-        );
+        assert_eq!(classify_features(0.50, 0.005, &p), RegionClass::StrongEdge,);
     }
 
     #[test]
@@ -418,10 +404,7 @@ mod tests {
     fn risky_halo_takes_priority_over_strong_edge() {
         let p = default_params();
         // Both gradient and variance are high -> RiskyHaloZone, not StrongEdge
-        assert_eq!(
-            classify_features(1.0, 0.1, &p),
-            RegionClass::RiskyHaloZone,
-        );
+        assert_eq!(classify_features(1.0, 0.1, &p), RegionClass::RiskyHaloZone,);
     }
 
     #[test]
@@ -429,10 +412,7 @@ mod tests {
         let p = default_params();
         // variance >= variance_high but gradient >= gradient_low (not < gradient_low)
         // so Microtexture rule does not match; falls through to Textured
-        assert_eq!(
-            classify_features(0.10, 0.015, &p),
-            RegionClass::Textured,
-        );
+        assert_eq!(classify_features(0.10, 0.015, &p), RegionClass::Textured,);
     }
 
     // -----------------------------------------------------------------------
@@ -441,9 +421,7 @@ mod tests {
 
     #[test]
     fn gain_map_matches_table_lookup() {
-        let map = RegionMap::new(2, 1, vec![
-            RegionClass::Flat, RegionClass::StrongEdge,
-        ]).unwrap();
+        let map = RegionMap::new(2, 1, vec![RegionClass::Flat, RegionClass::StrongEdge]).unwrap();
         let gt = GainTable::v03_default();
         let gm = gain_map_from_region_map(&map, &gt);
         assert_eq!(gm.width, 2);
@@ -461,7 +439,10 @@ mod tests {
         let luma = vec![0.5_f32; 8 * 8];
         let grad = sobel_gradient_magnitude(&luma, 8, 8);
         for &g in &grad {
-            assert!(g.abs() < 1e-6, "expected ~0 gradient on uniform image, got {g}");
+            assert!(
+                g.abs() < 1e-6,
+                "expected ~0 gradient on uniform image, got {g}"
+            );
         }
     }
 
@@ -476,7 +457,10 @@ mod tests {
         let grad = sobel_gradient_magnitude(&luma, 8, 8);
         // Interior edge pixels near x=3..5 should have high gradient
         let edge_grad = grad[3 * 8 + 3]; // row 3, just left of edge
-        assert!(edge_grad > 0.5, "expected significant gradient at edge, got {edge_grad}");
+        assert!(
+            edge_grad > 0.5,
+            "expected significant gradient at edge, got {edge_grad}"
+        );
     }
 
     #[test]
@@ -484,7 +468,10 @@ mod tests {
         let luma = vec![0.5_f32; 8 * 8];
         let var = local_variance(&luma, 8, 8, 5);
         for &v in &var {
-            assert!(v.abs() < 1e-6, "expected ~0 variance on uniform image, got {v}");
+            assert!(
+                v.abs() < 1e-6,
+                "expected ~0 variance on uniform image, got {v}"
+            );
         }
     }
 
@@ -517,8 +504,10 @@ mod tests {
         let img = LinearRgbImage::new(w, h, data).unwrap();
         let map = classify(&img, &default_params());
         let cov = RegionCoverage::from_region_map(&map);
-        assert!(cov.strong_edge > 0 || cov.risky_halo_zone > 0,
-            "expected some StrongEdge or RiskyHaloZone pixels at the step edge");
+        assert!(
+            cov.strong_edge > 0 || cov.risky_halo_zone > 0,
+            "expected some StrongEdge or RiskyHaloZone pixels at the step edge"
+        );
         assert_eq!(
             cov.flat + cov.textured + cov.strong_edge + cov.microtexture + cov.risky_halo_zone,
             cov.total_pixels,

@@ -17,10 +17,7 @@ pub fn channel_clipping_ratio(img: &LinearRgbImage) -> f32 {
     if total == 0 {
         return 0.0;
     }
-    let out_of_range: u32 = pixels
-        .iter()
-        .map(|&v| (v < 0.0 || v > 1.0) as u32)
-        .sum();
+    let out_of_range: u32 = pixels.iter().map(|&v| (v < 0.0 || v > 1.0) as u32).sum();
     out_of_range as f32 / total as f32
 }
 

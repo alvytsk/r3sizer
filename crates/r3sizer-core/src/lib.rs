@@ -24,31 +24,31 @@ pub mod solve;
 pub mod types;
 
 pub mod base_quality;
-pub mod color_space;
-pub mod resize_strategy;
 pub mod chroma_guard;
+pub mod color_space;
 pub mod evaluator;
 pub mod recommendations;
+pub mod resize_strategy;
 
 // Re-export the complete public surface.
 pub use pipeline::{
-    PreparedBase, prepare_base, process_from_prepared, process_from_prepared_with_probes,
-    resolve_initial_strengths, resolve_dense_strengths,
-    run_probes_standalone, run_probes_from_detail, compute_probe_detail,
-    process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
+    compute_probe_detail, prepare_base, process_auto_sharp_downscale,
+    process_auto_sharp_downscale_with_progress, process_from_prepared,
+    process_from_prepared_with_probes, resolve_dense_strengths, resolve_initial_strengths,
+    run_probes_from_detail, run_probes_standalone, PreparedBase,
 };
 pub use types::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, BaseResizeQuality,
-    ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, PipelineMode, ProbePassDiagnostics,
-    ProbeSample, ProbeConfig, ProcessOutput, QualityEvaluation, RegionClass, RegionCoverage,
-    RegionMap, Recommendation, RecommendationKind, Severity, ParamPatch,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SelectionPolicy, SaturationGuardParams, SharpenMode, SharpenStrategy, StageTiming,
+    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode,
+    ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
+    Recommendation, RecommendationKind, RegionClass, RegionCoverage, RegionMap, ResizeKernel,
+    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams,
+    SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
     REGION_CLASS_COUNT,
 };
 
@@ -68,10 +68,7 @@ pub enum CoreError {
     NoValidRoot { reason: String },
 
     #[error("buffer length mismatch: expected {expected_len} components, got {got_len}")]
-    BufferLengthMismatch {
-        expected_len: usize,
-        got_len: usize,
-    },
+    BufferLengthMismatch { expected_len: usize, got_len: usize },
 
     #[error("empty image: width or height is zero")]
     EmptyImage,

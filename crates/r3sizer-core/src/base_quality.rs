@@ -92,8 +92,7 @@ pub(crate) fn compute_ringing_score(luma: &[f32], w: usize, h: usize) -> f32 {
             let yi = y as isize;
 
             // Unnormalized 3×3 Sobel gradient magnitude.
-            let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
-                - 2.0 * px(xi - 1, yi)
+            let gx = -px(xi - 1, yi - 1) + px(xi + 1, yi - 1) - 2.0 * px(xi - 1, yi)
                 + 2.0 * px(xi + 1, yi)
                 - px(xi - 1, yi + 1)
                 + px(xi + 1, yi + 1);
@@ -157,8 +156,7 @@ fn sobel_energy_mean(luma: &[f32], w: usize, h: usize) -> f32 {
         for x in 0..w {
             let xi = x as isize;
             let yi = y as isize;
-            let gx = (-px(xi - 1, yi - 1) + px(xi + 1, yi - 1)
-                - 2.0 * px(xi - 1, yi)
+            let gx = (-px(xi - 1, yi - 1) + px(xi + 1, yi - 1) - 2.0 * px(xi - 1, yi)
                 + 2.0 * px(xi + 1, yi)
                 - px(xi - 1, yi + 1)
                 + px(xi + 1, yi + 1)) as f64;
@@ -268,7 +266,12 @@ pub fn score_base_resize(
         1.0
     };
 
-    BaseResizeQuality { edge_retention, texture_retention, ringing_score, envelope_scale }
+    BaseResizeQuality {
+        edge_retention,
+        texture_retention,
+        ringing_score,
+        envelope_scale,
+    }
 }
 
 // ---------------------------------------------------------------------------

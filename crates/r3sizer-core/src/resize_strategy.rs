@@ -9,8 +9,8 @@ use crate::{
     classifier::classify,
     resize::downscale,
     types::{
-        ClassificationParams, ImageSize, KernelTable, ResizeKernel,
-        ResizeStrategy, ResizeStrategyDiagnostics,
+        ClassificationParams, ImageSize, KernelTable, ResizeKernel, ResizeStrategy,
+        ResizeStrategyDiagnostics,
     },
     CoreError, LinearRgbImage,
 };
@@ -32,7 +32,9 @@ pub fn downscale_with_kernel(
     kernel: ResizeKernel,
 ) -> Result<LinearRgbImage, CoreError> {
     if target.width == 0 || target.height == 0 {
-        return Err(CoreError::InvalidParams("target dimensions must be non-zero".into()));
+        return Err(CoreError::InvalidParams(
+            "target dimensions must be non-zero".into(),
+        ));
     }
     if src.width() == target.width && src.height() == target.height {
         return Ok(src.clone());
@@ -71,7 +73,11 @@ pub fn downscale_adaptive(
         kernel_table.strong_edge,
         kernel_table.microtexture,
         kernel_table.risky_halo_zone,
-    ].into_iter().collect::<BTreeSet<_>>().into_iter().collect();
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>()
+    .into_iter()
+    .collect();
 
     // 3. If all regions map to the same kernel, fast path
     if all_kernels.len() == 1 {
@@ -151,9 +157,10 @@ pub fn downscale_with_strategy(
             };
             Ok((result, diag))
         }
-        ResizeStrategy::ContentAdaptive { classification, kernel_table } => {
-            downscale_adaptive(src, target, classification, kernel_table)
-        }
+        ResizeStrategy::ContentAdaptive {
+            classification,
+            kernel_table,
+        } => downscale_adaptive(src, target, classification, kernel_table),
     }
 }
 
@@ -177,7 +184,10 @@ mod tests {
     #[test]
     fn downscale_with_kernel_lanczos3_matches_default() {
         let src = gradient_image(16, 16);
-        let target = ImageSize { width: 4, height: 4 };
+        let target = ImageSize {
+            width: 4,
+            height: 4,
+        };
         let a = downscale(&src, target).unwrap();
         let b = downscale_with_kernel(&src, target, ResizeKernel::Lanczos3).unwrap();
         assert_eq!(a.pixels(), b.pixels());
@@ -186,7 +196,10 @@ mod tests {
     #[test]
     fn downscale_with_kernel_all_variants_valid() {
         let src = gradient_image(16, 16);
-        let target = ImageSize { width: 4, height: 4 };
+        let target = ImageSize {
+            width: 4,
+            height: 4,
+        };
         for kernel in [
             ResizeKernel::Lanczos3,
             ResizeKernel::MitchellNetravali,
@@ -203,11 +216,17 @@ mod tests {
     #[test]
     fn different_kernels_produce_different_results() {
         let src = gradient_image(32, 32);
-        let target = ImageSize { width: 8, height: 8 };
+        let target = ImageSize {
+            width: 8,
+            height: 8,
+        };
         let lanczos = downscale_with_kernel(&src, target, ResizeKernel::Lanczos3).unwrap();
         let gaussian = downscale_with_kernel(&src, target, ResizeKernel::Gaussian).unwrap();
         // They should differ
-        let diff: f32 = lanczos.pixels().iter().zip(gaussian.pixels().iter())
+        let diff: f32 = lanczos
+            .pixels()
+            .iter()
+            .zip(gaussian.pixels().iter())
             .map(|(a, b)| (a - b).abs())
             .sum();
         assert!(diff > 0.0);
@@ -216,13 +235,17 @@ mod tests {
     #[test]
     fn adaptive_resize_produces_valid_output() {
         let src = gradient_image(32, 32);
-        let target = ImageSize { width: 8, height: 8 };
+        let target = ImageSize {
+            width: 8,
+            height: 8,
+        };
         let (result, diag) = downscale_adaptive(
             &src,
             target,
             &ClassificationParams::default(),
             &KernelTable::default(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(result.width(), 8);
         assert_eq!(result.height(), 8);
         assert!(!diag.kernels_used.is_empty());
@@ -233,12 +256,18 @@ mod tests {
     #[test]
     fn uniform_strategy_dispatch() {
         let src = gradient_image(16, 16);
-        let target = ImageSize { width: 4, height: 4 };
+        let target = ImageSize {
+            width: 4,
+            height: 4,
+        };
         let (result, diag) = downscale_with_strategy(
             &src,
             target,
-            &ResizeStrategy::Uniform { kernel: ResizeKernel::CatmullRom },
-        ).unwrap();
+            &ResizeStrategy::Uniform {
+                kernel: ResizeKernel::CatmullRom,
+            },
+        )
+        .unwrap();
         assert_eq!(result.width(), 4);
         assert_eq!(diag.kernels_used, vec![ResizeKernel::CatmullRom]);
     }

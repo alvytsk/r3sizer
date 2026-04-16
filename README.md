@@ -48,7 +48,7 @@ r3sizer solves this automatically. It probes multiple sharpening strengths, fits
 ### CLI
 
 ```sh
-cargo install --path crates/r3sizer-cli
+cargo install --path crates/r3sizer
 
 r3sizer -i photo.jpg -o out.png --width 800 --height 600
 ```
@@ -136,7 +136,7 @@ See [`docs/algorithm.md`](docs/algorithm.md) for the complete pipeline descripti
 crates/
   r3sizer-core/    Pure processing — no I/O, no dependencies on CLI or WASM
   r3sizer-io/      Image I/O (PNG/JPEG via the image crate)
-  r3sizer-cli/     Command-line interface (clap)
+  r3sizer/         Command-line interface (clap)
   r3sizer-wasm/    WebAssembly bindings (wasm-bindgen)
 web/               React + Vite + Tailwind diagnostic UI
 ```

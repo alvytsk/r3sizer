@@ -2,7 +2,7 @@
 members = [
     "crates/r3sizer-core",
     "crates/r3sizer-io",
-    "crates/r3sizer-cli",
+    "crates/r3sizer",
     "crates/r3sizer-wasm",
 ]
 resolver = "2"

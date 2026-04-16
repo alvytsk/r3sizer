@@ -89,8 +89,14 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
 }
 
 pub fn run(args: &Cli) -> Result<()> {
-    let input_path = args.input.as_ref().expect("input is required in single-file mode");
-    let output_path = args.output.as_ref().expect("output is required in single-file mode");
+    let input_path = args
+        .input
+        .as_ref()
+        .expect("input is required in single-file mode");
+    let output_path = args
+        .output
+        .as_ref()
+        .expect("output is required in single-file mode");
 
     // --- Load ---
     let input = load_as_linear(input_path)

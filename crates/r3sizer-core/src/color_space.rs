@@ -3,9 +3,9 @@
 //! Allows the pipeline to accept pre-linearized or HDR data without
 //! going through the standard sRGB→linear conversion in the IO layer.
 
-use crate::{LinearRgbImage, CoreError};
 use crate::types::InputColorSpace;
 use crate::types::InputIngressDiagnostics;
+use crate::{CoreError, LinearRgbImage};
 
 /// Prepare input data according to the declared color space.
 ///
@@ -52,8 +52,12 @@ pub fn prepare_input(
             let mut min_val = f32::INFINITY;
             let mut max_val = f32::NEG_INFINITY;
             for &v in data {
-                if v < min_val { min_val = v; }
-                if v > max_val { max_val = v; }
+                if v < min_val {
+                    min_val = v;
+                }
+                if v > max_val {
+                    max_val = v;
+                }
             }
 
             let (output, scale) = if max_val > 1.0 {

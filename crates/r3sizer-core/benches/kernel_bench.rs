@@ -1,10 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use r3sizer_core::{
-    classifier, color, chroma_guard,
+    chroma_guard, classifier, color,
     metrics::{channel_clipping_ratio, pixel_out_of_gamut_ratio},
-    sharpen,
-    ClassificationParams, LinearRgbImage, ChromaRegionFactors,
+    sharpen, ChromaRegionFactors, ClassificationParams, LinearRgbImage,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,8 +28,7 @@ fn synthetic_luma(w: usize, h: usize) -> Vec<f32> {
         .map(|i| {
             let x = i % w;
             let y = i / w;
-            x as f32 / (w - 1).max(1) as f32 * 0.5
-                + y as f32 / (h - 1).max(1) as f32 * 0.5
+            x as f32 / (w - 1).max(1) as f32 * 0.5 + y as f32 / (h - 1).max(1) as f32 * 0.5
         })
         .collect()
 }
@@ -157,12 +155,7 @@ fn bench_sharpen_apply(c: &mut Criterion) {
 
     let luma = synthetic_luma(W as usize, H as usize);
     let kernel = sharpen::make_kernel(1.0).unwrap();
-    let detail = sharpen::compute_detail_single_channel(
-        &luma,
-        W as usize,
-        H as usize,
-        &kernel,
-    );
+    let detail = sharpen::compute_detail_single_channel(&luma, W as usize, H as usize, &kernel);
 
     group.bench_function("apply_detail_single_channel_540p", |b| {
         b.iter(|| {
@@ -215,9 +208,7 @@ fn bench_probe_loop(c: &mut Criterion) {
     let img = synthetic_image(W, H);
     let luma = color::extract_luminance(&img);
     let kernel = sharpen::make_kernel(1.0).unwrap();
-    let detail = sharpen::compute_detail_single_channel(
-        &luma, W as usize, H as usize, &kernel,
-    );
+    let detail = sharpen::compute_detail_single_channel(&luma, W as usize, H as usize, &kernel);
     let strengths: Vec<f32> = vec![0.1, 0.3, 0.5, 0.8, 1.0, 1.3, 1.6, 2.0, 2.5, 3.0];
 
     // Full probe loop: apply detail + reconstruct RGB + metric per probe
@@ -229,11 +220,12 @@ fn bench_probe_loop(c: &mut Criterion) {
             let mut rgb_scratch = LinearRgbImage::zeros(W, H).unwrap();
             let mut results = Vec::with_capacity(strengths.len());
             for &s in &strengths {
-                sharpen::apply_detail_single_channel_into(
-                    &luma, &detail, s, &mut luma_scratch,
-                );
+                sharpen::apply_detail_single_channel_into(&luma, &detail, s, &mut luma_scratch);
                 color::reconstruct_rgb_from_lightness_into(
-                    &img, &luma_scratch, &luma, &mut rgb_scratch,
+                    &img,
+                    &luma_scratch,
+                    &luma,
+                    &mut rgb_scratch,
                 );
                 let ratio = channel_clipping_ratio(&rgb_scratch);
                 results.push((s, ratio));

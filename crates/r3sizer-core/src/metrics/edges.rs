@@ -33,7 +33,8 @@ pub fn extract_edge_profiles(
     }
 
     // Use the shared optimized Sobel from classifier (split border/interior loops).
-    let (grad_mag, grad_dx, grad_dy) = crate::classifier::sobel_gradient_full(luma_original, width, height);
+    let (grad_mag, grad_dx, grad_dy) =
+        crate::classifier::sobel_gradient_full(luma_original, width, height);
 
     let mut profiles = Vec::new();
 
@@ -70,13 +71,7 @@ pub fn extract_edge_profiles(
 }
 
 /// Bilinear interpolation on a single-channel image.
-fn bilinear_sample(
-    data: &[f32],
-    width: usize,
-    height: usize,
-    x: f32,
-    y: f32,
-) -> f32 {
+fn bilinear_sample(data: &[f32], width: usize, height: usize, x: f32, y: f32) -> f32 {
     let x0 = (x.floor() as isize).clamp(0, width as isize - 1) as usize;
     let y0 = (y.floor() as isize).clamp(0, height as isize - 1) as usize;
     let x1 = (x0 + 1).min(width - 1);
@@ -90,10 +85,7 @@ fn bilinear_sample(
     let v01 = data[y1 * width + x0];
     let v11 = data[y1 * width + x1];
 
-    v00 * (1.0 - fx) * (1.0 - fy)
-        + v10 * fx * (1.0 - fy)
-        + v01 * (1.0 - fx) * fy
-        + v11 * fx * fy
+    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }
 
 #[cfg(test)]
@@ -160,6 +152,9 @@ mod tests {
         }
         let (mag, _dx, _dy) = crate::classifier::sobel_gradient_full(&luma, 5, 5);
         let edge_mag = mag[2 * 5 + 2];
-        assert!(edge_mag > 0.1, "edge magnitude should be significant: {edge_mag}");
+        assert!(
+            edge_mag > 0.1,
+            "edge magnitude should be significant: {edge_mag}"
+        );
     }
 }

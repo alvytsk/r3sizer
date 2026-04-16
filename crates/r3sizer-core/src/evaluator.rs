@@ -41,20 +41,11 @@ pub trait QualityEvaluator: Send + Sync {
 
     /// Suggest an optimal sharpening strength based on image content analysis.
     /// Returns `None` if the evaluator cannot make a suggestion.
-    fn suggest_strength(
-        &self,
-        base: &LinearRgbImage,
-        target_quality: f32,
-    ) -> Option<f32>;
+    fn suggest_strength(&self, base: &LinearRgbImage, target_quality: f32) -> Option<f32>;
 
     /// Suggest strength from precomputed luminance (avoids full feature extraction).
     /// Default delegates to [`suggest_strength`](Self::suggest_strength).
-    fn suggest_strength_from_luma(
-        &self,
-        _luma: &[f32],
-        _w: usize,
-        _h: usize,
-    ) -> Option<f32> {
+    fn suggest_strength_from_luma(&self, _luma: &[f32], _w: usize, _h: usize) -> Option<f32> {
         None
     }
 }
@@ -102,15 +93,19 @@ fn extract_features_from_luma_and_grads(
     let edge_count = gradients.iter().filter(|&&g| g > EDGE_THRESHOLD).count();
     let edge_density = edge_count as f32 / n as f32;
     let mean_grad = gradients.iter().copied().sum::<f32>() / n as f32;
-    let gradient_variance = gradients.iter()
+    let gradient_variance = gradients
+        .iter()
         .map(|&g| (g - mean_grad) * (g - mean_grad))
-        .sum::<f32>() / n as f32;
+        .sum::<f32>()
+        / n as f32;
 
     let local_vars = local_variance_5x5(luma, w, h);
     let mean_lv = local_vars.iter().copied().sum::<f32>() / n as f32;
-    let lv_variance = local_vars.iter()
+    let lv_variance = local_vars
+        .iter()
         .map(|&v| (v - mean_lv) * (v - mean_lv))
-        .sum::<f32>() / n as f32;
+        .sum::<f32>()
+        / n as f32;
 
     let laplacian_var = laplacian_variance(luma, w, h);
     let entropy = histogram_entropy(luma);
@@ -174,8 +169,7 @@ fn laplacian_variance(luma: &[f32], w: usize, h: usize) -> f32 {
 
     for y in 1..h - 1 {
         for x in 1..w - 1 {
-            let lap = at(x + 1, y) + at(x - 1, y) + at(x, y + 1) + at(x, y - 1)
-                    - 4.0 * at(x, y);
+            let lap = at(x + 1, y) + at(x - 1, y) + at(x, y + 1) + at(x, y - 1) - 4.0 * at(x, y);
             sum += lap as f64;
             sum_sq += (lap * lap) as f64;
             count += 1;
@@ -196,7 +190,9 @@ fn histogram_entropy(luma: &[f32]) -> f32 {
         bins[idx.min(HIST_BINS - 1)] += 1;
     }
     let n = luma.len() as f32;
-    if n <= 0.0 { return 0.0; }
+    if n <= 0.0 {
+        return 0.0;
+    }
     let mut entropy = 0.0f32;
     for &count in &bins {
         if count > 0 {
@@ -262,16 +258,25 @@ impl QualityEvaluator for HeuristicEvaluator {
         let grad_corr = pearson_correlation(&base_grads, &sharp_grads);
 
         // Out-of-range penalty
-        let oor = sharpened.pixels().iter()
+        let oor = sharpened
+            .pixels()
+            .iter()
             .filter(|&&v| !(0.0..=1.0).contains(&v))
-            .count() as f32 / sharpened.pixels().len().max(1) as f32;
+            .count() as f32
+            / sharpened.pixels().len().max(1) as f32;
         let oor_penalty = (oor * 100.0).min(1.0);
 
-        let strength_penalty = if strength > 2.0 { (strength - 2.0) * 0.1 } else { 0.0 };
-        let quality = (grad_corr * 0.6 + (1.0 - oor_penalty) * 0.3 + (1.0 - strength_penalty.min(1.0)) * 0.1)
-            .clamp(0.0, 1.0);
+        let strength_penalty = if strength > 2.0 {
+            (strength - 2.0) * 0.1
+        } else {
+            0.0
+        };
+        let quality =
+            (grad_corr * 0.6 + (1.0 - oor_penalty) * 0.3 + (1.0 - strength_penalty.min(1.0)) * 0.1)
+                .clamp(0.0, 1.0);
 
-        let confidence = (features_base.edge_density * 2.0 + features_base.luminance_histogram_entropy / 6.0)
+        let confidence = (features_base.edge_density * 2.0
+            + features_base.luminance_histogram_entropy / 6.0)
             .clamp(0.1, 0.9);
 
         QualityEvaluation {
@@ -282,21 +287,12 @@ impl QualityEvaluator for HeuristicEvaluator {
         }
     }
 
-    fn suggest_strength(
-        &self,
-        base: &LinearRgbImage,
-        _target_quality: f32,
-    ) -> Option<f32> {
+    fn suggest_strength(&self, base: &LinearRgbImage, _target_quality: f32) -> Option<f32> {
         let luma = extract_luminance(base);
         self.suggest_strength_from_luma(&luma, base.width() as usize, base.height() as usize)
     }
 
-    fn suggest_strength_from_luma(
-        &self,
-        luma: &[f32],
-        w: usize,
-        h: usize,
-    ) -> Option<f32> {
+    fn suggest_strength_from_luma(&self, luma: &[f32], w: usize, h: usize) -> Option<f32> {
         let edge_density = compute_edge_density(luma, w, h);
         Some(strength_from_edge_density(edge_density))
     }
@@ -305,7 +301,9 @@ impl QualityEvaluator for HeuristicEvaluator {
 /// Pearson correlation between two equal-length gradient vectors.
 fn pearson_correlation(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len() as f64;
-    if n == 0.0 { return 0.0; }
+    if n == 0.0 {
+        return 0.0;
+    }
 
     let mean_a = a.iter().copied().map(|v| v as f64).sum::<f64>() / n;
     let mean_b = b.iter().copied().map(|v| v as f64).sum::<f64>() / n;
@@ -323,7 +321,9 @@ fn pearson_correlation(a: &[f32], b: &[f32]) -> f32 {
     }
 
     let denom = (var_a * var_b).sqrt();
-    if denom < 1e-12 { return 1.0; }
+    if denom < 1e-12 {
+        return 1.0;
+    }
     (cov / denom) as f32
 }
 

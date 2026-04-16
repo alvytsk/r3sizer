@@ -16,7 +16,10 @@ pub fn run_diff(base_path: &Path, candidate_path: &Path) -> Result<()> {
     let cand: SweepSummary = read_summary(candidate_path)?;
 
     let base_name = base_path.file_stem().unwrap_or_default().to_string_lossy();
-    let cand_name = candidate_path.file_stem().unwrap_or_default().to_string_lossy();
+    let cand_name = candidate_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
 
     println!("Sweep comparison: {} → {}", base_name, cand_name);
     println!("{}", "=".repeat(72));
@@ -36,8 +39,7 @@ pub fn run_diff(base_path: &Path, candidate_path: &Path) -> Result<()> {
 fn read_summary(path: &Path) -> Result<SweepSummary> {
     let data = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&data)
-        .with_context(|| format!("failed to parse {}", path.display()))
+    serde_json::from_str(&data).with_context(|| format!("failed to parse {}", path.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -59,29 +61,66 @@ fn print_aggregate_diff(
     );
     println!("  {:30} {:>12} {:>12} {:>10}", "", "----", "----", "-----");
 
-    agg_row("files (ok/total)",
+    agg_row(
+        "files (ok/total)",
         &format!("{}/{}", base.succeeded, base.total_files),
-        &format!("{}/{}", cand.succeeded, cand.total_files));
-    agg_row_f("mean strength", base.mean_selected_strength, cand.mean_selected_strength);
-    agg_row_f("median strength", base.median_selected_strength, cand.median_selected_strength);
-    agg_row_pct("fit success rate", base.fit_success_rate, cand.fit_success_rate);
-    agg_row_f("mean time (ms)", base.mean_total_us as f32 / 1000.0, cand.mean_total_us as f32 / 1000.0);
+        &format!("{}/{}", cand.succeeded, cand.total_files),
+    );
+    agg_row_f(
+        "mean strength",
+        base.mean_selected_strength,
+        cand.mean_selected_strength,
+    );
+    agg_row_f(
+        "median strength",
+        base.median_selected_strength,
+        cand.median_selected_strength,
+    );
+    agg_row_pct(
+        "fit success rate",
+        base.fit_success_rate,
+        cand.fit_success_rate,
+    );
+    agg_row_f(
+        "mean time (ms)",
+        base.mean_total_us as f32 / 1000.0,
+        cand.mean_total_us as f32 / 1000.0,
+    );
 
     println!();
     println!("  Metric statistics (mean)");
-    println!("  {:30} {:>12} {:>12} {:>10}", "", base_name, cand_name, "delta%");
+    println!(
+        "  {:30} {:>12} {:>12} {:>10}",
+        "", base_name, cand_name, "delta%"
+    );
     println!("  {:30} {:>12} {:>12} {:>10}", "", "----", "----", "------");
 
     let metrics: Vec<(&str, &ComponentStats, &ComponentStats)> = vec![
-        ("gamut_excursion", &base.gamut_excursion, &cand.gamut_excursion),
+        (
+            "gamut_excursion",
+            &base.gamut_excursion,
+            &cand.gamut_excursion,
+        ),
         ("halo_ringing", &base.halo_ringing, &cand.halo_ringing),
         ("edge_overshoot", &base.edge_overshoot, &cand.edge_overshoot),
-        ("texture_flattening", &base.texture_flattening, &cand.texture_flattening),
-        ("composite_score", &base.composite_score, &cand.composite_score),
+        (
+            "texture_flattening",
+            &base.texture_flattening,
+            &cand.texture_flattening,
+        ),
+        (
+            "composite_score",
+            &base.composite_score,
+            &cand.composite_score,
+        ),
         ("ringing_score", &base.ringing_score, &cand.ringing_score),
         ("envelope_scale", &base.envelope_scale, &cand.envelope_scale),
         ("edge_retention", &base.edge_retention, &cand.edge_retention),
-        ("chroma_clamped", &base.chroma_clamped_fraction, &cand.chroma_clamped_fraction),
+        (
+            "chroma_clamped",
+            &base.chroma_clamped_fraction,
+            &cand.chroma_clamped_fraction,
+        ),
     ];
 
     for (name, bs, cs) in &metrics {
@@ -92,7 +131,10 @@ fn print_aggregate_diff(
         } else {
             "—".to_string()
         };
-        println!("  {:<30} {:>12.5} {:>12.5} {:>10}", name, bs.mean, cs.mean, pct);
+        println!(
+            "  {:<30} {:>12.5} {:>12.5} {:>10}",
+            name, bs.mean, cs.mean, pct
+        );
     }
 }
 
@@ -163,7 +205,14 @@ fn print_per_file_diff(
                 name, br.selected_strength, cr.selected_strength, delta, mode_change, flag
             );
         } else {
-            println!("  {:<25} {:>8} {:>8.4} {:>8} {}", name, "—", cr.selected_strength, "new", mode_short(&cr.selection_mode));
+            println!(
+                "  {:<25} {:>8} {:>8.4} {:>8} {}",
+                name,
+                "—",
+                cr.selected_strength,
+                "new",
+                mode_short(&cr.selection_mode)
+            );
         }
     }
 }
@@ -209,7 +258,10 @@ fn print_verdict(
     println!("{:-<72}", "");
 
     if improvements.is_empty() && regressions.is_empty() {
-        println!("  No significant changes across {} images.", unchanged + improvements.len() + regressions.len());
+        println!(
+            "  No significant changes across {} images.",
+            unchanged + improvements.len() + regressions.len()
+        );
         return;
     }
 

@@ -46,7 +46,11 @@ pub fn generate_corpus(dir: &Path) -> Result<()> {
         println!("  {name}.png  ({}×{})", img.width(), img.height());
     }
 
-    println!("Corpus: {} images written to {}", images.len(), dir.display());
+    println!(
+        "Corpus: {} images written to {}",
+        images.len(),
+        dir.display()
+    );
     Ok(())
 }
 
@@ -254,7 +258,11 @@ fn saturated_edges() -> LinearRgbImage {
             let band = ((y / block_h) as usize).min(3);
             let alt_band = (band + 1) % 4;
             let stripe = (x / 8) % 2;
-            let c = if stripe == 0 { colors[band] } else { colors[alt_band] };
+            let c = if stripe == 0 {
+                colors[band]
+            } else {
+                colors[alt_band]
+            };
             data.extend_from_slice(&c);
         }
     }
@@ -277,7 +285,11 @@ fn colored_lines() -> LinearRgbImage {
         let group_y = y % (6 * 5);
         let color_idx = (group_y / 6) as usize;
         let is_line = group_y % 6 == 0;
-        let pixel = if is_line { line_colors[color_idx.min(4)] } else { bg };
+        let pixel = if is_line {
+            line_colors[color_idx.min(4)]
+        } else {
+            bg
+        };
         for _x in 0..W {
             data.extend_from_slice(&pixel);
         }
@@ -326,8 +338,10 @@ fn saturated_texture() -> LinearRgbImage {
             let noise = (state as f32 / u32::MAX as f32) * 0.15;
             let hue = (x as f32 / W as f32 + y as f32 / H as f32) * 3.0;
             let r = (0.5 + 0.35 * (hue * std::f32::consts::TAU).sin() + noise).clamp(0.0, 1.0);
-            let g = (0.5 + 0.35 * ((hue + 0.333) * std::f32::consts::TAU).sin() + noise).clamp(0.0, 1.0);
-            let b = (0.5 + 0.35 * ((hue + 0.667) * std::f32::consts::TAU).sin() + noise).clamp(0.0, 1.0);
+            let g = (0.5 + 0.35 * ((hue + 0.333) * std::f32::consts::TAU).sin() + noise)
+                .clamp(0.0, 1.0);
+            let b = (0.5 + 0.35 * ((hue + 0.667) * std::f32::consts::TAU).sin() + noise)
+                .clamp(0.0, 1.0);
             data.extend_from_slice(&[r, g, b]);
         }
     }

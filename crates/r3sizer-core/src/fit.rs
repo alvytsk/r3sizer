@@ -78,7 +78,9 @@ pub fn fit_cubic(data: &[(f64, f64)]) -> Result<CubicPolynomial, CoreError> {
 /// - R² (coefficient of determination)
 /// - maximum absolute residual
 /// - minimum pivot encountered during Gaussian elimination
-pub fn fit_cubic_with_quality(data: &[(f64, f64)]) -> Result<(CubicPolynomial, FitQuality), CoreError> {
+pub fn fit_cubic_with_quality(
+    data: &[(f64, f64)],
+) -> Result<(CubicPolynomial, FitQuality), CoreError> {
     if data.len() < 4 {
         return Err(CoreError::FitFailed(format!(
             "need at least 4 data points for cubic fit, got {}",
@@ -129,7 +131,11 @@ pub fn fit_cubic_with_quality(data: &[(f64, f64)]) -> Result<(CubicPolynomial, F
         }
     }
 
-    let r_squared = if ss_tot > 1e-30 { 1.0 - ss_res / ss_tot } else { 1.0 };
+    let r_squared = if ss_tot > 1e-30 {
+        1.0 - ss_res / ss_tot
+    } else {
+        1.0
+    };
 
     let quality = FitQuality {
         residual_sum_of_squares: ss_res,
@@ -187,8 +193,7 @@ fn gauss_solve_with_pivots(
 
         if max_val < PIVOT_EPSILON {
             return Err(CoreError::FitFailed(
-                "normal equations are numerically singular; try more varied probe strengths"
-                    .into(),
+                "normal equations are numerically singular; try more varied probe strengths".into(),
             ));
         }
 
@@ -344,10 +349,30 @@ mod tests {
     #[test]
     fn monotonic_samples_detected() {
         let samples = vec![
-            crate::ProbeSample { strength: 0.5, artifact_ratio: 0.001, metric_value: 0.001, breakdown: None },
-            crate::ProbeSample { strength: 1.0, artifact_ratio: 0.002, metric_value: 0.002, breakdown: None },
-            crate::ProbeSample { strength: 2.0, artifact_ratio: 0.005, metric_value: 0.005, breakdown: None },
-            crate::ProbeSample { strength: 3.0, artifact_ratio: 0.010, metric_value: 0.010, breakdown: None },
+            crate::ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.001,
+                metric_value: 0.001,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 1.0,
+                artifact_ratio: 0.002,
+                metric_value: 0.002,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 2.0,
+                artifact_ratio: 0.005,
+                metric_value: 0.005,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 3.0,
+                artifact_ratio: 0.010,
+                metric_value: 0.010,
+                breakdown: None,
+            },
         ];
         let (mono, quasi) = check_monotonicity(&samples);
         assert!(mono);
@@ -357,10 +382,30 @@ mod tests {
     #[test]
     fn non_monotonic_samples_detected() {
         let samples = vec![
-            crate::ProbeSample { strength: 0.5, artifact_ratio: 0.005, metric_value: 0.005, breakdown: None },
-            crate::ProbeSample { strength: 1.0, artifact_ratio: 0.002, metric_value: 0.002, breakdown: None },
-            crate::ProbeSample { strength: 2.0, artifact_ratio: 0.008, metric_value: 0.008, breakdown: None },
-            crate::ProbeSample { strength: 3.0, artifact_ratio: 0.003, metric_value: 0.003, breakdown: None },
+            crate::ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.005,
+                metric_value: 0.005,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 1.0,
+                artifact_ratio: 0.002,
+                metric_value: 0.002,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 2.0,
+                artifact_ratio: 0.008,
+                metric_value: 0.008,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 3.0,
+                artifact_ratio: 0.003,
+                metric_value: 0.003,
+                breakdown: None,
+            },
         ];
         let (mono, quasi) = check_monotonicity(&samples);
         assert!(!mono);
@@ -370,10 +415,30 @@ mod tests {
     #[test]
     fn quasi_monotonic_one_inversion() {
         let samples = vec![
-            crate::ProbeSample { strength: 0.5, artifact_ratio: 0.001, metric_value: 0.001, breakdown: None },
-            crate::ProbeSample { strength: 1.0, artifact_ratio: 0.003, metric_value: 0.003, breakdown: None },
-            crate::ProbeSample { strength: 2.0, artifact_ratio: 0.002, metric_value: 0.002, breakdown: None },
-            crate::ProbeSample { strength: 3.0, artifact_ratio: 0.010, metric_value: 0.010, breakdown: None },
+            crate::ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.001,
+                metric_value: 0.001,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 1.0,
+                artifact_ratio: 0.003,
+                metric_value: 0.003,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 2.0,
+                artifact_ratio: 0.002,
+                metric_value: 0.002,
+                breakdown: None,
+            },
+            crate::ProbeSample {
+                strength: 3.0,
+                artifact_ratio: 0.010,
+                metric_value: 0.010,
+                breakdown: None,
+            },
         ];
         let (mono, quasi) = check_monotonicity(&samples);
         assert!(!mono);
