@@ -8,8 +8,8 @@
 //! strategy, metric mode, and probe configuration explicitly.
 use std::path::Path;
 
-use r3sizer_core::{ClassificationParams, GainTable};
 use r3sizer_core::prelude::*;
+use r3sizer_core::{ClassificationParams, GainTable};
 use r3sizer_io::{load_as_linear, save_from_linear};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

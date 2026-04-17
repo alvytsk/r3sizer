@@ -23,7 +23,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Load from file — decodes sRGB to linear-light f32 RGB.
     let src = load_as_linear(input_path)?;
-    println!("Loaded {}×{} from {:?}", src.width(), src.height(), input_path);
+    println!(
+        "Loaded {}×{} from {:?}",
+        src.width(),
+        src.height(),
+        input_path
+    );
 
     // 2. Build parameters from the Photo preset.
     //    .resolved() applies any pipeline_mode override before pipeline entry.

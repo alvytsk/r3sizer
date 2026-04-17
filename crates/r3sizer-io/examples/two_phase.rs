@@ -25,7 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Load image once.
     let src = load_as_linear(Path::new(&args[1]))?;
-    println!("Loaded {}×{} from {:?}", src.width(), src.height(), &args[1]);
+    println!(
+        "Loaded {}×{} from {:?}",
+        src.width(),
+        src.height(),
+        &args[1]
+    );
 
     // 2. Prepare the base once — resize, classify, baseline measurement.
     //    This is the expensive step (~1.5 s on a 24 MP image).

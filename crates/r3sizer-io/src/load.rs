@@ -106,11 +106,8 @@ mod tests {
         // Create a 4×4 solid-color PNG using the `image` crate itself.
         let img = image::RgbImage::from_fn(4, 4, |_, _| image::Rgb([128u8, 64, 200]));
         let mut buf = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut buf),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
         f.write_all(&buf).unwrap();
         f.flush().unwrap();
         f
@@ -133,10 +130,16 @@ mod tests {
             max_dimension: 3, // 4×4 image exceeds this
             max_pixels: 1_000_000,
         };
-        let err = load_as_linear_with_limits(f.path(), &limits)
-            .expect_err("should have been rejected");
+        let err =
+            load_as_linear_with_limits(f.path(), &limits).expect_err("should have been rejected");
         assert!(
-            matches!(err, IoError::TooLarge { width: 4, height: 4 }),
+            matches!(
+                err,
+                IoError::TooLarge {
+                    width: 4,
+                    height: 4
+                }
+            ),
             "expected TooLarge, got {err}"
         );
     }
@@ -148,10 +151,16 @@ mod tests {
             max_dimension: 65535,
             max_pixels: 15, // 4×4 = 16 pixels exceeds 15
         };
-        let err = load_as_linear_with_limits(f.path(), &limits)
-            .expect_err("should have been rejected");
+        let err =
+            load_as_linear_with_limits(f.path(), &limits).expect_err("should have been rejected");
         assert!(
-            matches!(err, IoError::TooLarge { width: 4, height: 4 }),
+            matches!(
+                err,
+                IoError::TooLarge {
+                    width: 4,
+                    height: 4
+                }
+            ),
             "expected TooLarge, got {err}"
         );
     }
