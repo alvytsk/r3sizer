@@ -21,6 +21,9 @@ web/node_modules/
 web/dist/
 web/src/wasm-pkg/
 
+# wasm-pack stale output (current build writes to web/src/wasm-pkg/)
+crates/r3sizer-wasm/pkg/
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
