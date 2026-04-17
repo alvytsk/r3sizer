@@ -10,7 +10,7 @@ resolver = "2"
 [workspace.package]
 version      = "0.8.0"
 edition      = "2021"
-rust-version = "1.75"
+rust-version = "1.87"
 license      = "MIT"
 authors      = ["Alexey Vymyatnin <alvy.tsk@gmail.com>"]
 repository   = "https://github.com/alvytsk/r3sizer"
