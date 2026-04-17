@@ -19,7 +19,9 @@
 ///    (least-bad option).
 use std::f64::consts::PI;
 
-use crate::{CoreError, CrossingStatus, CubicPolynomial, ProbeSample, SelectionMode, SelectionPolicy};
+use crate::{
+    CoreError, CrossingStatus, CubicPolynomial, ProbeSample, SelectionMode, SelectionPolicy,
+};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -47,7 +49,14 @@ pub fn find_sharpness(
     s_max: f64,
     probe_samples: &[ProbeSample],
 ) -> Result<SolveResult, CoreError> {
-    find_sharpness_with_policy(poly, target_p0, s_min, s_max, probe_samples, SelectionPolicy::GamutOnly)
+    find_sharpness_with_policy(
+        poly,
+        target_p0,
+        s_min,
+        s_max,
+        probe_samples,
+        SelectionPolicy::GamutOnly,
+    )
 }
 
 /// Direct sample search (no polynomial). Uses `GamutOnly` ranking.
@@ -186,7 +195,9 @@ fn solve_quadratic_or_lower(b: f64, c: f64, d: f64) -> Result<Vec<f64>, CoreErro
     if b.abs() < 1e-12 {
         // Linear: c*s + d = 0
         if c.abs() < 1e-12 {
-            return Err(CoreError::FitFailed("polynomial is effectively constant".into()));
+            return Err(CoreError::FitFailed(
+                "polynomial is effectively constant".into(),
+            ));
         }
         return Ok(vec![-d / c]);
     }
@@ -202,7 +213,11 @@ fn solve_quadratic_or_lower(b: f64, c: f64, d: f64) -> Result<Vec<f64>, CoreErro
 /// Real cube root (handles negative radicand).
 #[inline]
 fn cbrt(x: f64) -> f64 {
-    if x < 0.0 { -(-x).cbrt() } else { x.cbrt() }
+    if x < 0.0 {
+        -(-x).cbrt()
+    } else {
+        x.cbrt()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -220,8 +235,7 @@ fn fallback_from_samples(
         });
     }
 
-    let qualifying: Vec<&ProbeSample> =
-        samples.iter().filter(|s| s.metric_value <= p0).collect();
+    let qualifying: Vec<&ProbeSample> = samples.iter().filter(|s| s.metric_value <= p0).collect();
 
     if let Some(best) = select_best_qualifying(&qualifying, policy) {
         return Ok(SolveResult {
@@ -252,38 +266,41 @@ fn select_best_qualifying<'a>(
     match policy {
         SelectionPolicy::GamutOnly => {
             // Maximize strength (current behavior).
-            qualifying.iter().max_by(|a, b| {
-                a.strength.partial_cmp(&b.strength).unwrap()
-            }).copied()
+            qualifying
+                .iter()
+                .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                .copied()
         }
         SelectionPolicy::Hybrid | SelectionPolicy::CompositeOnly => {
             // Minimize composite score (best perceptual quality).
             // Fall back to max-strength ranking if no breakdowns available.
             let has_composites = qualifying.iter().any(|s| s.breakdown.is_some());
             if has_composites {
-                qualifying.iter().min_by(|a, b| {
-                    let ca = composite_score_of(a);
-                    let cb = composite_score_of(b);
-                    ca.partial_cmp(&cb).unwrap()
-                }).copied()
+                qualifying
+                    .iter()
+                    .min_by(|a, b| {
+                        let ca = composite_score_of(a);
+                        let cb = composite_score_of(b);
+                        ca.partial_cmp(&cb).unwrap()
+                    })
+                    .copied()
             } else {
-                qualifying.iter().max_by(|a, b| {
-                    a.strength.partial_cmp(&b.strength).unwrap()
-                }).copied()
+                qualifying
+                    .iter()
+                    .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                    .copied()
             }
         }
     }
 }
 
 /// Among all samples (budget exceeded), select the least bad per policy.
-fn select_least_bad(
-    samples: &[ProbeSample],
-    policy: SelectionPolicy,
-) -> &ProbeSample {
+fn select_least_bad(samples: &[ProbeSample], policy: SelectionPolicy) -> &ProbeSample {
     match policy {
         SelectionPolicy::GamutOnly => {
             // Minimize gamut metric_value (current behavior).
-            samples.iter()
+            samples
+                .iter()
                 .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
                 .unwrap()
         }
@@ -291,7 +308,8 @@ fn select_least_bad(
             // Minimize composite score.
             let has_composites = samples.iter().any(|s| s.breakdown.is_some());
             if has_composites {
-                samples.iter()
+                samples
+                    .iter()
                     .min_by(|a, b| {
                         let ca = composite_score_of(a);
                         let cb = composite_score_of(b);
@@ -299,7 +317,8 @@ fn select_least_bad(
                     })
                     .unwrap()
             } else {
-                samples.iter()
+                samples
+                    .iter()
                     .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
                     .unwrap()
             }
@@ -310,7 +329,9 @@ fn select_least_bad(
 /// Extract composite score from a sample, falling back to metric_value.
 #[inline]
 fn composite_score_of(sample: &ProbeSample) -> f32 {
-    sample.breakdown.as_ref()
+    sample
+        .breakdown
+        .as_ref()
         .map(|b| b.composite_score)
         .unwrap_or(sample.metric_value)
 }
@@ -367,10 +388,7 @@ mod tests {
     fn no_root_in_range_triggers_fallback() {
         // P_hat(s) = 0 roots are at 1, 2, 3 (outside [3.5, 4.0]).
         let p = poly(1.0, -6.0, 11.0, -6.0);
-        let samples = make_samples(
-            &[3.5, 3.7, 3.9, 4.0],
-            &[0.0001, 0.0002, 0.0003, 0.0004],
-        );
+        let samples = make_samples(&[3.5, 3.7, 3.9, 4.0], &[0.0001, 0.0002, 0.0003, 0.0004]);
         let result = find_sharpness(&p, 0.001, 3.5, 4.0, &samples).unwrap();
         assert_eq!(result.crossing_status, CrossingStatus::NotFoundInRange);
         assert!(matches!(
@@ -393,10 +411,7 @@ mod tests {
 
     #[test]
     fn all_samples_exceed_budget_picks_least_bad() {
-        let samples = make_samples(
-            &[1.0, 2.0, 3.0, 4.0],
-            &[0.01, 0.02, 0.03, 0.04],
-        );
+        let samples = make_samples(&[1.0, 2.0, 3.0, 4.0], &[0.01, 0.02, 0.03, 0.04]);
         let p = poly(0.0, 0.0, 0.0, 0.5);
         let result = find_sharpness(&p, 0.001, 1.0, 4.0, &samples).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::LeastBadSample);
@@ -405,10 +420,7 @@ mod tests {
 
     #[test]
     fn direct_search_picks_best_sample() {
-        let samples = make_samples(
-            &[0.5, 1.0, 2.0, 3.0],
-            &[0.0001, 0.0005, 0.002, 0.01],
-        );
+        let samples = make_samples(&[0.5, 1.0, 2.0, 3.0], &[0.0001, 0.0005, 0.002, 0.01]);
         let result = find_sharpness_direct(&samples, 0.001).unwrap();
         // Largest strength with metric_value <= 0.001 is s=1.0 (ratio=0.0005).
         assert_abs_diff_eq!(result.selected_strength, 1.0_f32, epsilon = 1e-5);
@@ -419,10 +431,30 @@ mod tests {
     fn fallback_uses_metric_value_not_artifact_ratio() {
         // metric_value differs from artifact_ratio (simulating RelativeToBase mode).
         let samples = vec![
-            ProbeSample { strength: 0.5, artifact_ratio: 0.010, metric_value: 0.005, breakdown: None },
-            ProbeSample { strength: 1.0, artifact_ratio: 0.015, metric_value: 0.010, breakdown: None },
-            ProbeSample { strength: 2.0, artifact_ratio: 0.025, metric_value: 0.020, breakdown: None },
-            ProbeSample { strength: 3.0, artifact_ratio: 0.040, metric_value: 0.035, breakdown: None },
+            ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.010,
+                metric_value: 0.005,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 1.0,
+                artifact_ratio: 0.015,
+                metric_value: 0.010,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 2.0,
+                artifact_ratio: 0.025,
+                metric_value: 0.020,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 3.0,
+                artifact_ratio: 0.040,
+                metric_value: 0.035,
+                breakdown: None,
+            },
         ];
         // P0 = 0.015 in relative terms: s=1.0 has metric_value=0.010 <= 0.015.
         let result = find_sharpness_direct(&samples, 0.015).unwrap();
@@ -470,7 +502,8 @@ mod tests {
             make_sample_with_composite(2.0, 0.0008, 0.05),
             make_sample_with_composite(3.0, 0.005, 0.10),
         ];
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
         assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
     }
@@ -482,7 +515,8 @@ mod tests {
             make_sample_with_composite(2.0, 0.0008, 0.05),
             make_sample_with_composite(3.0, 0.005, 0.10),
         ];
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
         assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
     }
@@ -493,7 +527,8 @@ mod tests {
             make_sample_with_composite(1.0, 0.0008, 0.09),
             make_sample_with_composite(2.0, 0.005, 0.001),
         ];
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
         assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
     }
@@ -505,7 +540,8 @@ mod tests {
             make_sample_with_composite(2.0, 0.010, 0.02),
             make_sample_with_composite(3.0, 0.020, 0.05),
         ];
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::LeastBadSample);
         assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
     }
@@ -517,18 +553,17 @@ mod tests {
             make_sample_with_composite(2.0, 0.010, 0.02),
             make_sample_with_composite(3.0, 0.020, 0.05),
         ];
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::GamutOnly).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::LeastBadSample);
         assert_abs_diff_eq!(result.selected_strength, 1.0, epsilon = 1e-5);
     }
 
     #[test]
     fn hybrid_with_no_breakdown_falls_back_to_gamut_ranking() {
-        let samples = make_samples(
-            &[1.0, 2.0, 3.0],
-            &[0.0005, 0.0008, 0.005],
-        );
-        let result = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        let samples = make_samples(&[1.0, 2.0, 3.0], &[0.0005, 0.0008, 0.005]);
+        let result =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
         assert_eq!(result.selection_mode, SelectionMode::BestSampleWithinBudget);
         assert_abs_diff_eq!(result.selected_strength, 2.0, epsilon = 1e-5);
     }
@@ -539,9 +574,18 @@ mod tests {
             make_sample_with_composite(1.0, 0.0005, 0.01),
             make_sample_with_composite(2.0, 0.0008, 0.05),
         ];
-        let result_composite = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::CompositeOnly).unwrap();
-        let result_hybrid = find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
-        assert_eq!(result_composite.selected_strength, result_hybrid.selected_strength);
-        assert_eq!(result_composite.selection_mode, result_hybrid.selection_mode);
+        let result_composite =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::CompositeOnly)
+                .unwrap();
+        let result_hybrid =
+            find_sharpness_direct_with_policy(&samples, 0.001, SelectionPolicy::Hybrid).unwrap();
+        assert_eq!(
+            result_composite.selected_strength,
+            result_hybrid.selected_strength
+        );
+        assert_eq!(
+            result_composite.selection_mode,
+            result_hybrid.selection_mode
+        );
     }
 }

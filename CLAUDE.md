@@ -24,11 +24,11 @@ cargo clippy --workspace -- -D warnings
 cargo bench -p r3sizer-core
 
 # Run the CLI (single file)
-cargo run -p r3sizer-cli -- --input <FILE> --output <FILE> --width <N> --height <N>
-cargo run -p r3sizer-cli -- --input photo.jpg --output out.png --width 800 --height 600 --diagnostics diag.json
+cargo run -p r3sizer -- process --input <FILE> --output <FILE> --width <N> --height <N>
+cargo run -p r3sizer -- process -i photo.jpg -o out.png --width 800 --height 600 --diagnostics diag.json
 
 # Run the CLI (sweep mode)
-cargo run -p r3sizer-cli -- --sweep-dir ./photos --sweep-output-dir ./out --sweep-summary summary.json --width 800 --height 600
+cargo run -p r3sizer -- sweep --in-dir ./photos --out-dir ./out --summary summary.json --width 800 --height 600
 
 # Regenerate TypeScript types from Rust (after changing types.rs)
 cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
@@ -36,7 +36,7 @@ cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --no
 
 ## Architecture
 
-Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer-cli`, and `r3sizer-core` ← `r3sizer-wasm`.
+Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` ← `r3sizer`, and `r3sizer-core` ← `r3sizer-wasm`.
 
 **`r3sizer-core`** — all image processing logic, no I/O. Reusable in CLI, WASM, and future Tauri GUI. Modules map 1:1 to pipeline stages:
 
@@ -58,7 +58,7 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 
 **`r3sizer-io`** — `load_as_linear` (file → `LinearRgbImage`, applies sRGB→linear) and `save_from_linear` (applies linear→sRGB, writes file). Format inferred from extension.
 
-**`r3sizer-cli`** — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
+**`r3sizer`** (CLI) — thin wrapper: `args.rs` (clap), `run.rs` (load→process→save), `output.rs` (stdout formatting), `sweep.rs` (batch directory processing with aggregate statistics).
 
 **`r3sizer-wasm`** — WebAssembly bindings (`wasm-bindgen`). WASM exports: `prepare_image` (sRGB→linear cache), `prepare_base` (resize+classify+baseline cache with params fingerprint fast-path), `process_image` (full pipeline), `get_base_data` (extract cached base for probe workers), `probe_batch` (run probes on raw base data), `compute_probe_detail` (precompute detail signal `D = input - blur(input)` for probe workers), `probe_batch_with_detail` (run probes using precomputed detail, skipping per-probe blur), `process_from_probes` (finish pipeline with externally-collected probes), `resolve_initial_strengths` (coarse/all strengths for parallel probing), `resolve_dense_strengths` (TwoPass dense window from coarse results). Thread-local `RefCell` caching for input, `PreparedBase`, and precomputed detail signal. Depends on `r3sizer-core` with `default-features = false` (no rayon). Color conversion in `convert.rs`.
 

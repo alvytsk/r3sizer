@@ -1,5 +1,8 @@
 //! Deterministic recommendation engine (v0.5).
 //!
+//! **Stability: experimental.** The recommendation kinds, thresholds, and
+//! output format may change in any minor version.
+//!
 //! Translates pipeline diagnostics + current params into actionable
 //! [`Recommendation`]s.  Each recommendation carries a self-contained
 //! [`ParamPatch`] that the UI can apply directly via `updateParams(patch)`.
@@ -102,7 +105,12 @@ fn rule_lower_strong_edge_gain(
             gain_table,
             max_backoff_iterations,
             backoff_scale_factor,
-        } => (classification, gain_table, *max_backoff_iterations, *backoff_scale_factor),
+        } => (
+            classification,
+            gain_table,
+            *max_backoff_iterations,
+            *backoff_scale_factor,
+        ),
         _ => return,
     };
 
@@ -271,8 +279,7 @@ fn rule_widen_probe_range(
     // Trigger B: selected strength near boundary
     let s = diag.selected_strength;
     let range = s_max - s_min;
-    let near_boundary = range > 0.0
-        && (s - s_min < range * 0.10 || s_max - s < range * 0.10);
+    let near_boundary = range > 0.0 && (s - s_min < range * 0.10 || s_max - s < range * 0.10);
 
     if !poor_fit && !near_boundary {
         return;
@@ -443,11 +450,7 @@ fn rule_switch_to_hybrid(
         reason: format!(
             "Hybrid policy would select s={:.3} (composite {:.4}) instead of \
              s={:.3} (composite {:.4}), a {:.0}% reduction in composite artifact score.",
-            alt_sample.strength,
-            alt_composite,
-            selected_s,
-            selected_composite,
-            improvement_pct,
+            alt_sample.strength, alt_composite, selected_s, selected_composite, improvement_pct,
         ),
         patch: ParamPatch {
             selection_policy: Some(SelectionPolicy::Hybrid),
@@ -498,11 +501,7 @@ fn interpolate_from_probes(probes: &[crate::types::ProbeSample], s: f32) -> Opti
 }
 
 /// Widen probe range by ~50% in each direction, adding intermediate points.
-fn widen_probes(
-    probes: &[crate::types::ProbeSample],
-    s_min: f32,
-    s_max: f32,
-) -> Vec<f32> {
+fn widen_probes(probes: &[crate::types::ProbeSample], s_min: f32, s_max: f32) -> Vec<f32> {
     let mut strengths: Vec<f32> = probes.iter().map(|p| p.strength).collect();
 
     let extent = s_max - s_min;
@@ -547,8 +546,14 @@ mod tests {
     /// Minimal diagnostics for testing — most fields at their simplest state.
     fn base_diag() -> AutoSharpDiagnostics {
         AutoSharpDiagnostics {
-            input_size: ImageSize { width: 100, height: 100 },
-            output_size: ImageSize { width: 50, height: 50 },
+            input_size: ImageSize {
+                width: 100,
+                height: 100,
+            },
+            output_size: ImageSize {
+                width: 50,
+                height: 50,
+            },
             sharpen_mode: SharpenMode::Lightness,
             metric_mode: MetricMode::RelativeToBase,
             artifact_metric: ArtifactMetric::ChannelClippingRatio,
@@ -556,13 +561,38 @@ mod tests {
             target_artifact_ratio: 0.001,
             baseline_artifact_ratio: 0.0,
             probe_samples: vec![
-                ProbeSample { strength: 0.05, artifact_ratio: 0.0001, metric_value: 0.0001, breakdown: None },
-                ProbeSample { strength: 0.15, artifact_ratio: 0.0005, metric_value: 0.0005, breakdown: None },
-                ProbeSample { strength: 0.30, artifact_ratio: 0.0015, metric_value: 0.0015, breakdown: None },
-                ProbeSample { strength: 0.50, artifact_ratio: 0.0040, metric_value: 0.0040, breakdown: None },
+                ProbeSample {
+                    strength: 0.05,
+                    artifact_ratio: 0.0001,
+                    metric_value: 0.0001,
+                    breakdown: None,
+                },
+                ProbeSample {
+                    strength: 0.15,
+                    artifact_ratio: 0.0005,
+                    metric_value: 0.0005,
+                    breakdown: None,
+                },
+                ProbeSample {
+                    strength: 0.30,
+                    artifact_ratio: 0.0015,
+                    metric_value: 0.0015,
+                    breakdown: None,
+                },
+                ProbeSample {
+                    strength: 0.50,
+                    artifact_ratio: 0.0040,
+                    metric_value: 0.0040,
+                    breakdown: None,
+                },
             ],
             fit_status: FitStatus::Success,
-            fit_coefficients: Some(CubicPolynomial { a: 0.01, b: 0.005, c: 0.001, d: 0.0 }),
+            fit_coefficients: Some(CubicPolynomial {
+                a: 0.01,
+                b: 0.005,
+                c: 0.001,
+                d: 0.0,
+            }),
             fit_quality: Some(FitQuality {
                 residual_sum_of_squares: 1e-8,
                 r_squared: 0.99,
@@ -626,8 +656,13 @@ mod tests {
         params.sharpen_strategy = SharpenStrategy::Uniform;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::SwitchToContentAdaptive).unwrap();
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::SwitchToContentAdaptive)
+            .unwrap();
         assert!(rec.patch.sharpen_strategy.is_some());
     }
 
@@ -644,7 +679,9 @@ mod tests {
         };
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
     }
 
     #[test]
@@ -653,7 +690,9 @@ mod tests {
         diag.evaluator_result = Some(eval_with_edge_density(0.10));
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToContentAdaptive));
     }
 
     // ── Rule 2: LowerStrongEdgeGain ──────────────────────────────────
@@ -663,10 +702,15 @@ mod tests {
         let mut diag = base_diag();
         diag.region_coverage = Some(RegionCoverage {
             total_pixels: 10000,
-            flat: 5000, textured: 2000, strong_edge: 1000,
-            microtexture: 500, risky_halo_zone: 2000,
-            flat_fraction: 0.50, textured_fraction: 0.20,
-            strong_edge_fraction: 0.10, microtexture_fraction: 0.05,
+            flat: 5000,
+            textured: 2000,
+            strong_edge: 1000,
+            microtexture: 500,
+            risky_halo_zone: 2000,
+            flat_fraction: 0.50,
+            textured_fraction: 0.20,
+            strong_edge_fraction: 0.10,
+            microtexture_fraction: 0.05,
             risky_halo_zone_fraction: 0.20,
         });
         let mut params = base_params();
@@ -678,7 +722,9 @@ mod tests {
         };
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::LowerStrongEdgeGain));
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::LowerStrongEdgeGain));
     }
 
     #[test]
@@ -686,10 +732,15 @@ mod tests {
         let mut diag = base_diag();
         diag.region_coverage = Some(RegionCoverage {
             total_pixels: 10000,
-            flat: 5000, textured: 2000, strong_edge: 1000,
-            microtexture: 500, risky_halo_zone: 2000,
-            flat_fraction: 0.50, textured_fraction: 0.20,
-            strong_edge_fraction: 0.10, microtexture_fraction: 0.05,
+            flat: 5000,
+            textured: 2000,
+            strong_edge: 1000,
+            microtexture: 500,
+            risky_halo_zone: 2000,
+            flat_fraction: 0.50,
+            textured_fraction: 0.20,
+            strong_edge_fraction: 0.10,
+            microtexture_fraction: 0.05,
             risky_halo_zone_fraction: 0.20,
         });
         let mut params = base_params();
@@ -697,7 +748,9 @@ mod tests {
         params.sharpen_strategy = SharpenStrategy::Uniform;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::LowerStrongEdgeGain));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::LowerStrongEdgeGain));
     }
 
     // ── Rule 3: RaiseArtifactBudget ──────────────────────────────────
@@ -707,14 +760,24 @@ mod tests {
         let mut diag = base_diag();
         diag.selected_strength = 0.15;
         // Use steeper coefficients so P_hat(0.40) >> default target 0.001.
-        diag.fit_coefficients = Some(CubicPolynomial { a: 0.5, b: 0.1, c: 0.01, d: 0.0 });
+        diag.fit_coefficients = Some(CubicPolynomial {
+            a: 0.5,
+            b: 0.1,
+            c: 0.01,
+            d: 0.0,
+        });
         let mut eval = eval_with_edge_density(0.10);
         eval.suggested_strength = Some(0.40); // > 30% diff from 0.15, within probe range
         diag.evaluator_result = Some(eval);
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::RaiseArtifactBudget));
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::RaiseArtifactBudget).unwrap();
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::RaiseArtifactBudget));
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::RaiseArtifactBudget)
+            .unwrap();
         assert!(rec.patch.target_artifact_ratio.is_some());
     }
 
@@ -727,7 +790,9 @@ mod tests {
         diag.evaluator_result = Some(eval);
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::RaiseArtifactBudget));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::RaiseArtifactBudget));
     }
 
     // ── Rule 4: SwitchToLightness ────────────────────────────────────
@@ -740,7 +805,9 @@ mod tests {
         params.sharpen_mode = SharpenMode::Rgb;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::SwitchToLightness));
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToLightness));
     }
 
     #[test]
@@ -749,7 +816,9 @@ mod tests {
         diag.evaluator_result = Some(eval_with_edge_density(0.20));
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToLightness));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToLightness));
     }
 
     // ── Rule 5: WidenProbeRange ──────────────────────────────────────
@@ -765,8 +834,13 @@ mod tests {
         });
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::WidenProbeRange));
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::WidenProbeRange).unwrap();
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::WidenProbeRange));
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::WidenProbeRange)
+            .unwrap();
         assert!(matches!(rec.severity, Severity::Warning));
     }
 
@@ -776,8 +850,13 @@ mod tests {
         diag.selected_strength = 0.052; // near min probe 0.05
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::WidenProbeRange));
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::WidenProbeRange).unwrap();
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::WidenProbeRange));
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::WidenProbeRange)
+            .unwrap();
         assert!(matches!(rec.severity, Severity::Suggestion));
     }
 
@@ -785,7 +864,9 @@ mod tests {
     fn rule5_skips_when_good_fit_and_centered() {
         let diag = base_diag(); // r² = 0.99, strength = 0.30 (centered)
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::WidenProbeRange));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::WidenProbeRange));
     }
 
     // ── Rule 6: LowerSigma ───────────────────────────────────────────
@@ -798,8 +879,13 @@ mod tests {
         params.sharpen_sigma = 2.0;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::LowerSigma));
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::LowerSigma).unwrap();
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::LowerSigma));
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::LowerSigma)
+            .unwrap();
         let new_sigma = rec.patch.sharpen_sigma.unwrap();
         assert!((new_sigma - 1.2).abs() < 0.05); // 2.0 * 0.6 = 1.2
     }
@@ -812,7 +898,9 @@ mod tests {
         params.sharpen_sigma = 1.0;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::LowerSigma));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::LowerSigma));
     }
 
     // ── Invariant: no field overlap ──────────────────────────────────
@@ -839,27 +927,40 @@ mod tests {
             for b in recs.iter().skip(i + 1) {
                 assert!(
                     !(a.patch.sharpen_strategy.is_some() && b.patch.sharpen_strategy.is_some()),
-                    "two recs both set sharpen_strategy: {:?} and {:?}", a.kind, b.kind
+                    "two recs both set sharpen_strategy: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
                 assert!(
-                    !(a.patch.target_artifact_ratio.is_some() && b.patch.target_artifact_ratio.is_some()),
-                    "two recs both set target_artifact_ratio: {:?} and {:?}", a.kind, b.kind
+                    !(a.patch.target_artifact_ratio.is_some()
+                        && b.patch.target_artifact_ratio.is_some()),
+                    "two recs both set target_artifact_ratio: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
                 assert!(
                     !(a.patch.sharpen_mode.is_some() && b.patch.sharpen_mode.is_some()),
-                    "two recs both set sharpen_mode: {:?} and {:?}", a.kind, b.kind
+                    "two recs both set sharpen_mode: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
                 assert!(
                     !(a.patch.probe_strengths.is_some() && b.patch.probe_strengths.is_some()),
-                    "two recs both set probe_strengths: {:?} and {:?}", a.kind, b.kind
+                    "two recs both set probe_strengths: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
                 assert!(
                     !(a.patch.sharpen_sigma.is_some() && b.patch.sharpen_sigma.is_some()),
-                    "two recs both set sharpen_sigma: {:?} and {:?}", a.kind, b.kind
+                    "two recs both set sharpen_sigma: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
                 assert!(
                     !(a.patch.selection_policy.is_some() && b.patch.selection_policy.is_some()),
-                    "two recs both set selection_policy: {:?} and {:?}", a.kind, b.kind
+                    "two recs both set selection_policy: {:?} and {:?}",
+                    a.kind,
+                    b.kind
                 );
             }
         }
@@ -870,8 +971,18 @@ mod tests {
     #[test]
     fn widen_probes_produces_sorted_range() {
         let probes = vec![
-            ProbeSample { strength: 0.05, artifact_ratio: 0.0, metric_value: 0.0, breakdown: None },
-            ProbeSample { strength: 0.50, artifact_ratio: 0.0, metric_value: 0.0, breakdown: None },
+            ProbeSample {
+                strength: 0.05,
+                artifact_ratio: 0.0,
+                metric_value: 0.0,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 0.50,
+                artifact_ratio: 0.0,
+                metric_value: 0.0,
+                breakdown: None,
+            },
         ];
         let result = widen_probes(&probes, 0.05, 0.50);
         assert!(result.len() > 2);
@@ -885,8 +996,18 @@ mod tests {
     #[test]
     fn interpolate_within_range() {
         let probes = vec![
-            ProbeSample { strength: 0.1, artifact_ratio: 0.0, metric_value: 0.001, breakdown: None },
-            ProbeSample { strength: 0.5, artifact_ratio: 0.0, metric_value: 0.005, breakdown: None },
+            ProbeSample {
+                strength: 0.1,
+                artifact_ratio: 0.0,
+                metric_value: 0.001,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.0,
+                metric_value: 0.005,
+                breakdown: None,
+            },
         ];
         let v = interpolate_from_probes(&probes, 0.3).unwrap();
         assert!((v - 0.003).abs() < 0.001);
@@ -895,8 +1016,18 @@ mod tests {
     #[test]
     fn interpolate_outside_range_returns_none() {
         let probes = vec![
-            ProbeSample { strength: 0.1, artifact_ratio: 0.0, metric_value: 0.001, breakdown: None },
-            ProbeSample { strength: 0.5, artifact_ratio: 0.0, metric_value: 0.005, breakdown: None },
+            ProbeSample {
+                strength: 0.1,
+                artifact_ratio: 0.0,
+                metric_value: 0.001,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.0,
+                metric_value: 0.005,
+                breakdown: None,
+            },
         ];
         assert!(interpolate_from_probes(&probes, 0.6).is_none());
     }
@@ -929,27 +1060,37 @@ mod tests {
         diag.probe_samples = vec![
             // s=1.0: within budget, great composite
             ProbeSample {
-                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                strength: 1.0,
+                artifact_ratio: 0.0005,
+                metric_value: 0.0005,
                 breakdown: make_breakdown(0.0005, 0.01),
             },
             // s=2.0: within budget, poor composite — this is what GamutOnly picked (max strength)
             ProbeSample {
-                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                strength: 2.0,
+                artifact_ratio: 0.0008,
+                metric_value: 0.0008,
                 breakdown: make_breakdown(0.0008, 0.06),
             },
             // s=3.0: exceeds budget
             ProbeSample {
-                strength: 3.0, artifact_ratio: 0.005, metric_value: 0.005,
+                strength: 3.0,
+                artifact_ratio: 0.005,
+                metric_value: 0.005,
                 breakdown: make_breakdown(0.005, 0.10),
             },
         ];
 
         let recs = generate_recommendations(&diag, &base_params());
         assert!(
-            recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid),
+            recs.iter()
+                .any(|r| r.kind == RecommendationKind::SwitchToHybrid),
             "should recommend Hybrid when composite improvement is significant"
         );
-        let rec = recs.iter().find(|r| r.kind == RecommendationKind::SwitchToHybrid).unwrap();
+        let rec = recs
+            .iter()
+            .find(|r| r.kind == RecommendationKind::SwitchToHybrid)
+            .unwrap();
         assert_eq!(rec.patch.selection_policy, Some(SelectionPolicy::Hybrid));
         assert!(rec.reason.contains("1.000")); // recommends s=1.0
     }
@@ -963,17 +1104,23 @@ mod tests {
         diag.probe_samples = vec![
             // GamutOnly picked s=1.0 (lowest gamut), but s=2.0 has much better composite
             ProbeSample {
-                strength: 1.0, artifact_ratio: 0.005, metric_value: 0.005,
+                strength: 1.0,
+                artifact_ratio: 0.005,
+                metric_value: 0.005,
                 breakdown: make_breakdown(0.005, 0.08),
             },
             ProbeSample {
-                strength: 2.0, artifact_ratio: 0.010, metric_value: 0.010,
+                strength: 2.0,
+                artifact_ratio: 0.010,
+                metric_value: 0.010,
                 breakdown: make_breakdown(0.010, 0.02),
             },
         ];
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToHybrid));
     }
 
     #[test]
@@ -984,11 +1131,15 @@ mod tests {
         diag.selection_policy = SelectionPolicy::Hybrid;
         diag.probe_samples = vec![
             ProbeSample {
-                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                strength: 1.0,
+                artifact_ratio: 0.0005,
+                metric_value: 0.0005,
                 breakdown: make_breakdown(0.0005, 0.01),
             },
             ProbeSample {
-                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                strength: 2.0,
+                artifact_ratio: 0.0008,
+                metric_value: 0.0008,
                 breakdown: make_breakdown(0.0008, 0.06),
             },
         ];
@@ -996,7 +1147,9 @@ mod tests {
         params.selection_policy = SelectionPolicy::Hybrid;
 
         let recs = generate_recommendations(&diag, &params);
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToHybrid));
     }
 
     #[test]
@@ -1006,17 +1159,23 @@ mod tests {
         diag.selection_policy = SelectionPolicy::GamutOnly;
         diag.probe_samples = vec![
             ProbeSample {
-                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                strength: 1.0,
+                artifact_ratio: 0.0005,
+                metric_value: 0.0005,
                 breakdown: make_breakdown(0.0005, 0.01),
             },
             ProbeSample {
-                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                strength: 2.0,
+                artifact_ratio: 0.0008,
+                metric_value: 0.0008,
                 breakdown: make_breakdown(0.0008, 0.06),
             },
         ];
 
         let recs = generate_recommendations(&diag, &base_params());
-        assert!(!recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid));
+        assert!(!recs
+            .iter()
+            .any(|r| r.kind == RecommendationKind::SwitchToHybrid));
     }
 
     #[test]
@@ -1027,18 +1186,24 @@ mod tests {
         diag.selection_policy = SelectionPolicy::GamutOnly;
         diag.probe_samples = vec![
             ProbeSample {
-                strength: 1.0, artifact_ratio: 0.0005, metric_value: 0.0005,
+                strength: 1.0,
+                artifact_ratio: 0.0005,
+                metric_value: 0.0005,
                 breakdown: make_breakdown(0.0005, 0.049), // only ~2% better than 0.05
             },
             ProbeSample {
-                strength: 2.0, artifact_ratio: 0.0008, metric_value: 0.0008,
+                strength: 2.0,
+                artifact_ratio: 0.0008,
+                metric_value: 0.0008,
                 breakdown: make_breakdown(0.0008, 0.050),
             },
         ];
 
         let recs = generate_recommendations(&diag, &base_params());
         assert!(
-            !recs.iter().any(|r| r.kind == RecommendationKind::SwitchToHybrid),
+            !recs
+                .iter()
+                .any(|r| r.kind == RecommendationKind::SwitchToHybrid),
             "should not recommend Hybrid for marginal improvement"
         );
     }

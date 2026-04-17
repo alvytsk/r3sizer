@@ -51,8 +51,8 @@ fn has_ringing(samples: &[f32; 5]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::edges::EdgeProfile;
+    use super::*;
 
     fn profile(diff: [f32; 5]) -> EdgeProfile {
         EdgeProfile {

@@ -1,10 +1,10 @@
 use r3sizer_core::{
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ChromaRegionFactors, ClassificationParams, ClampPolicy, CrossingStatus, DiagnosticsLevel,
-    ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable,
-    LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig, ResizeKernel,
-    ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
-    process_auto_sharp_downscale,
+    process_auto_sharp_downscale, AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics,
+    AutoSharpParams, ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus,
+    DiagnosticsLevel, ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize,
+    KernelTable, LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig,
+    ResizeKernel, ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode,
+    SharpenStrategy,
 };
 
 // ---------------------------------------------------------------------------
@@ -65,8 +65,20 @@ fn gradient_downscale_output_dimensions() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 4);
     assert_eq!(out.image.height(), 4);
-    assert_eq!(out.diagnostics.output_size, ImageSize { width: 4, height: 4 });
-    assert_eq!(out.diagnostics.input_size, ImageSize { width: 16, height: 16 });
+    assert_eq!(
+        out.diagnostics.output_size,
+        ImageSize {
+            width: 4,
+            height: 4
+        }
+    );
+    assert_eq!(
+        out.diagnostics.input_size,
+        ImageSize {
+            width: 16,
+            height: 16
+        }
+    );
 }
 
 #[test]
@@ -122,7 +134,7 @@ fn selected_strength_within_probe_range() {
     let s = out.diagnostics.selected_strength;
     // Default is Photo preset: TwoPass with coarse_max=1.0
     assert!(
-        s >= 0.00 && s <= 1.00,
+        (0.00..=1.00).contains(&s),
         "selected_strength {s} outside probe range [0.00, 1.00]"
     );
 }
@@ -135,7 +147,7 @@ fn probe_sample_count_matches_config() {
     // Default is TwoPass: 7 coarse + 4 dense = 11 total probes
     let count = out.diagnostics.probe_samples.len();
     assert!(
-        count >= 7 && count <= 11,
+        (7..=11).contains(&count),
         "expected 7-11 probes for TwoPass default, got {count}"
     );
 }
@@ -160,7 +172,10 @@ fn output_pixels_all_clamped_after_clamp_policy() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for &v in out.image.pixels() {
-        assert!(v >= 0.0 && v <= 1.0, "pixel value {v} outside [0,1] after clamping");
+        assert!(
+            (0.0..=1.0).contains(&v),
+            "pixel value {v} outside [0,1] after clamping"
+        );
     }
 }
 
@@ -227,7 +242,11 @@ fn relative_mode_metric_values_are_nonnegative() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for ps in &out.diagnostics.probe_samples {
-        assert!(ps.metric_value >= 0.0, "relative metric_value {} < 0", ps.metric_value);
+        assert!(
+            ps.metric_value >= 0.0,
+            "relative metric_value {} < 0",
+            ps.metric_value
+        );
     }
 }
 
@@ -322,7 +341,10 @@ fn pixel_out_of_gamut_metric_produces_valid_result() {
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 4);
     assert!(out.diagnostics.measured_artifact_ratio >= 0.0);
-    assert_eq!(out.diagnostics.artifact_metric, ArtifactMetric::PixelOutOfGamutRatio);
+    assert_eq!(
+        out.diagnostics.artifact_metric,
+        ArtifactMetric::PixelOutOfGamutRatio
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -334,7 +356,10 @@ fn fit_quality_present_for_cubic_strategy() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let q = out.diagnostics.fit_quality.expect("fit_quality should be present for cubic strategy");
+    let q = out
+        .diagnostics
+        .fit_quality
+        .expect("fit_quality should be present for cubic strategy");
     assert!(q.r_squared.is_finite());
     assert!(q.residual_sum_of_squares.is_finite());
     assert!(q.max_residual.is_finite());
@@ -361,7 +386,10 @@ fn robustness_flags_present() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let r = out.diagnostics.robustness.expect("robustness should be present");
+    let r = out
+        .diagnostics
+        .robustness
+        .expect("robustness should be present");
     // quasi_monotonic should be at least as permissive as monotonic.
     if r.monotonic {
         assert!(r.quasi_monotonic);
@@ -391,7 +419,10 @@ fn direct_search_has_fallback_reason() {
         ..default_params(16, 16)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    assert_eq!(out.diagnostics.fallback_reason, Some(FallbackReason::DirectSearchConfigured));
+    assert_eq!(
+        out.diagnostics.fallback_reason,
+        Some(FallbackReason::DirectSearchConfigured)
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +445,21 @@ fn timing_total_gte_parts() {
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let t = &out.diagnostics.timing;
-    let parts_sum = t.resize_us + t.contrast_us + t.baseline_us + t.probing_us
-        + t.fit_us + t.robustness_us + t.final_sharpen_us + t.clamp_us;
+    let parts_sum = t.resize_us
+        + t.contrast_us
+        + t.baseline_us
+        + t.probing_us
+        + t.fit_us
+        + t.robustness_us
+        + t.final_sharpen_us
+        + t.clamp_us;
     // Total should be >= sum of parts (captures overhead between stages too).
-    assert!(t.total_us >= parts_sum / 2, "total_us={} should be roughly >= parts_sum={}", t.total_us, parts_sum);
+    assert!(
+        t.total_us >= parts_sum / 2,
+        "total_us={} should be roughly >= parts_sum={}",
+        t.total_us,
+        parts_sum
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +474,10 @@ fn metric_breakdown_present_in_diagnostics() {
         ..default_params(16, 16)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let mc = out.diagnostics.metric_components.expect("metric_components should be present");
+    let mc = out
+        .diagnostics
+        .metric_components
+        .expect("metric_components should be present");
     assert_eq!(mc.components.len(), 4);
     assert_eq!(mc.selected_metric, MetricComponent::GamutExcursion);
     assert!(mc.selection_score.is_finite());
@@ -454,7 +499,10 @@ fn probe_samples_have_no_breakdown_even_in_full_mode() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for sample in &out.diagnostics.probe_samples {
-        assert!(sample.breakdown.is_none(), "probes should not have breakdown (fast path)");
+        assert!(
+            sample.breakdown.is_none(),
+            "probes should not have breakdown (fast path)"
+        );
     }
     // But the final metric components should still be present.
     assert!(out.diagnostics.metric_components.is_some());
@@ -466,7 +514,10 @@ fn probe_samples_stripped_in_summary_mode() {
     let params = default_params(16, 16); // default = Summary
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     for sample in &out.diagnostics.probe_samples {
-        assert!(sample.breakdown.is_none(), "breakdown should be stripped in Summary mode");
+        assert!(
+            sample.breakdown.is_none(),
+            "breakdown should be stripped in Summary mode"
+        );
     }
 }
 
@@ -496,8 +547,12 @@ fn composite_score_equals_weighted_sum() {
         + w.halo_ringing * mc.components[&MetricComponent::HaloRinging]
         + w.edge_overshoot * mc.components[&MetricComponent::EdgeOvershoot]
         + w.texture_flattening * mc.components[&MetricComponent::TextureFlattening];
-    assert!((mc.composite_score - expected).abs() < 1e-6,
-        "composite_score {} != weighted sum {}", mc.composite_score, expected);
+    assert!(
+        (mc.composite_score - expected).abs() < 1e-6,
+        "composite_score {} != weighted sum {}",
+        mc.composite_score,
+        expected
+    );
 }
 
 #[test]
@@ -523,11 +578,18 @@ fn v02_components_are_finite_and_nonnegative() {
     let mc = out.diagnostics.metric_components.unwrap();
     for (&_component, &value) in &mc.components {
         assert!(value.is_finite(), "component value must be finite");
-        assert!(value >= 0.0, "component value must be non-negative: {value}");
+        assert!(
+            value >= 0.0,
+            "component value must be non-negative: {value}"
+        );
     }
     // Per-probe breakdowns are no longer computed (fast probing path).
     // Verify the final metric_components is complete instead.
-    assert_eq!(mc.components.len(), 4, "final breakdown should have all 4 components");
+    assert_eq!(
+        mc.components.len(),
+        4,
+        "final breakdown should have all 4 components"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -578,8 +640,14 @@ fn default_strategy_is_content_adaptive() {
     let d = &out.diagnostics;
 
     // Default is now ContentAdaptive (Photo preset)
-    assert!(d.region_coverage.is_some(), "region_coverage should be present for ContentAdaptive");
-    assert!(d.adaptive_validation.is_some(), "adaptive_validation should be present for ContentAdaptive");
+    assert!(
+        d.region_coverage.is_some(),
+        "region_coverage should be present for ContentAdaptive"
+    );
+    assert!(
+        d.adaptive_validation.is_some(),
+        "adaptive_validation should be present for ContentAdaptive"
+    );
     assert!(d.timing.classification_us.is_some());
     assert!(d.timing.adaptive_validation_us.is_some());
 
@@ -606,7 +674,10 @@ fn content_adaptive_happy_path() {
     let d = &out.diagnostics;
 
     // Region coverage present and sums to pixel count
-    let cov = d.region_coverage.as_ref().expect("region_coverage should be Some");
+    let cov = d
+        .region_coverage
+        .as_ref()
+        .expect("region_coverage should be Some");
     assert_eq!(cov.total_pixels, 16 * 16);
     assert_eq!(
         cov.flat + cov.textured + cov.strong_edge + cov.microtexture + cov.risky_halo_zone,
@@ -614,12 +685,17 @@ fn content_adaptive_happy_path() {
     );
 
     // Adaptive validation present
-    let val = d.adaptive_validation.as_ref().expect("adaptive_validation should be Some");
+    let val = d
+        .adaptive_validation
+        .as_ref()
+        .expect("adaptive_validation should be Some");
     match val {
         AdaptiveValidationOutcome::PassedDirect { measured_metric } => {
             assert!(*measured_metric <= 0.1);
         }
-        AdaptiveValidationOutcome::PassedAfterBackoff { measured_metric, .. } => {
+        AdaptiveValidationOutcome::PassedAfterBackoff {
+            measured_metric, ..
+        } => {
             assert!(*measured_metric <= 0.1);
         }
         _ => {} // FailedBudgetExceeded is acceptable — it's content-dependent
@@ -633,7 +709,10 @@ fn content_adaptive_happy_path() {
     assert_eq!(out.image.width(), 16);
     assert_eq!(out.image.height(), 16);
     for &v in out.image.pixels() {
-        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1] after clamping");
+        assert!(
+            (0.0..=1.0).contains(&v),
+            "pixel {v} outside [0,1] after clamping"
+        );
     }
 }
 
@@ -651,7 +730,11 @@ fn content_adaptive_deterministic() {
     };
     let out1 = process_auto_sharp_downscale(&src, &params).unwrap();
     let out2 = process_auto_sharp_downscale(&src, &params).unwrap();
-    assert_eq!(out1.image.pixels(), out2.image.pixels(), "adaptive pipeline must be deterministic");
+    assert_eq!(
+        out1.image.pixels(),
+        out2.image.pixels(),
+        "adaptive pipeline must be deterministic"
+    );
     assert_eq!(
         out1.diagnostics.selected_strength,
         out2.diagnostics.selected_strength,
@@ -672,7 +755,10 @@ fn content_adaptive_tight_budget_triggers_backoff_or_failure() {
         ..default_params(8, 8)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let val = out.diagnostics.adaptive_validation.as_ref()
+    let val = out
+        .diagnostics
+        .adaptive_validation
+        .as_ref()
         .expect("adaptive_validation should be Some");
 
     match val {
@@ -705,8 +791,7 @@ fn gamut_only_policy_identical_to_default() {
     let out_default = process_auto_sharp_downscale(&src, &params_default).unwrap();
     let out_explicit = process_auto_sharp_downscale(&src, &params_explicit).unwrap();
     assert_eq!(
-        out_default.diagnostics.selected_strength,
-        out_explicit.diagnostics.selected_strength,
+        out_default.diagnostics.selected_strength, out_explicit.diagnostics.selected_strength,
         "GamutOnly must be identical to default behavior"
     );
     assert_eq!(out_default.image.pixels(), out_explicit.image.pixels());
@@ -729,7 +814,9 @@ fn hybrid_policy_respects_gamut_budget() {
     // Without per-probe breakdowns, Hybrid falls back to gamut-only ranking (max strength),
     // which still respects the gamut budget constraint.
     if d.selection_mode == SelectionMode::BestSampleWithinBudget {
-        let selected = d.probe_samples.iter()
+        let selected = d
+            .probe_samples
+            .iter()
             .find(|s| (s.strength - d.selected_strength).abs() < 1e-6)
             .expect("selected strength must correspond to a probe sample");
         assert!(
@@ -751,7 +838,7 @@ fn hybrid_policy_produces_valid_result() {
     assert_eq!(out.image.width(), 8);
     assert_eq!(out.image.height(), 8);
     for &v in out.image.pixels() {
-        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1]");
+        assert!((0.0..=1.0).contains(&v), "pixel {v} outside [0,1]");
     }
 }
 
@@ -794,7 +881,10 @@ fn composite_only_produces_valid_result() {
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 16);
-    assert_eq!(out.diagnostics.selection_policy, SelectionPolicy::CompositeOnly);
+    assert_eq!(
+        out.diagnostics.selection_policy,
+        SelectionPolicy::CompositeOnly
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -850,7 +940,11 @@ fn content_adaptive_resize_happy_path() {
         .expect("resize_strategy_diagnostics should be Some for content-adaptive");
     assert!(!diag.kernels_used.is_empty());
     let total: u32 = diag.per_kernel_pixel_count.values().sum();
-    assert_eq!(total, 16 * 16, "per_kernel_pixel_count must sum to target pixel count");
+    assert_eq!(
+        total,
+        16 * 16,
+        "per_kernel_pixel_count must sum to target pixel count"
+    );
 }
 
 #[test]
@@ -931,7 +1025,7 @@ fn two_pass_produces_valid_result() {
     assert_eq!(out.image.width(), 16);
     assert_eq!(out.image.height(), 16);
     for &v in out.image.pixels() {
-        assert!(v >= 0.0 && v <= 1.0, "pixel {v} outside [0,1]");
+        assert!((0.0..=1.0).contains(&v), "pixel {v} outside [0,1]");
     }
     assert!(out.diagnostics.selected_strength > 0.0);
     assert!(out.diagnostics.measured_artifact_ratio.is_finite());
@@ -961,7 +1055,10 @@ fn two_pass_dense_window_within_coarse_range() {
     assert!(
         pp.dense_min >= pp.coarse_min && pp.dense_max <= pp.coarse_max,
         "dense window [{}, {}] not within coarse range [{}, {}]",
-        pp.dense_min, pp.dense_max, pp.coarse_min, pp.coarse_max,
+        pp.dense_min,
+        pp.dense_max,
+        pp.coarse_min,
+        pp.coarse_max,
     );
 }
 
@@ -996,25 +1093,47 @@ fn two_pass_probe_count_gte_static_minimum() {
 
 #[test]
 fn two_pass_validation_rejects_bad_params() {
-    let base = AutoSharpParams { target_width: 16, target_height: 16, ..AutoSharpParams::default() };
+    let base = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        ..AutoSharpParams::default()
+    };
 
     // coarse_count too small
     let p = AutoSharpParams {
-        probe_strengths: ProbeConfig::TwoPass { coarse_count: 2, coarse_min: 0.05, coarse_max: 3.0, dense_count: 4, window_margin: 0.5 },
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 2,
+            coarse_min: 0.05,
+            coarse_max: 3.0,
+            dense_count: 4,
+            window_margin: 0.5,
+        },
         ..base.clone()
     };
     assert!(p.validate().is_err());
 
     // dense_count too small
     let p = AutoSharpParams {
-        probe_strengths: ProbeConfig::TwoPass { coarse_count: 5, coarse_min: 0.05, coarse_max: 3.0, dense_count: 1, window_margin: 0.5 },
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 5,
+            coarse_min: 0.05,
+            coarse_max: 3.0,
+            dense_count: 1,
+            window_margin: 0.5,
+        },
         ..base.clone()
     };
     assert!(p.validate().is_err());
 
     // coarse_min >= coarse_max
     let p = AutoSharpParams {
-        probe_strengths: ProbeConfig::TwoPass { coarse_count: 5, coarse_min: 2.0, coarse_max: 1.0, dense_count: 4, window_margin: 0.5 },
+        probe_strengths: ProbeConfig::TwoPass {
+            coarse_count: 5,
+            coarse_min: 2.0,
+            coarse_max: 1.0,
+            dense_count: 4,
+            window_margin: 0.5,
+        },
         ..base.clone()
     };
     assert!(p.validate().is_err());
@@ -1029,15 +1148,32 @@ fn base_resize_quality_present_and_finite() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let bq = out.diagnostics.base_resize_quality
+    let bq = out
+        .diagnostics
+        .base_resize_quality
         .expect("base_resize_quality should always be present");
-    assert!(bq.edge_retention.is_finite(), "edge_retention must be finite");
-    assert!(bq.texture_retention.is_finite(), "texture_retention must be finite");
+    assert!(
+        bq.edge_retention.is_finite(),
+        "edge_retention must be finite"
+    );
+    assert!(
+        bq.texture_retention.is_finite(),
+        "texture_retention must be finite"
+    );
     assert!(bq.ringing_score.is_finite(), "ringing_score must be finite");
-    assert!(bq.envelope_scale.is_finite(), "envelope_scale must be finite");
-    assert!(bq.ringing_score >= 0.0, "ringing_score must be non-negative");
-    assert!(bq.envelope_scale >= 0.65 && bq.envelope_scale <= 1.0,
-        "envelope_scale must be in [0.65, 1.0], got {}", bq.envelope_scale);
+    assert!(
+        bq.envelope_scale.is_finite(),
+        "envelope_scale must be finite"
+    );
+    assert!(
+        bq.ringing_score >= 0.0,
+        "ringing_score must be non-negative"
+    );
+    assert!(
+        bq.envelope_scale >= 0.65 && bq.envelope_scale <= 1.0,
+        "envelope_scale must be in [0.65, 1.0], got {}",
+        bq.envelope_scale
+    );
 }
 
 #[test]
@@ -1049,12 +1185,14 @@ fn effective_target_never_above_requested() {
     assert!(
         d.effective_target_artifact_ratio <= d.target_artifact_ratio + 1e-9,
         "effective {} must not exceed requested {}",
-        d.effective_target_artifact_ratio, d.target_artifact_ratio,
+        d.effective_target_artifact_ratio,
+        d.target_artifact_ratio,
     );
     assert!(
         d.effective_target_artifact_ratio >= d.target_artifact_ratio * 0.65 - 1e-9,
         "effective {} must be >= requested * 0.65 = {}",
-        d.effective_target_artifact_ratio, d.target_artifact_ratio * 0.65,
+        d.effective_target_artifact_ratio,
+        d.target_artifact_ratio * 0.65,
     );
 }
 
@@ -1069,7 +1207,9 @@ fn envelope_formula_consistent() {
     assert!(
         (d.effective_target_artifact_ratio - expected).abs() < 1e-9,
         "effective {} != target {} * envelope_scale {}",
-        d.effective_target_artifact_ratio, d.target_artifact_ratio, bq.envelope_scale,
+        d.effective_target_artifact_ratio,
+        d.target_artifact_ratio,
+        bq.envelope_scale,
     );
 }
 
@@ -1080,8 +1220,14 @@ fn smooth_image_minimal_ringing() {
     let params = default_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     let bq = out.diagnostics.base_resize_quality.unwrap();
-    assert_eq!(bq.ringing_score, 0.0, "solid image should have zero ringing");
-    assert!((bq.envelope_scale - 1.0).abs() < 1e-6, "no ringing -> envelope_scale == 1.0");
+    assert_eq!(
+        bq.ringing_score, 0.0,
+        "solid image should have zero ringing"
+    );
+    assert!(
+        (bq.envelope_scale - 1.0).abs() < 1e-6,
+        "no ringing -> envelope_scale == 1.0"
+    );
 }
 
 #[test]
@@ -1126,23 +1272,38 @@ fn chroma_guard_per_region_diagnostics_with_content_adaptive() {
     let src = gradient_image(64, 64);
     let params = content_adaptive_chroma_params(16, 16);
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let cg = out.diagnostics.chroma_guard
+    let cg = out
+        .diagnostics
+        .chroma_guard
         .expect("chroma_guard diagnostics should be present");
-    let pr = cg.per_region
+    let pr = cg
+        .per_region
         .expect("per_region should be present with ContentAdaptive + region_factors");
 
     // Every field should be finite
-    for stats in [&pr.flat, &pr.textured, &pr.strong_edge, &pr.microtexture, &pr.risky_halo_zone] {
+    for stats in [
+        &pr.flat,
+        &pr.textured,
+        &pr.strong_edge,
+        &pr.microtexture,
+        &pr.risky_halo_zone,
+    ] {
         assert!(stats.mean_shift.is_finite());
         assert!(stats.max_shift.is_finite());
         assert!(stats.clamped_fraction.is_finite());
     }
 
     // Total pixel counts should sum to image dimensions
-    let total = pr.flat.pixel_count + pr.textured.pixel_count
-        + pr.strong_edge.pixel_count + pr.microtexture.pixel_count
+    let total = pr.flat.pixel_count
+        + pr.textured.pixel_count
+        + pr.strong_edge.pixel_count
+        + pr.microtexture.pixel_count
         + pr.risky_halo_zone.pixel_count;
-    assert_eq!(total, 16 * 16, "region pixel counts must sum to output dimensions");
+    assert_eq!(
+        total,
+        16 * 16,
+        "region pixel counts must sum to output dimensions"
+    );
 }
 
 #[test]
@@ -1153,9 +1314,14 @@ fn chroma_guard_per_region_absent_for_uniform() {
         ..default_params(16, 16)
     };
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let cg = out.diagnostics.chroma_guard
+    let cg = out
+        .diagnostics
+        .chroma_guard
         .expect("chroma_guard diagnostics should be present");
-    assert!(cg.per_region.is_none(), "per_region should be None for Uniform strategy");
+    assert!(
+        cg.per_region.is_none(),
+        "per_region should be None for Uniform strategy"
+    );
 }
 
 #[test]
@@ -1163,7 +1329,9 @@ fn chroma_guard_effective_threshold_stats_present() {
     let src = gradient_image(64, 64);
     let params = default_params(16, 16); // default has saturation_guard on
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let cg = out.diagnostics.chroma_guard
+    let cg = out
+        .diagnostics
+        .chroma_guard
         .expect("chroma_guard diagnostics should be present");
     // Saturation guard is on by default -> effective threshold stats should be present
     assert!(cg.effective_threshold_min.is_some());
@@ -1179,8 +1347,14 @@ fn chroma_region_factors_defaults_monotone() {
     // Tighter protection for edges/halos, more permissive for flat regions
     assert!(f.flat >= f.textured, "flat >= textured");
     assert!(f.textured >= f.microtexture, "textured >= microtexture");
-    assert!(f.microtexture >= f.strong_edge, "microtexture >= strong_edge");
-    assert!(f.strong_edge >= f.risky_halo_zone, "strong_edge >= risky_halo_zone");
+    assert!(
+        f.microtexture >= f.strong_edge,
+        "microtexture >= strong_edge"
+    );
+    assert!(
+        f.strong_edge >= f.risky_halo_zone,
+        "strong_edge >= risky_halo_zone"
+    );
 }
 
 #[test]
@@ -1197,7 +1371,10 @@ fn saturation_guard_tightens_for_saturated_pixels() {
         experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
             max_chroma_shift: 0.10,
             chroma_region_factors: None,
-            saturation_guard: Some(SaturationGuardParams { min_scale: 0.6, gamma: 1.5 }),
+            saturation_guard: Some(SaturationGuardParams {
+                min_scale: 0.6,
+                gamma: 1.5,
+            }),
         }),
         ..AutoSharpParams::default()
     };
@@ -1209,8 +1386,7 @@ fn saturation_guard_tightens_for_saturated_pixels() {
     // The saturation factor < 1.0 for saturated pixels should pull the mean down.
     let eff_mean = cg.effective_threshold_mean.unwrap();
     let eff_max = cg.effective_threshold_max.unwrap();
-    assert!(eff_mean < eff_max || eff_mean == eff_max,
-        "mean should be <= max");
+    assert!(eff_mean <= eff_max, "mean should be <= max");
     assert!(eff_mean.is_finite());
 }
 
@@ -1224,7 +1400,8 @@ fn fast_mode_produces_valid_result() {
     let params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Fast),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 80);
     assert_eq!(out.image.height(), 60);
@@ -1237,7 +1414,8 @@ fn quality_mode_produces_valid_result() {
     let params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Quality),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
     assert_eq!(out.image.width(), 80);
     assert_eq!(out.image.height(), 60);
@@ -1250,11 +1428,13 @@ fn fast_mode_has_fewer_probes_than_quality() {
     let fast_params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Fast),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
     let quality_params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Quality),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
 
     let fast_out = process_auto_sharp_downscale(&src, &fast_params).unwrap();
     let quality_out = process_auto_sharp_downscale(&src, &quality_params).unwrap();
@@ -1272,16 +1452,24 @@ fn fast_mode_uses_uniform_strategy() {
     let params = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Fast),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
     // After resolving, sharpen_strategy should be Uniform
     assert!(
         matches!(params.sharpen_strategy, SharpenStrategy::Uniform),
-        "fast mode should use uniform strategy, got {:?}", params.sharpen_strategy,
+        "fast mode should use uniform strategy, got {:?}",
+        params.sharpen_strategy,
     );
     // Chroma guard should be disabled
-    assert!(params.experimental_sharpen_mode.is_none(), "fast mode should disable chroma guard");
+    assert!(
+        params.experimental_sharpen_mode.is_none(),
+        "fast mode should disable chroma guard"
+    );
     // Evaluator should be disabled
-    assert!(params.evaluator_config.is_none(), "fast mode should disable evaluator");
+    assert!(
+        params.evaluator_config.is_none(),
+        "fast mode should disable evaluator"
+    );
 }
 
 #[test]
@@ -1293,13 +1481,23 @@ fn quality_mode_ensures_adaptive_strategy() {
         experimental_sharpen_mode: None,
         evaluator_config: None,
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
     assert!(
-        matches!(params.sharpen_strategy, SharpenStrategy::ContentAdaptive { .. }),
+        matches!(
+            params.sharpen_strategy,
+            SharpenStrategy::ContentAdaptive { .. }
+        ),
         "quality mode should ensure adaptive strategy",
     );
-    assert!(params.experimental_sharpen_mode.is_some(), "quality mode should enable chroma guard");
-    assert!(params.evaluator_config.is_some(), "quality mode should enable evaluator");
+    assert!(
+        params.experimental_sharpen_mode.is_some(),
+        "quality mode should enable chroma guard"
+    );
+    assert!(
+        params.evaluator_config.is_some(),
+        "quality mode should enable evaluator"
+    );
 }
 
 #[test]
@@ -1308,7 +1506,8 @@ fn balanced_mode_preserves_defaults() {
     let resolved = AutoSharpParams {
         pipeline_mode: Some(PipelineMode::Balanced),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
 
     // Balanced should not change any fields (it's a no-op)
     assert_eq!(
@@ -1325,15 +1524,26 @@ fn balanced_mode_preserves_defaults() {
 fn mode_preserves_p0_and_sigma() {
     let custom_p0 = 0.005;
     let custom_sigma = 1.5;
-    for mode in [PipelineMode::Fast, PipelineMode::Balanced, PipelineMode::Quality] {
+    for mode in [
+        PipelineMode::Fast,
+        PipelineMode::Balanced,
+        PipelineMode::Quality,
+    ] {
         let params = AutoSharpParams {
             pipeline_mode: Some(mode),
             target_artifact_ratio: custom_p0,
             sharpen_sigma: custom_sigma,
             ..AutoSharpParams::photo(80, 60)
-        }.resolved();
-        assert_eq!(params.target_artifact_ratio, custom_p0, "{mode:?} should preserve P0");
-        assert_eq!(params.sharpen_sigma, custom_sigma, "{mode:?} should preserve sigma");
+        }
+        .resolved();
+        assert_eq!(
+            params.target_artifact_ratio, custom_p0,
+            "{mode:?} should preserve P0"
+        );
+        assert_eq!(
+            params.sharpen_sigma, custom_sigma,
+            "{mode:?} should preserve sigma"
+        );
     }
 }
 
@@ -1357,16 +1567,23 @@ fn two_pass_early_stop_fires_on_easy_crossing() {
         },
         pipeline_mode: Some(PipelineMode::Quality),
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
 
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let diag = out.diagnostics.probe_pass_diagnostics.as_ref()
+    let diag = out
+        .diagnostics
+        .probe_pass_diagnostics
+        .as_ref()
         .expect("TwoPass should produce pass diagnostics");
 
     // If early stopping fired, coarse_probes_used < coarse_count
     if let Some(used) = diag.coarse_probes_used {
-        assert!(used < diag.coarse_count,
-            "early stop should use fewer probes: used={used}, configured={}", diag.coarse_count);
+        assert!(
+            used < diag.coarse_count,
+            "early stop should use fewer probes: used={used}, configured={}",
+            diag.coarse_count
+        );
         assert!(used >= 3, "should use at least 3 coarse probes");
     }
     // Either way, the result should be valid
@@ -1389,13 +1606,20 @@ fn two_pass_no_early_stop_when_all_under_budget() {
             window_margin: 0.5,
         },
         ..AutoSharpParams::photo(80, 60)
-    }.resolved();
+    }
+    .resolved();
 
     let out = process_auto_sharp_downscale(&src, &params).unwrap();
-    let diag = out.diagnostics.probe_pass_diagnostics.as_ref()
+    let diag = out
+        .diagnostics
+        .probe_pass_diagnostics
+        .as_ref()
         .expect("TwoPass should produce pass diagnostics");
 
     // No early stop: all coarse probes should have run
-    assert!(diag.coarse_probes_used.is_none(),
-        "no bracket → no early stop, but got coarse_probes_used={:?}", diag.coarse_probes_used);
+    assert!(
+        diag.coarse_probes_used.is_none(),
+        "no bracket → no early stop, but got coarse_probes_used={:?}",
+        diag.coarse_probes_used
+    );
 }

@@ -15,8 +15,8 @@ pub use gamut::{channel_clipping_ratio, pixel_out_of_gamut_ratio};
 
 use std::collections::BTreeMap;
 
-use crate::{ArtifactMetric, MetricBreakdown, MetricComponent, MetricWeights};
 use crate::types::LinearRgbImage;
+use crate::{ArtifactMetric, MetricBreakdown, MetricComponent, MetricWeights};
 
 /// Compute the full per-component metric breakdown.
 ///
@@ -57,13 +57,8 @@ pub fn compute_metric_breakdown(
         texture::DEFAULT_TEXTURE_THRESHOLD,
     );
 
-    let composite_score = composite::weighted_aggregate(
-        gamut,
-        halo_score,
-        overshoot_score,
-        texture_score,
-        weights,
-    );
+    let composite_score =
+        composite::weighted_aggregate(gamut, halo_score, overshoot_score, texture_score, weights);
 
     let mut components = BTreeMap::new();
     components.insert(MetricComponent::GamutExcursion, gamut);

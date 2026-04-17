@@ -27,8 +27,9 @@ pub fn save_from_linear(img: &LinearRgbImage, path: &Path) -> Result<(), IoError
 
     // Build image buffer and save.
     let buf: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(img.width(), img.height(), bytes)
-            .ok_or_else(|| IoError::UnsupportedFormat("failed to build output ImageBuffer".into()))?;
+        ImageBuffer::from_raw(img.width(), img.height(), bytes).ok_or_else(|| {
+            IoError::UnsupportedFormat("failed to build output ImageBuffer".into())
+        })?;
 
     buf.save(path)?;
     Ok(())

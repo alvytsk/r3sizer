@@ -5,9 +5,9 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use r3sizer_core::SelectionMode;
-use r3sizer_io::{load_as_linear, save_from_linear};
+use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
 
-use crate::args::Cli;
+use crate::args::SweepArgs;
 use crate::run::{build_params, resolve_dimensions};
 
 /// Supported image extensions for sweep mode.
@@ -97,24 +97,30 @@ pub struct SweepSummary {
 }
 
 /// Run sweep mode: process all images in a directory.
-pub fn run_sweep(args: &Cli) -> Result<()> {
-    let sweep_dir = args.sweep_dir.as_ref().expect("sweep_dir is required");
-    if !sweep_dir.is_dir() {
-        bail!("--sweep-dir path is not a directory: {}", sweep_dir.display());
+pub fn run_sweep(args: &SweepArgs) -> Result<()> {
+    if !args.in_dir.is_dir() {
+        bail!(
+            "--in-dir path is not a directory: {}",
+            args.in_dir.display()
+        );
     }
 
-    let files = find_images(sweep_dir)?;
+    let files = find_images(&args.in_dir)?;
     if files.is_empty() {
-        bail!("no image files found in {}", sweep_dir.display());
+        bail!("no image files found in {}", args.in_dir.display());
     }
 
     // Create output directory if specified.
-    if let Some(ref out_dir) = args.sweep_output_dir {
+    if let Some(ref out_dir) = args.out_dir {
         std::fs::create_dir_all(out_dir)
             .with_context(|| format!("failed to create output directory: {}", out_dir.display()))?;
     }
 
-    println!("Sweep: processing {} files from {}", files.len(), sweep_dir.display());
+    println!(
+        "Sweep: processing {} files from {}",
+        files.len(),
+        args.in_dir.display()
+    );
 
     let mut results = Vec::new();
     let mut errors = Vec::new();
@@ -146,7 +152,10 @@ pub fn run_sweep(args: &Cli) -> Result<()> {
     let aggregate = compute_aggregate(&results, errors.len());
 
     println!();
-    println!("Sweep complete: {} succeeded, {} failed", aggregate.succeeded, aggregate.failed);
+    println!(
+        "Sweep complete: {} succeeded, {} failed",
+        aggregate.succeeded, aggregate.failed
+    );
     println!(
         "  Mean strength   : {:.4}",
         aggregate.mean_selected_strength
@@ -165,12 +174,20 @@ pub fn run_sweep(args: &Cli) -> Result<()> {
     );
 
     // Write summary JSON.
-    if let Some(ref summary_path) = args.sweep_summary {
-        let summary = SweepSummary { aggregate, results, errors };
-        let json = serde_json::to_string_pretty(&summary)
-            .context("failed to serialise sweep summary")?;
-        std::fs::write(summary_path, json)
-            .with_context(|| format!("failed to write sweep summary to {}", summary_path.display()))?;
+    if let Some(ref summary_path) = args.summary {
+        let summary = SweepSummary {
+            aggregate,
+            results,
+            errors,
+        };
+        let json =
+            serde_json::to_string_pretty(&summary).context("failed to serialise sweep summary")?;
+        std::fs::write(summary_path, json).with_context(|| {
+            format!(
+                "failed to write sweep summary to {}",
+                summary_path.display()
+            )
+        })?;
         println!("Summary written to         : {}", summary_path.display());
     }
 
@@ -203,18 +220,22 @@ fn find_images(dir: &Path) -> Result<Vec<PathBuf>> {
 }
 
 /// Process a single file and return the result summary.
-fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
-    let input = load_as_linear(input_path)
+fn process_one(args: &SweepArgs, input_path: &Path) -> Result<FileResult> {
+    let limits = DecodeLimits {
+        max_pixels: args.pipeline.max_pixels,
+        max_dimension: args.pipeline.max_dimension,
+    };
+    let input = load_as_linear_with_limits(input_path, &limits)
         .with_context(|| format!("failed to load: {}", input_path.display()))?;
 
-    let (tw, th) = resolve_dimensions(args, input.width(), input.height())?;
-    let params = build_params(args, tw, th);
+    let (tw, th) = resolve_dimensions(&args.pipeline, input.width(), input.height())?;
+    let params = build_params(&args.pipeline, tw, th);
 
-    let output = r3sizer_core::process_auto_sharp_downscale(&input, &params)
-        .context("pipeline failed")?;
+    let output =
+        r3sizer_core::process_auto_sharp_downscale(&input, &params).context("pipeline failed")?;
 
-    // Save output image if sweep_output_dir is set.
-    let output_path = if let Some(ref out_dir) = args.sweep_output_dir {
+    // Save output image if out_dir is set.
+    let output_path = if let Some(ref out_dir) = args.out_dir {
         let stem = input_path.file_stem().unwrap_or_default();
         let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
         save_from_linear(&output.image, &out_file)
@@ -227,10 +248,22 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     let diag = &output.diagnostics;
     let (ge, hr, eo, tf, cs) = if let Some(ref mc) = diag.metric_components {
         (
-            mc.components.get(&r3sizer_core::MetricComponent::GamutExcursion).copied().unwrap_or(0.0),
-            mc.components.get(&r3sizer_core::MetricComponent::HaloRinging).copied().unwrap_or(0.0),
-            mc.components.get(&r3sizer_core::MetricComponent::EdgeOvershoot).copied().unwrap_or(0.0),
-            mc.components.get(&r3sizer_core::MetricComponent::TextureFlattening).copied().unwrap_or(0.0),
+            mc.components
+                .get(&r3sizer_core::MetricComponent::GamutExcursion)
+                .copied()
+                .unwrap_or(0.0),
+            mc.components
+                .get(&r3sizer_core::MetricComponent::HaloRinging)
+                .copied()
+                .unwrap_or(0.0),
+            mc.components
+                .get(&r3sizer_core::MetricComponent::EdgeOvershoot)
+                .copied()
+                .unwrap_or(0.0),
+            mc.components
+                .get(&r3sizer_core::MetricComponent::TextureFlattening)
+                .copied()
+                .unwrap_or(0.0),
             mc.composite_score,
         )
     } else {
@@ -239,14 +272,25 @@ fn process_one(args: &Cli, input_path: &Path) -> Result<FileResult> {
     // Step 4: base resize quality
     let (ringing_score, envelope_scale, edge_retention, texture_retention) =
         if let Some(bq) = diag.base_resize_quality {
-            (bq.ringing_score, bq.envelope_scale, bq.edge_retention, bq.texture_retention)
+            (
+                bq.ringing_score,
+                bq.envelope_scale,
+                bq.edge_retention,
+                bq.texture_retention,
+            )
         } else {
             (0.0, 1.0, 1.0, 1.0)
         };
 
     // Step 5: chroma guard
-    let chroma_clamped_fraction = diag.chroma_guard.as_ref().map(|cg| cg.pixels_clamped_fraction);
-    let chroma_effective_threshold_mean = diag.chroma_guard.as_ref().and_then(|cg| cg.effective_threshold_mean);
+    let chroma_clamped_fraction = diag
+        .chroma_guard
+        .as_ref()
+        .map(|cg| cg.pixels_clamped_fraction);
+    let chroma_effective_threshold_mean = diag
+        .chroma_guard
+        .as_ref()
+        .and_then(|cg| cg.effective_threshold_mean);
 
     Ok(FileResult {
         input: input_path.display().to_string(),
@@ -284,13 +328,22 @@ fn percentile(sorted: &[f32], p: f32) -> f32 {
 
 fn compute_component_stats(values: &[f32]) -> ComponentStats {
     if values.is_empty() {
-        return ComponentStats { mean: 0.0, median: 0.0, p90: 0.0, p95: 0.0 };
+        return ComponentStats {
+            mean: 0.0,
+            median: 0.0,
+            p90: 0.0,
+            p95: 0.0,
+        };
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let n = sorted.len();
     let mean = sorted.iter().sum::<f32>() / n as f32;
-    let median = if n.is_multiple_of(2) { (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0 } else { sorted[n / 2] };
+    let median = if n.is_multiple_of(2) {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    } else {
+        sorted[n / 2]
+    };
     ComponentStats {
         mean,
         median,
@@ -300,7 +353,12 @@ fn compute_component_stats(values: &[f32]) -> ComponentStats {
 }
 
 fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
-    let empty_cs = ComponentStats { mean: 0.0, median: 0.0, p90: 0.0, p95: 0.0 };
+    let empty_cs = ComponentStats {
+        mean: 0.0,
+        median: 0.0,
+        p90: 0.0,
+        p95: 0.0,
+    };
     let n = results.len();
     if n == 0 {
         return AggregateStats {
@@ -359,16 +417,56 @@ fn compute_aggregate(results: &[FileResult], failed: usize) -> AggregateStats {
         mean_total_us: mean_us,
         selection_mode_counts: counts,
         fit_success_rate,
-        gamut_excursion: compute_component_stats(&results.iter().map(|r| r.gamut_excursion).collect::<Vec<_>>()),
-        halo_ringing: compute_component_stats(&results.iter().map(|r| r.halo_ringing).collect::<Vec<_>>()),
-        edge_overshoot: compute_component_stats(&results.iter().map(|r| r.edge_overshoot).collect::<Vec<_>>()),
-        texture_flattening: compute_component_stats(&results.iter().map(|r| r.texture_flattening).collect::<Vec<_>>()),
-        composite_score: compute_component_stats(&results.iter().map(|r| r.composite_score).collect::<Vec<_>>()),
-        ringing_score: compute_component_stats(&results.iter().map(|r| r.ringing_score).collect::<Vec<_>>()),
-        envelope_scale: compute_component_stats(&results.iter().map(|r| r.envelope_scale).collect::<Vec<_>>()),
-        edge_retention: compute_component_stats(&results.iter().map(|r| r.edge_retention).collect::<Vec<_>>()),
-        texture_retention: compute_component_stats(&results.iter().map(|r| r.texture_retention).collect::<Vec<_>>()),
-        effective_target_artifact_ratio: compute_component_stats(&results.iter().map(|r| r.effective_target_artifact_ratio).collect::<Vec<_>>()),
-        chroma_clamped_fraction: compute_component_stats(&results.iter().filter_map(|r| r.chroma_clamped_fraction).collect::<Vec<_>>()),
+        gamut_excursion: compute_component_stats(
+            &results
+                .iter()
+                .map(|r| r.gamut_excursion)
+                .collect::<Vec<_>>(),
+        ),
+        halo_ringing: compute_component_stats(
+            &results.iter().map(|r| r.halo_ringing).collect::<Vec<_>>(),
+        ),
+        edge_overshoot: compute_component_stats(
+            &results.iter().map(|r| r.edge_overshoot).collect::<Vec<_>>(),
+        ),
+        texture_flattening: compute_component_stats(
+            &results
+                .iter()
+                .map(|r| r.texture_flattening)
+                .collect::<Vec<_>>(),
+        ),
+        composite_score: compute_component_stats(
+            &results
+                .iter()
+                .map(|r| r.composite_score)
+                .collect::<Vec<_>>(),
+        ),
+        ringing_score: compute_component_stats(
+            &results.iter().map(|r| r.ringing_score).collect::<Vec<_>>(),
+        ),
+        envelope_scale: compute_component_stats(
+            &results.iter().map(|r| r.envelope_scale).collect::<Vec<_>>(),
+        ),
+        edge_retention: compute_component_stats(
+            &results.iter().map(|r| r.edge_retention).collect::<Vec<_>>(),
+        ),
+        texture_retention: compute_component_stats(
+            &results
+                .iter()
+                .map(|r| r.texture_retention)
+                .collect::<Vec<_>>(),
+        ),
+        effective_target_artifact_ratio: compute_component_stats(
+            &results
+                .iter()
+                .map(|r| r.effective_target_artifact_ratio)
+                .collect::<Vec<_>>(),
+        ),
+        chroma_clamped_fraction: compute_component_stats(
+            &results
+                .iter()
+                .filter_map(|r| r.chroma_clamped_fraction)
+                .collect::<Vec<_>>(),
+        ),
     }
 }

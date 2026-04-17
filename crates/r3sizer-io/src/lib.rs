@@ -9,7 +9,7 @@ pub mod convert;
 pub mod load;
 pub mod save;
 
-pub use load::load_as_linear;
+pub use load::{load_as_linear, load_as_linear_with_limits, DecodeLimits};
 pub use save::save_from_linear;
 
 #[derive(Debug, thiserror::Error)]
@@ -25,4 +25,7 @@ pub enum IoError {
 
     #[error("unsupported pixel format: {0}")]
     UnsupportedFormat(String),
+
+    #[error("image too large: {width}×{height} exceeds configured decode limits")]
+    TooLarge { width: u32, height: u32 },
 }

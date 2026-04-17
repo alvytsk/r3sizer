@@ -12,14 +12,14 @@
 use fast_image_resize as fir;
 use fir::pixels::F32x3;
 
-use crate::{CoreError, LinearRgbImage, ImageSize};
+use crate::{CoreError, ImageSize, LinearRgbImage};
 
 /// Minimum shrink ratio (max of X and Y) that triggers the two-stage path.
 const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
 
 /// Downscale `src` to `target` size using Lanczos3 resampling.
 ///
-/// For shrink ratios above [`STAGED_SHRINK_THRESHOLD`] a two-stage path is
+/// For shrink ratios above `STAGED_SHRINK_THRESHOLD` a two-stage path is
 /// used: a fast bilinear pre-reduce brings the image to ~2× the target, then a
 /// final Lanczos3 pass produces the output.  This follows the same principle as
 /// libvips' `gap` parameter.
@@ -37,7 +37,9 @@ pub fn downscale_with_info(
     target: ImageSize,
 ) -> Result<(LinearRgbImage, bool), CoreError> {
     if target.width == 0 || target.height == 0 {
-        return Err(CoreError::InvalidParams("target dimensions must be non-zero".into()));
+        return Err(CoreError::InvalidParams(
+            "target dimensions must be non-zero".into(),
+        ));
     }
 
     // Fast path: no resize needed.
@@ -55,11 +57,26 @@ pub fn downscale_with_info(
         let pre_w = ((src.width() as f64 / pre_factor).round() as u32).max(target.width);
         let pre_h = ((src.height() as f64 / pre_factor).round() as u32).max(target.height);
 
-        let pre = fir_resize(src, pre_w, pre_h, fir::ResizeAlg::Convolution(fir::FilterType::Bilinear))?;
-        let out = fir_resize(&pre, target.width, target.height, fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3))?;
+        let pre = fir_resize(
+            src,
+            pre_w,
+            pre_h,
+            fir::ResizeAlg::Convolution(fir::FilterType::Bilinear),
+        )?;
+        let out = fir_resize(
+            &pre,
+            target.width,
+            target.height,
+            fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
+        )?;
         Ok((out, true))
     } else {
-        let out = fir_resize(src, target.width, target.height, fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3))?;
+        let out = fir_resize(
+            src,
+            target.width,
+            target.height,
+            fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
+        )?;
         Ok((out, false))
     }
 }
@@ -76,16 +93,18 @@ fn fir_resize(
     alg: fir::ResizeAlg,
 ) -> Result<LinearRgbImage, CoreError> {
     let src_pixels = f32_slice_as_f32x3(src.pixels());
-    let src_image = fir::images::TypedImageRef::<F32x3>::new(
-        src.width(),
-        src.height(),
-        src_pixels,
-    ).map_err(|e| CoreError::InvalidParams(format!("fir source image: {e}")))?;
+    let src_image = fir::images::TypedImageRef::<F32x3>::new(src.width(), src.height(), src_pixels)
+        .map_err(|e| CoreError::InvalidParams(format!("fir source image: {e}")))?;
 
     let mut dst_image = fir::images::TypedImage::<F32x3>::new(dst_w, dst_h);
 
     let mut resizer = fir::Resizer::new();
-    resizer.resize_typed(&src_image, &mut dst_image, Some(&fir::ResizeOptions::new().resize_alg(alg)))
+    resizer
+        .resize_typed(
+            &src_image,
+            &mut dst_image,
+            Some(&fir::ResizeOptions::new().resize_alg(alg)),
+        )
         .map_err(|e| CoreError::InvalidParams(format!("fir resize: {e}")))?;
 
     let dst_floats = f32x3_slice_to_vec(dst_image.pixels());
@@ -135,7 +154,10 @@ mod tests {
     #[test]
     fn output_dimensions_match_target() {
         let src = gradient_image(100, 80);
-        let target = ImageSize { width: 40, height: 30 };
+        let target = ImageSize {
+            width: 40,
+            height: 30,
+        };
         let out = downscale(&src, target).unwrap();
         assert_eq!(out.width(), 40);
         assert_eq!(out.height(), 30);
@@ -144,7 +166,10 @@ mod tests {
     #[test]
     fn same_size_returns_clone() {
         let src = gradient_image(16, 16);
-        let target = ImageSize { width: 16, height: 16 };
+        let target = ImageSize {
+            width: 16,
+            height: 16,
+        };
         let out = downscale(&src, target).unwrap();
         assert_eq!(out.width(), 16);
         assert_eq!(out.height(), 16);
@@ -158,7 +183,14 @@ mod tests {
     fn trivial_1x1_to_1x1() {
         let data = vec![0.2, 0.4, 0.6];
         let src = LinearRgbImage::new(1, 1, data).unwrap();
-        let out = downscale(&src, ImageSize { width: 1, height: 1 }).unwrap();
+        let out = downscale(
+            &src,
+            ImageSize {
+                width: 1,
+                height: 1,
+            },
+        )
+        .unwrap();
         assert_eq!(out.width(), 1);
         assert_eq!(out.height(), 1);
     }
@@ -166,8 +198,22 @@ mod tests {
     #[test]
     fn zero_target_is_error() {
         let src = gradient_image(10, 10);
-        assert!(downscale(&src, ImageSize { width: 0, height: 5 }).is_err());
-        assert!(downscale(&src, ImageSize { width: 5, height: 0 }).is_err());
+        assert!(downscale(
+            &src,
+            ImageSize {
+                width: 0,
+                height: 5
+            }
+        )
+        .is_err());
+        assert!(downscale(
+            &src,
+            ImageSize {
+                width: 5,
+                height: 0
+            }
+        )
+        .is_err());
     }
 
     #[test]
@@ -175,9 +221,16 @@ mod tests {
         // A clean [0,1] input should stay close to [0,1] after Lanczos.
         // (Lanczos can introduce tiny ringing; we allow a small margin.)
         let src = gradient_image(64, 64);
-        let out = downscale(&src, ImageSize { width: 16, height: 16 }).unwrap();
+        let out = downscale(
+            &src,
+            ImageSize {
+                width: 16,
+                height: 16,
+            },
+        )
+        .unwrap();
         for &v in out.pixels() {
-            assert!(v >= -0.01 && v <= 1.01, "out-of-range value: {v}");
+            assert!((-0.01..=1.01).contains(&v), "out-of-range value: {v}");
         }
     }
 
@@ -188,7 +241,14 @@ mod tests {
     #[test]
     fn small_ratio_does_not_use_staged_shrink() {
         let src = gradient_image(100, 80);
-        let (out, staged) = downscale_with_info(&src, ImageSize { width: 50, height: 40 }).unwrap();
+        let (out, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 50,
+                height: 40,
+            },
+        )
+        .unwrap();
         assert_eq!(out.width(), 50);
         assert_eq!(out.height(), 40);
         assert!(!staged, "2× ratio should not trigger staged shrink");
@@ -197,7 +257,14 @@ mod tests {
     #[test]
     fn large_ratio_uses_staged_shrink() {
         let src = gradient_image(400, 300);
-        let (out, staged) = downscale_with_info(&src, ImageSize { width: 80, height: 60 }).unwrap();
+        let (out, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 80,
+                height: 60,
+            },
+        )
+        .unwrap();
         assert_eq!(out.width(), 80);
         assert_eq!(out.height(), 60);
         assert!(staged, "5× ratio should trigger staged shrink");
@@ -206,10 +273,20 @@ mod tests {
     #[test]
     fn staged_shrink_output_stays_in_range() {
         let src = gradient_image(640, 480);
-        let (out, staged) = downscale_with_info(&src, ImageSize { width: 64, height: 48 }).unwrap();
+        let (out, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 64,
+                height: 48,
+            },
+        )
+        .unwrap();
         assert!(staged, "10× ratio should trigger staged shrink");
         for &v in out.pixels() {
-            assert!(v >= -0.02 && v <= 1.02, "out-of-range value from staged shrink: {v}");
+            assert!(
+                (-0.02..=1.02).contains(&v),
+                "out-of-range value from staged shrink: {v}"
+            );
         }
     }
 
@@ -218,29 +295,48 @@ mod tests {
         // Staged shrink should produce similar (but not identical) results
         // compared to a single-pass Lanczos3 downscale.
         let src = gradient_image(400, 300);
-        let target = ImageSize { width: 80, height: 60 };
+        let target = ImageSize {
+            width: 80,
+            height: 60,
+        };
 
         let (staged_out, did_stage) = downscale_with_info(&src, target).unwrap();
         assert!(did_stage);
 
         // Direct single-pass Lanczos3 for comparison.
         let direct = fir_resize(
-            &src, target.width, target.height,
+            &src,
+            target.width,
+            target.height,
             fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Should be close — the pre-reduce is bilinear so there will be
         // minor differences, but on a smooth gradient they should be small.
-        let max_diff: f32 = staged_out.pixels().iter().zip(direct.pixels().iter())
+        let max_diff: f32 = staged_out
+            .pixels()
+            .iter()
+            .zip(direct.pixels().iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
-        assert!(max_diff < 0.05, "staged shrink diverges too much from direct: max_diff={max_diff}");
+        assert!(
+            max_diff < 0.05,
+            "staged shrink diverges too much from direct: max_diff={max_diff}"
+        );
     }
 
     #[test]
     fn same_size_reports_no_staged_shrink() {
         let src = gradient_image(16, 16);
-        let (_, staged) = downscale_with_info(&src, ImageSize { width: 16, height: 16 }).unwrap();
+        let (_, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 16,
+                height: 16,
+            },
+        )
+        .unwrap();
         assert!(!staged);
     }
 }

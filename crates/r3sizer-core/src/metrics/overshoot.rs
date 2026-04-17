@@ -33,8 +33,8 @@ pub fn edge_overshoot_score(profiles: &[EdgeProfile]) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::edges::EdgeProfile;
+    use super::*;
 
     fn profile(grad_mag: f32, diff: [f32; 5]) -> EdgeProfile {
         EdgeProfile {

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-/// Command-line arguments for `r3sizer`.
+/// `r3sizer` — downscale an image with automatic sharpness adjustment.
 #[derive(clap::Parser, Debug)]
 #[command(
     name = "r3sizer",
@@ -10,16 +10,32 @@ use std::path::PathBuf;
                   artifact ratios, then solving for a target artifact threshold P0."
 )]
 pub struct Cli {
-    /// Input image file (PNG, JPEG, BMP, ...).
-    /// Not required when --sweep-dir or --generate-corpus is used.
-    #[arg(long, short = 'i', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
-    pub input: Option<PathBuf>,
+    #[command(subcommand)]
+    pub command: Commands,
+}
 
-    /// Output image file.  Format is inferred from the extension.
-    /// Not required when --sweep-dir or --generate-corpus is used.
-    #[arg(long, short = 'o', value_name = "FILE", required_unless_present_any = ["sweep_dir", "generate_corpus", "sweep_diff"])]
-    pub output: Option<PathBuf>,
+#[derive(clap::Subcommand, Debug)]
+pub enum Commands {
+    /// Process a single image file.
+    Process(ProcessArgs),
+    /// Process all images in a directory (batch mode).
+    Sweep(SweepArgs),
+    /// Compare two sweep summary JSON files.
+    Diff(DiffArgs),
+    /// Generate a synthetic benchmark corpus.
+    Corpus(CorpusArgs),
+    /// Show or list available presets.
+    #[command(subcommand)]
+    Presets(PresetsCommand),
+}
 
+// ---------------------------------------------------------------------------
+// Shared pipeline parameters
+// ---------------------------------------------------------------------------
+
+/// Pipeline configuration flags shared by `process` and `sweep`.
+#[derive(clap::Args, Debug)]
+pub struct PipelineArgs {
     /// Target width in pixels.
     #[arg(long, short = 'W')]
     pub width: Option<u32>,
@@ -28,22 +44,18 @@ pub struct Cli {
     #[arg(long, short = 'H')]
     pub height: Option<u32>,
 
-    /// Preserve the input image's aspect ratio. When set, only one of
-    /// --width or --height is required; the other is computed automatically.
+    /// Preserve the input image's aspect ratio.  Only one of --width or --height is
+    /// then required; the other is computed automatically.
     #[arg(long, short = 'p')]
     pub preserve_aspect_ratio: bool,
 
-    /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
+    /// Target artifact ratio P0 (fraction of channel values outside \[0,1\]).
     /// Default: 0.003 (= 0.3 %, "photo" preset).
     #[arg(long, default_value_t = 0.003)]
     pub target_artifact_ratio: f32,
 
-    /// Path to write a JSON diagnostics file (optional).
-    #[arg(long, value_name = "FILE")]
-    pub diagnostics: Option<PathBuf>,
-
-    /// Explicit comma-separated probe sharpening strengths, e.g. "0.05,0.1,0.2,0.4,0.8,1.5,3.0".
-    /// When omitted, a non-uniform default list dense near zero is used.
+    /// Explicit comma-separated probe sharpening strengths, e.g. "0.05,0.1,0.2,0.4".
+    /// When omitted, the default non-uniform grid is used.
     #[arg(long, value_delimiter = ',', value_name = "S1,S2,...")]
     pub probe_strengths: Option<Vec<f32>>,
 
@@ -74,55 +86,118 @@ pub struct Cli {
     #[arg(long, value_delimiter = ',', value_name = "W1,W2,W3,W4")]
     pub metric_weights: Option<Vec<f32>>,
 
-    /// Diagnostics verbosity: "summary" (final breakdown only) or "full" (per-probe breakdowns).
+    /// Diagnostics verbosity: "summary" (default) or "full" (per-probe breakdowns).
     #[arg(long, default_value = "summary")]
     pub diagnostics_level: DiagnosticsLevelArg,
 
     /// Named pipeline preset. Overrides all pipeline settings.
-    /// Stable: photo (default), precision. Legacy: baseline, v3-adaptive, v5-full, v5-two-pass.
+    /// Stable: photo (default), precision.  Legacy: baseline, v3-adaptive, v5-full, v5-two-pass.
     #[arg(long, value_name = "NAME")]
     pub preset: Option<String>,
 
-    /// Performance-quality tradeoff: fast (fewer probes, uniform sharpen),
-    /// balanced (default), quality (more probes, full adaptive pipeline).
-    /// Applied after --preset and before any explicit overrides.
+    /// Performance-quality tradeoff: fast, balanced (default), or quality.
     #[arg(long, value_name = "MODE")]
     pub mode: Option<PipelineModeArg>,
 
-    /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only" (experimental).
+    /// Selection policy: "gamut-only" (default), "hybrid", or "composite-only".
     #[arg(long, default_value = "gamut-only")]
     pub selection_policy: SelectionPolicyArg,
 
-    // --- Sweep mode ---
+    /// Maximum image pixel count (width × height) to decode.
+    /// Inputs exceeding this limit are rejected before loading.
+    /// Default: 100 000 000 (100 MP).
+    #[arg(long, value_name = "N", default_value_t = 100_000_000u64)]
+    pub max_pixels: u64,
 
-    /// Directory of images to process in batch mode. Mutually exclusive with --input/--output.
-    #[arg(long, value_name = "DIR")]
-    pub sweep_dir: Option<PathBuf>,
-
-    /// Output directory for processed images in sweep mode.
-    #[arg(long, value_name = "DIR", requires = "sweep_dir")]
-    pub sweep_output_dir: Option<PathBuf>,
-
-    /// Path to write the sweep summary JSON file.
-    #[arg(long, value_name = "FILE", requires = "sweep_dir")]
-    pub sweep_summary: Option<PathBuf>,
-
-    // --- Corpus generation ---
-
-    /// Generate a synthetic benchmark corpus in the given directory and exit.
-    #[arg(long, value_name = "DIR")]
-    pub generate_corpus: Option<PathBuf>,
-
-    // --- Sweep comparison ---
-
-    /// Compare two sweep summary JSON files: baseline,candidate.
-    /// Produces a diff report showing per-file and aggregate changes.
-    #[arg(long, value_delimiter = ',', num_args = 2, value_name = "BASE,CANDIDATE")]
-    pub sweep_diff: Option<Vec<PathBuf>>,
+    /// Maximum image dimension (width or height) to decode.
+    /// Default: 16 384 px.
+    #[arg(long, value_name = "PX", default_value_t = 16_384u32)]
+    pub max_dimension: u32,
 }
 
 // ---------------------------------------------------------------------------
-// CLI-friendly wrappers for core enums (avoids adding clap dep to core)
+// Subcommand arg structs
+// ---------------------------------------------------------------------------
+
+#[derive(clap::Args, Debug)]
+pub struct ProcessArgs {
+    /// Input image file (PNG, JPEG, BMP, TIFF, WebP, ...).
+    #[arg(long, short = 'i', value_name = "FILE")]
+    pub input: PathBuf,
+
+    /// Output image file.  Format is inferred from the extension.
+    #[arg(long, short = 'o', value_name = "FILE")]
+    pub output: PathBuf,
+
+    /// Path to write a JSON diagnostics file (optional).
+    #[arg(long, value_name = "FILE")]
+    pub diagnostics: Option<PathBuf>,
+
+    /// Output format for the process summary printed to stdout.
+    #[arg(long, default_value = "text", value_name = "FORMAT")]
+    pub output_format: OutputFormat,
+
+    #[command(flatten)]
+    pub pipeline: PipelineArgs,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SweepArgs {
+    /// Directory of images to process.
+    #[arg(long = "in-dir", value_name = "DIR")]
+    pub in_dir: PathBuf,
+
+    /// Output directory for processed images.
+    #[arg(long = "out-dir", value_name = "DIR")]
+    pub out_dir: Option<PathBuf>,
+
+    /// Path to write the sweep summary JSON file.
+    #[arg(long, value_name = "FILE")]
+    pub summary: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub pipeline: PipelineArgs,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct DiffArgs {
+    /// Baseline sweep summary JSON.
+    pub baseline: PathBuf,
+    /// Candidate sweep summary JSON.
+    pub candidate: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CorpusArgs {
+    /// Directory to write generated images.
+    pub output_dir: PathBuf,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum PresetsCommand {
+    /// List all available preset names.
+    List,
+    /// Show the configuration for a named preset.
+    Show {
+        /// Preset name (e.g. "photo", "precision").
+        name: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Output format
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum OutputFormat {
+    /// Human-readable text (default).
+    Text,
+    /// JSON object printed to stdout.
+    Json,
+}
+
+// ---------------------------------------------------------------------------
+// CLI-friendly wrappers for core enums
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -164,8 +239,12 @@ pub enum ArtifactMetricArg {
 impl From<ArtifactMetricArg> for r3sizer_core::ArtifactMetric {
     fn from(val: ArtifactMetricArg) -> Self {
         match val {
-            ArtifactMetricArg::ChannelClipping => r3sizer_core::ArtifactMetric::ChannelClippingRatio,
-            ArtifactMetricArg::PixelOutOfGamut => r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio,
+            ArtifactMetricArg::ChannelClipping => {
+                r3sizer_core::ArtifactMetric::ChannelClippingRatio
+            }
+            ArtifactMetricArg::PixelOutOfGamut => {
+                r3sizer_core::ArtifactMetric::PixelOutOfGamutRatio
+            }
         }
     }
 }

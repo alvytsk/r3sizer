@@ -17,10 +17,11 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
-    MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample,
-    QualityEvaluation, Recommendation, RecommendationKind, RegionClass, RegionCoverage,
-    ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SelectionMode,
-    SelectionPolicy, SaturationGuardParams, Severity, SharpenMode, SharpenStrategy, StageTiming,
+    MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics,
+    ProbeSample, QualityEvaluation, Recommendation, RecommendationKind, RegionClass,
+    RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags,
+    SaturationGuardParams, SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy,
+    StageTiming,
 };
 
 #[test]
@@ -162,8 +163,7 @@ fn export_typescript_bindings() {
         default_params
     ));
 
-    let default_kernel_table =
-        serde_json::to_string_pretty(&KernelTable::default()).unwrap();
+    let default_kernel_table = serde_json::to_string_pretty(&KernelTable::default()).unwrap();
     output.push_str(&format!(
         "export const DEFAULT_KERNEL_TABLE: KernelTable = {};\n\n",
         default_kernel_table
@@ -184,8 +184,8 @@ fn export_typescript_bindings() {
     ));
 
     // Write to web directory
-    let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../web/src/types/generated.ts");
+    let out_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types/generated.ts");
     std::fs::write(&out_path, &output).expect("failed to write generated.ts");
 
     println!("✓ Wrote {}", out_path.display());

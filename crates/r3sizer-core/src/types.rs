@@ -37,7 +37,11 @@ impl LinearRgbImage {
                 got_len: data.len(),
             });
         }
-        Ok(Self { width, height, data })
+        Ok(Self {
+            width,
+            height,
+            data,
+        })
     }
 
     /// Create an all-zero (black) image of the given size.
@@ -46,20 +50,34 @@ impl LinearRgbImage {
             return Err(CoreError::EmptyImage);
         }
         let len = (width as usize) * (height as usize) * 3;
-        Ok(Self { width, height, data: vec![0.0f32; len] })
+        Ok(Self {
+            width,
+            height,
+            data: vec![0.0f32; len],
+        })
     }
 
-    pub fn width(&self) -> u32 { self.width }
-    pub fn height(&self) -> u32 { self.height }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
 
     /// Read-only flat slice of all pixel components.
-    pub fn pixels(&self) -> &[f32] { &self.data }
+    pub fn pixels(&self) -> &[f32] {
+        &self.data
+    }
 
     /// Mutable flat slice of all pixel components.
-    pub fn pixels_mut(&mut self) -> &mut [f32] { &mut self.data }
+    pub fn pixels_mut(&mut self) -> &mut [f32] {
+        &mut self.data
+    }
 
     /// Total number of f32 components (width * height * 3).
-    pub fn total_components(&self) -> usize { self.data.len() }
+    pub fn total_components(&self) -> usize {
+        self.data.len()
+    }
 
     /// Read-only view of scan-line `y` (0-indexed).
     pub fn row(&self, y: u32) -> &[f32] {
@@ -77,11 +95,16 @@ impl LinearRgbImage {
     }
 
     pub fn size(&self) -> ImageSize {
-        ImageSize { width: self.width, height: self.height }
+        ImageSize {
+            width: self.width,
+            height: self.height,
+        }
     }
 
     /// Consume the image and return the underlying flat buffer.
-    pub fn into_data(self) -> Vec<f32> { self.data }
+    pub fn into_data(self) -> Vec<f32> {
+        self.data
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +142,7 @@ pub enum SharpenMode {
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetricMode {
-    /// P_total(s): absolute fraction of channel values outside [0,1].
+    /// P_total(s): absolute fraction of channel values outside \[0,1\].
     /// Includes artifacts from both the resize stage and the sharpen stage.
     AbsoluteTotal,
     /// max(0, P_total(s) - P_base): additional artifacts attributable to sharpening.
@@ -137,9 +160,9 @@ pub enum MetricMode {
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactMetric {
-    /// Per-channel: fraction of f32 channel values outside [0,1]. Denominator = W*H*3.
+    /// Per-channel: fraction of f32 channel values outside \[0,1\]. Denominator = W*H*3.
     ChannelClippingRatio,
-    /// Per-pixel: fraction of pixels where *any* channel is outside [0,1]. Denominator = W*H.
+    /// Per-pixel: fraction of pixels where *any* channel is outside \[0,1\]. Denominator = W*H.
     PixelOutOfGamutRatio,
 }
 
@@ -284,7 +307,8 @@ impl ProbeConfig {
             }
             ProbeConfig::TwoPass { .. } => {
                 return Err(CoreError::InvalidParams(
-                    "TwoPass probe config is handled by the pipeline; use AutoSharpParams directly".into(),
+                    "TwoPass probe config is handled by the pipeline; use AutoSharpParams directly"
+                        .into(),
                 ));
             }
         };
@@ -451,11 +475,12 @@ impl PipelineMode {
                 }
                 // Ensure chroma guard is on
                 if params.experimental_sharpen_mode.is_none() {
-                    params.experimental_sharpen_mode = Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
-                        max_chroma_shift: 0.25,
-                        chroma_region_factors: Some(ChromaRegionFactors::default()),
-                        saturation_guard: Some(SaturationGuardParams::default()),
-                    });
+                    params.experimental_sharpen_mode =
+                        Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                            max_chroma_shift: 0.25,
+                            chroma_region_factors: Some(ChromaRegionFactors::default()),
+                            saturation_guard: Some(SaturationGuardParams::default()),
+                        });
                 }
                 // Ensure evaluator is on
                 if params.evaluator_config.is_none() {
@@ -474,7 +499,7 @@ pub struct AutoSharpParams {
     pub target_height: u32,
     /// How to select sharpening probe strengths.
     pub probe_strengths: ProbeConfig,
-    /// Target artifact ratio P0 (fraction of channel values outside [0,1]).
+    /// Target artifact ratio P0 (fraction of channel values outside \[0,1\]).
     /// Default: 0.001 (= 0.1%).
     pub target_artifact_ratio: f32,
     /// Enable the contrast-leveling post-process stage.
@@ -501,7 +526,6 @@ pub struct AutoSharpParams {
     pub sharpen_strategy: SharpenStrategy,
 
     // --- Experimental (v0.4) ---
-
     /// Input color space declaration. Default: `None` (= Srgb).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_color_space: Option<InputColorSpace>,
@@ -523,7 +547,6 @@ pub struct AutoSharpParams {
     pub evaluator_config: Option<EvaluatorConfig>,
 
     // --- Runtime mode ---
-
     /// Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
     /// called automatically during [`AutoSharpParams::validate`], overriding
     /// the speed-sensitive fields before pipeline execution.
@@ -605,7 +628,7 @@ impl AutoSharpParams {
         }
     }
 
-    /// Apply [`pipeline_mode`] overrides (if set) and return the resolved params.
+    /// Apply `pipeline_mode` overrides (if set) and return the resolved params.
     ///
     /// Call this before passing params to the pipeline:
     /// ```ignore
@@ -622,7 +645,9 @@ impl AutoSharpParams {
     /// Validate that parameters are internally consistent. Called at pipeline entry.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.target_width == 0 || self.target_height == 0 {
-            return Err(CoreError::InvalidParams("target dimensions must be non-zero".into()));
+            return Err(CoreError::InvalidParams(
+                "target dimensions must be non-zero".into(),
+            ));
         }
         if self.target_artifact_ratio < 0.0 || self.target_artifact_ratio > 1.0 {
             return Err(CoreError::InvalidParams(
@@ -630,9 +655,15 @@ impl AutoSharpParams {
             ));
         }
         if self.sharpen_sigma <= 0.0 {
-            return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+            return Err(CoreError::InvalidParams(
+                "sharpen_sigma must be positive".into(),
+            ));
         }
-        if let SharpenStrategy::ContentAdaptive { backoff_scale_factor, .. } = &self.sharpen_strategy {
+        if let SharpenStrategy::ContentAdaptive {
+            backoff_scale_factor,
+            ..
+        } = &self.sharpen_strategy
+        {
             if *backoff_scale_factor <= 0.0 || *backoff_scale_factor >= 1.0 {
                 return Err(CoreError::InvalidParams(
                     "backoff_scale_factor must be in (0.0, 1.0)".into(),
@@ -640,24 +671,42 @@ impl AutoSharpParams {
             }
         }
         match &self.probe_strengths {
-            ProbeConfig::TwoPass { coarse_count, coarse_min, coarse_max, dense_count, window_margin } => {
+            ProbeConfig::TwoPass {
+                coarse_count,
+                coarse_min,
+                coarse_max,
+                dense_count,
+                window_margin,
+            } => {
                 if *coarse_count < 3 {
-                    return Err(CoreError::InvalidParams("TwoPass coarse_count must be >= 3".into()));
+                    return Err(CoreError::InvalidParams(
+                        "TwoPass coarse_count must be >= 3".into(),
+                    ));
                 }
                 if *dense_count < 2 {
-                    return Err(CoreError::InvalidParams("TwoPass dense_count must be >= 2".into()));
+                    return Err(CoreError::InvalidParams(
+                        "TwoPass dense_count must be >= 2".into(),
+                    ));
                 }
                 if *coarse_min <= 0.0 {
-                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be positive".into()));
+                    return Err(CoreError::InvalidParams(
+                        "TwoPass coarse_min must be positive".into(),
+                    ));
                 }
                 if coarse_min >= coarse_max {
-                    return Err(CoreError::InvalidParams("TwoPass coarse_min must be less than coarse_max".into()));
+                    return Err(CoreError::InvalidParams(
+                        "TwoPass coarse_min must be less than coarse_max".into(),
+                    ));
                 }
                 if *window_margin < 0.0 {
-                    return Err(CoreError::InvalidParams("TwoPass window_margin must be >= 0".into()));
+                    return Err(CoreError::InvalidParams(
+                        "TwoPass window_margin must be >= 0".into(),
+                    ));
                 }
             }
-            _ => { self.probe_strengths.resolve()?; }
+            _ => {
+                self.probe_strengths.resolve()?;
+            }
         }
         Ok(())
     }
@@ -868,7 +917,11 @@ impl RegionMap {
                 got_len: data.len(),
             });
         }
-        Ok(Self { width, height, data })
+        Ok(Self {
+            width,
+            height,
+            data,
+        })
     }
 
     /// Read the class at pixel (x, y).
@@ -901,7 +954,11 @@ impl GainMap {
                 got_len: data.len(),
             });
         }
-        Ok(Self { width, height, data })
+        Ok(Self {
+            width,
+            height,
+            data,
+        })
     }
 
     /// Read the gain at pixel (x, y).
@@ -959,7 +1016,13 @@ impl GainTable {
                 )));
             }
         }
-        Ok(Self { flat, textured, strong_edge, microtexture, risky_halo_zone })
+        Ok(Self {
+            flat,
+            textured,
+            strong_edge,
+            microtexture,
+            risky_halo_zone,
+        })
     }
 
     /// Canonical v0.3 preset. Range `[0.70, 1.10]`.
@@ -989,7 +1052,7 @@ impl GainTable {
 /// Thresholds for the four-pass pixel classifier.
 ///
 /// All thresholds are tied to the specific operators in `classifier.rs`:
-/// - Gradient thresholds: **unnormalized Sobel scale** (max ≈ 5.66 for luminance in [0,1]).
+/// - Gradient thresholds: **unnormalized Sobel scale** (max ≈ 5.66 for luminance in \[0,1\]).
 /// - Variance thresholds: **squared-luminance units** (max 0.25 for bounded data).
 ///
 /// Changing the Sobel normalization or variance formula invalidates these defaults.
@@ -1102,7 +1165,13 @@ impl RegionCoverage {
             counts[c as usize] += 1;
         }
         let total = map.width * map.height;
-        let frac = |c: u32| if total > 0 { c as f32 / total as f32 } else { 0.0 };
+        let frac = |c: u32| {
+            if total > 0 {
+                c as f32 / total as f32
+            } else {
+                0.0
+            }
+        };
         Self {
             total_pixels: total,
             flat: counts[0],
@@ -1258,7 +1327,6 @@ pub struct AutoSharpDiagnostics {
     pub timing: StageTiming,
 
     // --- Experimental (v0.4) ---
-
     /// Input color-space ingress diagnostics.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_ingress: Option<InputIngressDiagnostics>,
@@ -1295,7 +1363,6 @@ pub struct AutoSharpDiagnostics {
     pub effective_target_artifact_ratio: f32,
 
     // --- Performance optimisation flags ---
-
     /// Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
     /// Active for shrink ratios above ~3×.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1522,7 +1589,10 @@ pub struct SaturationGuardParams {
 
 impl Default for SaturationGuardParams {
     fn default() -> Self {
-        Self { min_scale: 0.6, gamma: 1.5 }
+        Self {
+            min_scale: 0.6,
+            gamma: 1.5,
+        }
     }
 }
 
@@ -1555,7 +1625,6 @@ pub struct ChromaGuardDiagnostics {
     pub max_chroma_shift: f32,
 
     // --- Context-aware guard diagnostics (step 5) ---
-
     /// Minimum effective threshold across all pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_threshold_min: Option<f32>,
@@ -1829,7 +1898,10 @@ mod adaptive_tests {
 
     #[test]
     fn sharpen_strategy_default_is_uniform() {
-        assert!(matches!(SharpenStrategy::default(), SharpenStrategy::Uniform));
+        assert!(matches!(
+            SharpenStrategy::default(),
+            SharpenStrategy::Uniform
+        ));
     }
 
     #[test]
@@ -1845,17 +1917,24 @@ mod adaptive_tests {
 
     #[test]
     fn region_coverage_invariant() {
-        let rc = RegionCoverage::from_region_map(&RegionMap::new(
-            2, 2,
-            vec![
-                RegionClass::Flat,
-                RegionClass::Textured,
-                RegionClass::StrongEdge,
-                RegionClass::Flat,
-            ],
-        ).unwrap());
+        let rc = RegionCoverage::from_region_map(
+            &RegionMap::new(
+                2,
+                2,
+                vec![
+                    RegionClass::Flat,
+                    RegionClass::Textured,
+                    RegionClass::StrongEdge,
+                    RegionClass::Flat,
+                ],
+            )
+            .unwrap(),
+        );
         assert_eq!(rc.total_pixels, 4);
-        assert_eq!(rc.flat + rc.textured + rc.strong_edge + rc.microtexture + rc.risky_halo_zone, 4);
+        assert_eq!(
+            rc.flat + rc.textured + rc.strong_edge + rc.microtexture + rc.risky_halo_zone,
+            4
+        );
         assert_eq!(rc.flat, 2);
         assert_eq!(rc.textured, 1);
         assert_eq!(rc.strong_edge, 1);

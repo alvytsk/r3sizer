@@ -38,64 +38,69 @@ fn gaussian_kernel(sigma: f32) -> Vec<f32> {
 // Separable Gaussian blur
 // ---------------------------------------------------------------------------
 
-/// Apply a separable Gaussian blur to `src` with the given 1-D `kernel`.
-/// Returns a new `LinearRgbImage`; `src` is not mutated.
-pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbImage {
-    let w = src.width() as usize;
-    let h = src.height() as usize;
+/// Core separable Gaussian blur for interleaved multi-channel data.
+///
+/// `data` is `width × height × channels` floats. Blur is applied in two passes
+/// (horizontal then vertical) into pre-allocated `horiz` and `vert` buffers.
+/// On return, `vert` contains the blurred result.
+///
+/// Both `horiz` and `vert` must have length >= `width * height * channels`.
+#[allow(clippy::needless_range_loop)]
+fn separable_blur_into(
+    data: &[f32],
+    width: usize,
+    height: usize,
+    channels: usize,
+    kernel: &[f32],
+    horiz: &mut [f32],
+    vert: &mut [f32],
+) {
     let radius = kernel.len() / 2;
-    let stride = w * 3;
-
-    let src_data = src.pixels();
+    let stride = width * channels;
 
     // --- Horizontal pass ---
     // Interior uses transposed loop order: iterate kernel taps in the outer
-    // loop, pixel channels in the inner loop. Because RGB channels are stored
-    // contiguously (R,G,B,R,G,B,...), a shift of 1 pixel = shift of 3 f32s.
+    // loop, pixel channels in the inner loop. Because channels are stored
+    // contiguously, a shift of 1 pixel = shift of `channels` f32s.
     // The inner loop becomes a contiguous slice multiply-accumulate that LLVM
-    // can auto-vectorize across all three channels simultaneously.
-    let mut horiz = vec![0.0f32; w * h * 3];
-    for y in 0..h {
+    // can auto-vectorize across all channels simultaneously.
+    for y in 0..height {
         let row_start = y * stride;
-        let row = &src_data[row_start..row_start + stride];
+        let row = &data[row_start..row_start + stride];
         let out_row = &mut horiz[row_start..row_start + stride];
 
         // Left edge: x < radius (clamped, per-pixel reduction)
-        for x in 0..radius.min(w) {
-            let mut r = 0.0f32;
-            let mut g = 0.0f32;
-            let mut b = 0.0f32;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let xi = (x + ki).saturating_sub(radius).min(w - 1);
-                r += row[xi * 3] * kv;
-                g += row[xi * 3 + 1] * kv;
-                b += row[xi * 3 + 2] * kv;
+        for x in 0..radius.min(width) {
+            for c in 0..channels {
+                let mut acc = 0.0f32;
+                for (ki, &kv) in kernel.iter().enumerate() {
+                    let xi = (x + ki).saturating_sub(radius).min(width - 1);
+                    acc += row[xi * channels + c] * kv;
+                }
+                out_row[x * channels + c] = acc;
             }
-            out_row[x * 3] = r;
-            out_row[x * 3 + 1] = g;
-            out_row[x * 3 + 2] = b;
         }
 
         // Interior: transposed loop order for auto-vectorization.
-        // Treat the interior as a flat contiguous buffer of (interior_pixels * 3) f32s.
-        let x_start = radius.min(w);
-        let x_end = w.saturating_sub(radius);
+        // Treat the interior as a flat contiguous buffer of (interior_pixels * channels) f32s.
+        let x_start = radius.min(width);
+        let x_end = width.saturating_sub(radius);
         let interior = x_end.saturating_sub(x_start);
         if interior > 0 {
-            let out_start = x_start * 3;
-            let out_len = interior * 3;
+            let out_start = x_start * channels;
+            let out_len = interior * channels;
             let out_interior = &mut out_row[out_start..out_start + out_len];
 
             // First tap: initialize
             let kv0 = kernel[0];
-            let src_off = (x_start - radius) * 3;
+            let src_off = (x_start - radius) * channels;
             let src0 = &row[src_off..src_off + out_len];
             for i in 0..out_len {
                 out_interior[i] = src0[i] * kv0;
             }
             // Remaining taps: accumulate
             for (ki, &kv) in kernel.iter().enumerate().skip(1) {
-                let src_off = (x_start - radius + ki) * 3;
+                let src_off = (x_start - radius + ki) * channels;
                 let src = &row[src_off..src_off + out_len];
                 for i in 0..out_len {
                     out_interior[i] += src[i] * kv;
@@ -104,29 +109,24 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
         }
 
         // Right edge: x >= w - radius (clamped, per-pixel reduction)
-        for x in x_end.max(x_start)..w {
-            let mut r = 0.0f32;
-            let mut g = 0.0f32;
-            let mut b = 0.0f32;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let xi = (x + ki).saturating_sub(radius).min(w - 1);
-                r += row[xi * 3] * kv;
-                g += row[xi * 3 + 1] * kv;
-                b += row[xi * 3 + 2] * kv;
+        for x in x_end.max(x_start)..width {
+            for c in 0..channels {
+                let mut acc = 0.0f32;
+                for (ki, &kv) in kernel.iter().enumerate() {
+                    let xi = (x + ki).saturating_sub(radius).min(width - 1);
+                    acc += row[xi * channels + c] * kv;
+                }
+                out_row[x * channels + c] = acc;
             }
-            out_row[x * 3] = r;
-            out_row[x * 3 + 1] = g;
-            out_row[x * 3 + 2] = b;
         }
     }
 
     // --- Vertical pass ---
     // Already in transposed order: outer loop over kernel taps, inner loop
     // over contiguous row elements. LLVM vectorizes the inner `for i` loops.
-    let mut vert = vec![0.0f32; w * h * 3];
 
     // Top edge (clamped)
-    for y in 0..radius.min(h) {
+    for y in 0..radius.min(height) {
         let out_start = y * stride;
         let out_row = &mut vert[out_start..out_start + stride];
 
@@ -137,7 +137,7 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
             out_row[i] = src_row0[i] * kv0;
         }
         for (ki, &kv) in kernel.iter().enumerate().skip(1) {
-            let yi = (y + ki).saturating_sub(radius).min(h - 1);
+            let yi = (y + ki).saturating_sub(radius).min(height - 1);
             let src_row = &horiz[yi * stride..yi * stride + stride];
             for i in 0..stride {
                 out_row[i] += src_row[i] * kv;
@@ -146,8 +146,8 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
     }
 
     // Interior rows: no clamping needed
-    let y_start = radius.min(h);
-    let y_end = h.saturating_sub(radius);
+    let y_start = radius.min(height);
+    let y_end = height.saturating_sub(radius);
     for y in y_start..y_end {
         let out_start = y * stride;
         let out_row = &mut vert[out_start..out_start + stride];
@@ -168,7 +168,7 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
     }
 
     // Bottom edge (clamped)
-    for y in y_end.max(y_start)..h {
+    for y in y_end.max(y_start)..height {
         let out_start = y * stride;
         let out_row = &mut vert[out_start..out_start + stride];
 
@@ -179,14 +179,24 @@ pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbIm
             out_row[i] = src_row0[i] * kv0;
         }
         for (ki, &kv) in kernel.iter().enumerate().skip(1) {
-            let yi = (y + ki).saturating_sub(radius).min(h - 1);
+            let yi = (y + ki).saturating_sub(radius).min(height - 1);
             let src_row = &horiz[yi * stride..yi * stride + stride];
             for i in 0..stride {
                 out_row[i] += src_row[i] * kv;
             }
         }
     }
+}
 
+/// Apply a separable Gaussian blur to `src` with the given 1-D `kernel`.
+/// Returns a new `LinearRgbImage`; `src` is not mutated.
+pub(crate) fn gaussian_blur(src: &LinearRgbImage, kernel: &[f32]) -> LinearRgbImage {
+    let w = src.width() as usize;
+    let h = src.height() as usize;
+    let n = w * h * 3;
+    let mut horiz = vec![0.0f32; n];
+    let mut vert = vec![0.0f32; n];
+    separable_blur_into(src.pixels(), w, h, 3, kernel, &mut horiz, &mut vert);
     LinearRgbImage::new(src.width(), src.height(), vert).unwrap()
 }
 
@@ -223,117 +233,7 @@ pub(crate) fn gaussian_blur_single_channel_into(
     horiz: &mut [f32],
     vert: &mut [f32],
 ) {
-    let radius = kernel.len() / 2;
-
-    // --- Horizontal pass ---
-    // Interior uses transposed loop order: iterate kernel taps in the outer
-    // loop, pixels in the inner loop. This turns the per-pixel reduction into
-    // a contiguous slice multiply-accumulate that LLVM can auto-vectorize.
-    for y in 0..height {
-        let row = &data[y * width..(y + 1) * width];
-        let out_row = &mut horiz[y * width..(y + 1) * width];
-
-        // Left edge (clamped)
-        for x in 0..radius.min(width) {
-            let mut acc = 0.0f32;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let xi = (x + ki).saturating_sub(radius).min(width - 1);
-                acc += row[xi] * kv;
-            }
-            out_row[x] = acc;
-        }
-
-        // Interior: transposed loop order for auto-vectorization.
-        let x_start = radius.min(width);
-        let x_end = width.saturating_sub(radius);
-        let interior = x_end.saturating_sub(x_start);
-        if interior > 0 {
-            let out_interior = &mut out_row[x_start..x_end];
-
-            // First tap: initialize (write, no read of out)
-            let kv0 = kernel[0];
-            let src0 = &row[x_start - radius..x_end - radius];
-            for i in 0..interior {
-                out_interior[i] = src0[i] * kv0;
-            }
-            // Remaining taps: accumulate
-            for ki in 1..kernel.len() {
-                let kv = kernel[ki];
-                let src = &row[x_start - radius + ki..x_end - radius + ki];
-                for i in 0..interior {
-                    out_interior[i] += src[i] * kv;
-                }
-            }
-        }
-
-        // Right edge (clamped)
-        for x in x_end.max(x_start)..width {
-            let mut acc = 0.0f32;
-            for (ki, &kv) in kernel.iter().enumerate() {
-                let xi = (x + ki).saturating_sub(radius).min(width - 1);
-                acc += row[xi] * kv;
-            }
-            out_row[x] = acc;
-        }
-    }
-
-    // --- Vertical pass ---
-    // Already in transposed order: outer loop over kernel taps, inner loop
-    // over contiguous row elements. LLVM vectorizes the inner `for i` loops.
-    // Top edge
-    for y in 0..radius.min(height) {
-        let out_row = &mut vert[y * width..(y + 1) * width];
-        let yi0 = y.saturating_sub(radius);
-        let kv0 = kernel[0];
-        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
-        for i in 0..width {
-            out_row[i] = src_row0[i] * kv0;
-        }
-        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
-            let yi = (y + ki).saturating_sub(radius).min(height - 1);
-            let src_row = &horiz[yi * width..(yi + 1) * width];
-            for i in 0..width {
-                out_row[i] += src_row[i] * kv;
-            }
-        }
-    }
-    // Interior
-    let y_start = radius.min(height);
-    let y_end = height.saturating_sub(radius);
-    for y in y_start..y_end {
-        let out_row = &mut vert[y * width..(y + 1) * width];
-        let yi0 = y - radius;
-        let kv0 = kernel[0];
-        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
-        for i in 0..width {
-            out_row[i] = src_row0[i] * kv0;
-        }
-        for ki in 1..kernel.len() {
-            let kv = kernel[ki];
-            let yi = yi0 + ki;
-            let src_row = &horiz[yi * width..(yi + 1) * width];
-            for i in 0..width {
-                out_row[i] += src_row[i] * kv;
-            }
-        }
-    }
-    // Bottom edge
-    for y in y_end.max(y_start)..height {
-        let out_row = &mut vert[y * width..(y + 1) * width];
-        let yi0 = y.saturating_sub(radius);
-        let kv0 = kernel[0];
-        let src_row0 = &horiz[yi0 * width..(yi0 + 1) * width];
-        for i in 0..width {
-            out_row[i] = src_row0[i] * kv0;
-        }
-        for (ki, &kv) in kernel.iter().enumerate().skip(1) {
-            let yi = (y + ki).saturating_sub(radius).min(height - 1);
-            let src_row = &horiz[yi * width..(yi + 1) * width];
-            for i in 0..width {
-                out_row[i] += src_row[i] * kv;
-            }
-        }
-    }
+    separable_blur_into(data, width, height, 1, kernel, horiz, vert);
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +247,9 @@ pub(crate) fn gaussian_blur_single_channel_into(
 /// [`unsharp_mask_single_channel_with_kernel`].
 pub fn make_kernel(sigma: f32) -> Result<Vec<f32>, CoreError> {
     if sigma <= 0.0 {
-        return Err(CoreError::InvalidParams("sharpen_sigma must be positive".into()));
+        return Err(CoreError::InvalidParams(
+            "sharpen_sigma must be positive".into(),
+        ));
     }
     Ok(gaussian_kernel(sigma))
 }
@@ -401,7 +303,9 @@ pub fn unsharp_mask_single_channel(
     sigma: f32,
 ) -> Result<Vec<f32>, CoreError> {
     let kernel = make_kernel(sigma)?;
-    Ok(unsharp_mask_single_channel_with_kernel(data, width, height, amount, &kernel))
+    Ok(unsharp_mask_single_channel_with_kernel(
+        data, width, height, amount, &kernel,
+    ))
 }
 
 /// Like [`unsharp_mask_single_channel`] but accepts a pre-built kernel.
@@ -423,7 +327,6 @@ pub fn unsharp_mask_single_channel_with_kernel(
     blurred
 }
 
-
 // ---------------------------------------------------------------------------
 // Adaptive sharpening (v0.3)
 // ---------------------------------------------------------------------------
@@ -443,7 +346,10 @@ pub fn adaptive_sharpen_lightness(
     gain_map: &GainMap,
     sigma: f32,
 ) -> Result<LinearRgbImage, CoreError> {
-    debug_assert_eq!(luminance.len(), (src.width() as usize) * (src.height() as usize));
+    debug_assert_eq!(
+        luminance.len(),
+        (src.width() as usize) * (src.height() as usize)
+    );
     debug_assert_eq!(gain_map.width, src.width());
     debug_assert_eq!(gain_map.height, src.height());
 
@@ -454,12 +360,17 @@ pub fn adaptive_sharpen_lightness(
     let blurred = gaussian_blur_single_channel(luminance, w, h, &kernel);
 
     // Detail layer: D = L - blur(L)
-    let detail: Vec<f32> = luminance.iter().zip(blurred.iter())
+    let detail: Vec<f32> = luminance
+        .iter()
+        .zip(blurred.iter())
         .map(|(&l, &b)| l - b)
         .collect();
 
     let sharpened_l = apply_adaptive_lightness_from_detail(luminance, &detail, strength, gain_map);
-    Ok(crate::color::reconstruct_rgb_from_lightness(src, &sharpened_l))
+    Ok(crate::color::reconstruct_rgb_from_lightness(
+        src,
+        &sharpened_l,
+    ))
 }
 
 /// Apply adaptive sharpening from pre-computed detail buffer.
@@ -474,7 +385,10 @@ pub fn apply_adaptive_lightness_from_detail(
     gain_map: &GainMap,
 ) -> Vec<f32> {
     let gain_data = gain_map.data();
-    luminance.iter().zip(detail.iter()).zip(gain_data.iter())
+    luminance
+        .iter()
+        .zip(detail.iter())
+        .zip(gain_data.iter())
         .map(|((&l, &d), &g)| l + strength * g * d)
         .collect()
 }
@@ -501,7 +415,8 @@ pub fn adaptive_sharpen_rgb(
     let blur_px = blurred.pixels();
     let gain_data = gain_map.data();
 
-    let out: Vec<f32> = src_px.chunks_exact(3)
+    let out: Vec<f32> = src_px
+        .chunks_exact(3)
         .zip(blur_px.chunks_exact(3))
         .zip(gain_data.iter())
         .flat_map(|((s, b), &g)| {
@@ -537,7 +452,10 @@ pub fn compute_detail_single_channel(
     kernel: &[f32],
 ) -> Vec<f32> {
     let blurred = gaussian_blur_single_channel(data, width, height, kernel);
-    data.iter().zip(blurred.iter()).map(|(&d, &b)| d - b).collect()
+    data.iter()
+        .zip(blurred.iter())
+        .map(|(&d, &b)| d - b)
+        .collect()
 }
 
 /// Compute the RGB detail signal: `D = src - blur(src)`.
@@ -568,7 +486,12 @@ pub fn apply_detail_single_channel(input: &[f32], detail: &[f32], amount: f32) -
 ///
 /// `out` must have length >= `input.len()`.  `detail` must also be at least as
 /// long as `input`.
-pub fn apply_detail_single_channel_into(input: &[f32], detail: &[f32], amount: f32, out: &mut [f32]) {
+pub fn apply_detail_single_channel_into(
+    input: &[f32],
+    detail: &[f32],
+    amount: f32,
+    out: &mut [f32],
+) {
     debug_assert!(out.len() >= input.len(), "out buffer too short");
     debug_assert!(detail.len() >= input.len(), "detail buffer too short");
     for ((o, &i), &d) in out.iter_mut().zip(input.iter()).zip(detail.iter()) {
@@ -599,7 +522,12 @@ pub fn apply_detail_rgb(src: &LinearRgbImage, detail: &[f32], amount: f32) -> Li
 /// Like [`apply_detail_rgb`] but writes into a pre-allocated `LinearRgbImage`.
 ///
 /// `out` must have the same dimensions as `src`.
-pub fn apply_detail_rgb_into(src: &LinearRgbImage, detail: &[f32], amount: f32, out: &mut LinearRgbImage) {
+pub fn apply_detail_rgb_into(
+    src: &LinearRgbImage,
+    detail: &[f32],
+    amount: f32,
+    out: &mut LinearRgbImage,
+) {
     let src_px = src.pixels();
     let dst = out.pixels_mut();
     debug_assert_eq!(detail.len(), src_px.len());
@@ -669,7 +597,7 @@ mod tests {
     fn large_amount_produces_out_of_range_values() {
         // A sharp edge in the input should produce ringing (values outside [0,1])
         // when sharpening amount is large enough.
-        let mut data = vec![0.0f32; 32 * 1 * 3];
+        let mut data = vec![0.0_f32; 32 * 3];
         // Create a hard edge: left half = 0, right half = 1
         for x in 16..32_usize {
             data[x * 3] = 1.0;
@@ -678,8 +606,11 @@ mod tests {
         }
         let src = LinearRgbImage::new(32, 1, data).unwrap();
         let out = unsharp_mask(&src, 5.0, 1.0).unwrap();
-        let has_oob = out.pixels().iter().any(|&v| v < 0.0 || v > 1.0);
-        assert!(has_oob, "expected out-of-range values for strong sharpening on an edge");
+        let has_oob = out.pixels().iter().any(|&v| !(0.0..=1.0).contains(&v));
+        assert!(
+            has_oob,
+            "expected out-of-range values for strong sharpening on an edge"
+        );
     }
 
     #[test]
@@ -700,14 +631,14 @@ mod tests {
     #[test]
     fn adaptive_lightness_gain_one_matches_uniform() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 1.0);
         let adaptive = adaptive_sharpen_lightness(&src, &luma, 1.5, &gain_map, 1.0).unwrap();
-        let uniform = unsharp_mask_single_channel(
-            &luma, 16, 16, 1.5, 1.0,
-        ).unwrap();
+        let uniform = unsharp_mask_single_channel(&luma, 16, 16, 1.5, 1.0).unwrap();
         let uniform_img = crate::color::reconstruct_rgb_from_lightness(&src, &uniform);
         for (a, b) in adaptive.pixels().iter().zip(uniform_img.pixels().iter()) {
             assert_abs_diff_eq!(a, b, epsilon = 1e-4);
@@ -717,7 +648,9 @@ mod tests {
     #[test]
     fn adaptive_lightness_gain_zero_is_identity() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 0.0);
@@ -750,7 +683,7 @@ mod tests {
 
     #[test]
     fn adaptive_preserves_out_of_range_values() {
-        let mut data = vec![0.0f32; 32 * 1 * 3];
+        let mut data = vec![0.0_f32; 32 * 3];
         for x in 16..32_usize {
             data[x * 3] = 1.0;
             data[x * 3 + 1] = 1.0;
@@ -759,8 +692,11 @@ mod tests {
         let src = LinearRgbImage::new(32, 1, data).unwrap();
         let gain_map = make_gain_map(32, 1, 1.5);
         let out = adaptive_sharpen_rgb(&src, 5.0, &gain_map, 1.0).unwrap();
-        let has_oob = out.pixels().iter().any(|&v| v < 0.0 || v > 1.0);
-        assert!(has_oob, "expected out-of-range values for strong adaptive sharpening");
+        let has_oob = out.pixels().iter().any(|&v| !(0.0..=1.0).contains(&v));
+        assert!(
+            has_oob,
+            "expected out-of-range values for strong adaptive sharpening"
+        );
     }
 
     #[test]
@@ -781,7 +717,9 @@ mod tests {
         // Applying precomputed detail at strength s must produce the same
         // result as the one-shot unsharp_mask_single_channel_with_kernel.
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -814,7 +752,9 @@ mod tests {
     #[test]
     fn detail_single_channel_into_matches() {
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -835,7 +775,9 @@ mod tests {
         // Verify that reusing detail for multiple strengths gives consistent
         // results with independent USM calls.
         let src = gradient(16, 16);
-        let luma: Vec<f32> = src.pixels().chunks_exact(3)
+        let luma: Vec<f32> = src
+            .pixels()
+            .chunks_exact(3)
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);

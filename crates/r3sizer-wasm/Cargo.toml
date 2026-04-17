@@ -1,12 +1,24 @@
 [package]
-name    = "r3sizer-wasm"
-version = "0.8.0"
-edition = "2021"
-license.workspace = true
-description = "WebAssembly bindings for r3sizer-core image processing pipeline"
+name                   = "r3sizer-wasm"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description            = "WebAssembly bindings for r3sizer-core image processing pipeline"
+publish                = false
+exclude                = ["pkg/**"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+[package.metadata.wasm-pack.profile.profiling]
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [dependencies]
 wasm-bindgen       = "0.2"
@@ -14,4 +26,4 @@ js-sys             = "0.3"
 serde              = { workspace = true }
 serde_json         = { workspace = true }
 serde-wasm-bindgen = "0.6"
-r3sizer-core      = { path = "../r3sizer-core", default-features = false }
+r3sizer-core       = { path = "../r3sizer-core", version = "0.8", default-features = false }

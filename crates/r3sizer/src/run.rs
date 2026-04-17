@@ -1,13 +1,16 @@
-/// Core run logic: load → process → save → diagnostics.
+/// Core run logic: load → process → save → print summary.
 use anyhow::{bail, Context, Result};
 
 use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
-use r3sizer_io::{load_as_linear, save_from_linear};
+use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
 
-use crate::{args::Cli, output::print_summary};
+use crate::{
+    args::{OutputFormat, PipelineArgs, ProcessArgs},
+    output::{print_summary, print_summary_json},
+};
 
-/// Resolve target dimensions from CLI args and input image size.
-pub fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u32)> {
+/// Resolve target dimensions from pipeline args and input image size.
+pub fn resolve_dimensions(args: &PipelineArgs, src_w: u32, src_h: u32) -> Result<(u32, u32)> {
     match (args.width, args.height, args.preserve_aspect_ratio) {
         (Some(w), Some(h), _) => Ok((w, h)),
         (Some(w), None, true) => {
@@ -25,13 +28,10 @@ pub fn resolve_dimensions(args: &Cli, src_w: u32, src_h: u32) -> Result<(u32, u3
     }
 }
 
-/// Build pipeline params from CLI args + resolved dimensions.
-/// If `--preset` is set, uses the named preset; CLI flags override where specified.
-/// If `--mode` is set, applies the performance-quality mode after preset/manual config.
-pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSharpParams {
+/// Build pipeline params from pipeline args + resolved dimensions.
+pub fn build_params(args: &PipelineArgs, target_width: u32, target_height: u32) -> AutoSharpParams {
     let pipeline_mode = args.mode.map(r3sizer_core::PipelineMode::from);
 
-    // If a preset is specified, start from its configuration.
     if let Some(ref name) = args.preset {
         match crate::presets::preset_params(name, target_width, target_height) {
             Ok(mut params) => {
@@ -82,36 +82,40 @@ pub fn build_params(args: &Cli, target_width: u32, target_height: u32) -> AutoSh
         diagnostics_level: args.diagnostics_level.into(),
         selection_policy: args.selection_policy.into(),
         pipeline_mode,
-        // Inherit sharpen_strategy, chroma guard, and evaluator from default (Photo).
         ..Default::default()
     };
     params.resolved()
 }
 
-pub fn run(args: &Cli) -> Result<()> {
-    let input_path = args.input.as_ref().expect("input is required in single-file mode");
-    let output_path = args.output.as_ref().expect("output is required in single-file mode");
-
+pub fn run(args: &ProcessArgs) -> Result<()> {
     // --- Load ---
-    let input = load_as_linear(input_path)
-        .with_context(|| format!("failed to load input file: {}", input_path.display()))?;
+    let limits = DecodeLimits {
+        max_pixels: args.pipeline.max_pixels,
+        max_dimension: args.pipeline.max_dimension,
+    };
+    let input = load_as_linear_with_limits(&args.input, &limits)
+        .with_context(|| format!("failed to load input file: {}", args.input.display()))?;
 
     // --- Resolve target dimensions ---
-    let (target_width, target_height) = resolve_dimensions(args, input.width(), input.height())?;
+    let (target_width, target_height) =
+        resolve_dimensions(&args.pipeline, input.width(), input.height())?;
 
     // --- Build params ---
-    let params = build_params(args, target_width, target_height);
+    let params = build_params(&args.pipeline, target_width, target_height);
 
     // --- Process ---
     let output = r3sizer_core::process_auto_sharp_downscale(&input, &params)
         .context("pipeline processing failed")?;
 
     // --- Save image ---
-    save_from_linear(&output.image, output_path)
-        .with_context(|| format!("failed to save output file: {}", output_path.display()))?;
+    save_from_linear(&output.image, &args.output)
+        .with_context(|| format!("failed to save output file: {}", args.output.display()))?;
 
     // --- Print summary ---
-    print_summary(&output.diagnostics);
+    match args.output_format {
+        OutputFormat::Text => print_summary(&output.diagnostics),
+        OutputFormat::Json => print_summary_json(&output.diagnostics)?,
+    }
 
     // --- Optionally write diagnostics JSON ---
     if let Some(ref diag_path) = args.diagnostics {
@@ -119,7 +123,9 @@ pub fn run(args: &Cli) -> Result<()> {
             .context("failed to serialise diagnostics")?;
         std::fs::write(diag_path, json)
             .with_context(|| format!("failed to write diagnostics to {}", diag_path.display()))?;
-        println!("Diagnostics written to     : {}", diag_path.display());
+        if matches!(args.output_format, OutputFormat::Text) {
+            println!("Diagnostics written to     : {}", diag_path.display());
+        }
     }
 
     Ok(())

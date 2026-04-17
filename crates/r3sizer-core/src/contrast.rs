@@ -1,3 +1,9 @@
+//! Contrast leveling post-process stage.
+//!
+//! **Stability: experimental / placeholder.** The exact algorithm is not yet
+//! confirmed from source material; this stage is disabled by default
+//! (`ContrastLevelingParams::enabled = false`).  The function signature is
+//! fixed but the body will be replaced once the correct formula is known.
 /// Contrast leveling post-process stage.
 ///
 /// **Status:** The exact contrast-leveling algorithm used in the original
@@ -48,9 +54,7 @@ pub fn apply_contrast_leveling(
 
     for ch in 0..3_usize {
         // Collect channel values.
-        let mut values: Vec<f32> = (0..n)
-            .map(|px| img.pixels()[px * 3 + ch])
-            .collect();
+        let mut values: Vec<f32> = (0..n).map(|px| img.pixels()[px * 3 + ch]).collect();
         values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let lo_idx = ((n as f32 * 0.01) as usize).min(n - 1);

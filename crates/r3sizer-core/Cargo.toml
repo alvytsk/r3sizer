@@ -1,9 +1,16 @@
 [package]
-name    = "r3sizer-core"
-version = "0.8.0"
-edition = "2021"
-license.workspace = true
-description = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
+name                   = "r3sizer-core"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description            = "Pure image processing core: linear color, downscale, sharpen, artifact metric, polynomial fit and solve"
+readme                 = "README.md"
+keywords               = ["image", "resize", "downscale", "sharpen"]
+categories             = ["multimedia::images"]
 
 [features]
 default     = ["parallel", "formats"]

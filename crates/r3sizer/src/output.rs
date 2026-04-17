@@ -1,4 +1,5 @@
 /// Formatted stdout output.
+use anyhow::{Context, Result};
 use r3sizer_core::{
     ArtifactMetric, AutoSharpDiagnostics, CrossingStatus, FallbackReason, FitStatus,
     MetricComponent, MetricMode, SelectionMode, SharpenMode,
@@ -73,10 +74,7 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
             "  metric                    : {}",
             metric_component_label(mc.selected_metric)
         );
-        println!(
-            "  selection_score           : {:.6}",
-            mc.selection_score
-        );
+        println!("  selection_score           : {:.6}", mc.selection_score);
         println!();
         println!("Metric breakdown (v0.2 — diagnostic only):");
         for (component, value) in &mc.components {
@@ -100,7 +98,10 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         println!();
         println!("Fit quality:");
         println!("  R²                        : {:.6}", q.r_squared);
-        println!("  Residual sum of squares   : {:.2e}", q.residual_sum_of_squares);
+        println!(
+            "  Residual sum of squares   : {:.2e}",
+            q.residual_sum_of_squares
+        );
         println!("  Max residual              : {:.2e}", q.max_residual);
         println!("  Min pivot                 : {:.2e}", q.min_pivot);
     }
@@ -109,11 +110,26 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
     if let Some(r) = &diag.robustness {
         println!();
         println!("Robustness:");
-        println!("  Monotonic                 : {}", if r.monotonic { "yes" } else { "no" });
-        println!("  Quasi-monotonic           : {}", if r.quasi_monotonic { "yes" } else { "no" });
-        println!("  R² ok                     : {}", if r.r_squared_ok { "yes" } else { "no" });
-        println!("  Well conditioned          : {}", if r.well_conditioned { "yes" } else { "no" });
-        println!("  LOO stable                : {}", if r.loo_stable { "yes" } else { "no" });
+        println!(
+            "  Monotonic                 : {}",
+            if r.monotonic { "yes" } else { "no" }
+        );
+        println!(
+            "  Quasi-monotonic           : {}",
+            if r.quasi_monotonic { "yes" } else { "no" }
+        );
+        println!(
+            "  R² ok                     : {}",
+            if r.r_squared_ok { "yes" } else { "no" }
+        );
+        println!(
+            "  Well conditioned          : {}",
+            if r.well_conditioned { "yes" } else { "no" }
+        );
+        println!(
+            "  LOO stable                : {}",
+            if r.loo_stable { "yes" } else { "no" }
+        );
         println!("  Max LOO root change       : {:.4}", r.max_loo_root_change);
     }
 
@@ -132,7 +148,13 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
         println!("  Clamp                     : {}", t.clamp_us);
         println!("  Total                     : {}", t.total_us);
     }
+}
 
+/// Serialize the diagnostics as JSON and print to stdout.
+pub fn print_summary_json(diag: &AutoSharpDiagnostics) -> Result<()> {
+    let json = serde_json::to_string_pretty(diag).context("failed to serialise diagnostics")?;
+    println!("{json}");
+    Ok(())
 }
 
 fn sharpen_mode_label(m: SharpenMode) -> &'static str {
@@ -201,4 +223,3 @@ fn metric_component_label(c: MetricComponent) -> &'static str {
         MetricComponent::TextureFlattening => "texture_flattening",
     }
 }
-

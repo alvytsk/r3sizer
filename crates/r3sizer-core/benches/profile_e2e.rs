@@ -5,8 +5,8 @@
 //! Run with: cargo bench --bench profile_e2e
 
 use r3sizer_core::{
-    AutoSharpParams, LinearRgbImage, PipelineMode, StageTiming,
-    prepare_base, process_from_prepared, process_auto_sharp_downscale,
+    prepare_base, process_auto_sharp_downscale, process_from_prepared, AutoSharpParams,
+    LinearRgbImage, PipelineMode, StageTiming,
 };
 
 fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
@@ -26,7 +26,11 @@ fn synthetic_image(w: u32, h: u32) -> LinearRgbImage {
 fn print_timing(label: &str, timing: &StageTiming) {
     let total = timing.total_us;
     let fmt = |name: &str, us: u64| {
-        let pct = if total > 0 { us as f64 / total as f64 * 100.0 } else { 0.0 };
+        let pct = if total > 0 {
+            us as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
         println!("    {name:<28} {us:>8} µs  ({pct:5.1}%)");
     };
 
@@ -75,7 +79,7 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
         let result = process_from_prepared(&prepared, params, &|_| {}).unwrap();
         let proc_wall_us = t_proc_start.elapsed().as_micros() as u64;
 
-        timings.push(result.diagnostics.timing.clone());
+        timings.push(result.diagnostics.timing);
         phase_timings.push((prep_wall_us, proc_wall_us));
     }
 
@@ -108,10 +112,14 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
     let proc_gap = proc_wall.saturating_sub(timed_in_process);
 
     println!("    --- Phase breakdown ---");
-    println!("    prepare_base wall:    {:>8} µs  (timed: {} µs, gap: {} µs)",
-        prep_wall, timed_in_prepare, prep_gap);
-    println!("    process_from_prepared: {:>7} µs  (timed: {} µs, gap: {} µs)",
-        proc_wall, timed_in_process, proc_gap);
+    println!(
+        "    prepare_base wall:    {:>8} µs  (timed: {} µs, gap: {} µs)",
+        prep_wall, timed_in_prepare, prep_gap
+    );
+    println!(
+        "    process_from_prepared: {:>7} µs  (timed: {} µs, gap: {} µs)",
+        proc_wall, timed_in_process, proc_gap
+    );
 }
 
 fn main() {
@@ -131,7 +139,8 @@ fn main() {
             let params = AutoSharpParams {
                 pipeline_mode: Some(mode),
                 ..AutoSharpParams::photo(960, 540)
-            }.resolved();
+            }
+            .resolved();
             run_scenario(&format!("1080p→540p {name}"), &src, &params);
         }
     }
@@ -149,7 +158,8 @@ fn main() {
             let params = AutoSharpParams {
                 pipeline_mode: Some(mode),
                 ..AutoSharpParams::photo(1280, 720)
-            }.resolved();
+            }
+            .resolved();
             run_scenario(&format!("4K→720p {name}"), &src, &params);
         }
     }
@@ -163,13 +173,15 @@ fn main() {
         let params = AutoSharpParams {
             pipeline_mode: Some(PipelineMode::Fast),
             ..AutoSharpParams::photo(640, 360)
-        }.resolved();
+        }
+        .resolved();
         run_scenario("4K→360p Fast", &src, &params);
 
         let params = AutoSharpParams {
             pipeline_mode: Some(PipelineMode::Balanced),
             ..AutoSharpParams::photo(640, 360)
-        }.resolved();
+        }
+        .resolved();
         run_scenario("4K→360p Balanced", &src, &params);
     }
 
@@ -182,7 +194,8 @@ fn main() {
         let params = AutoSharpParams {
             pipeline_mode: Some(PipelineMode::Balanced),
             ..AutoSharpParams::photo(320, 240)
-        }.resolved();
+        }
+        .resolved();
         run_scenario("VGA→QVGA Balanced", &src, &params);
     }
 
