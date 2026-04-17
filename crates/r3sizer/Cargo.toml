@@ -1,9 +1,16 @@
 [package]
-name    = "r3sizer"
-version = "0.8.0"
-edition = "2021"
-license.workspace = true
-description = "CLI for automatic-sharpness image downscaling"
+name                   = "r3sizer"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description            = "CLI for automatic-sharpness image downscaling"
+readme                 = "README.md"
+keywords               = ["image", "resize", "cli", "downscale", "sharpen"]
+categories             = ["command-line-utilities", "multimedia::images"]
 
 [[bin]]
 name = "r3sizer"
@@ -22,5 +29,5 @@ anyhow        = "1"
 serde         = { workspace = true }
 serde_json    = { workspace = true }
 glob          = "0.3"
-r3sizer-core = { path = "../r3sizer-core" }
-r3sizer-io   = { path = "../r3sizer-io" }
+r3sizer-core  = { path = "../r3sizer-core", version = "0.8" }
+r3sizer-io    = { path = "../r3sizer-io",   version = "0.8" }
