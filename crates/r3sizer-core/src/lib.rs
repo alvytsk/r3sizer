@@ -16,6 +16,7 @@ pub mod classifier;
 pub mod color;
 pub mod contrast;
 pub mod fit;
+pub mod ingest;
 pub mod metrics;
 pub mod pipeline;
 pub mod resize;
