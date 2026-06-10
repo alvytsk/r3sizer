@@ -418,9 +418,8 @@ mod tests {
 
     #[test]
     fn u8_lut_matches_reference_conversion() {
-        for i in 0..=255usize {
+        for (i, &got) in SRGB_U8_TO_LINEAR.iter().enumerate() {
             let expected = srgb_to_linear(i as f32 / 255.0);
-            let got = SRGB_U8_TO_LINEAR[i];
             assert!(
                 (got - expected).abs() < 1e-6,
                 "LUT[{i}] = {got}, expected {expected}"
