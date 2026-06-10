@@ -1,32 +1,5 @@
-use r3sizer_core::color::linear_to_srgb_fast;
+use r3sizer_core::color::{linear_to_srgb_fast, SRGB_U8_TO_LINEAR};
 use r3sizer_core::{CoreError, LinearRgbImage};
-
-// ---------------------------------------------------------------------------
-// Exact u8→linear LUT (256 entries, no interpolation needed)
-// ---------------------------------------------------------------------------
-//
-// Since WASM input is always u8 (0-255 from canvas getImageData), we can
-// precompute the exact sRGB→linear value for each of the 256 possible inputs.
-// This is a 1KB LUT — trivially fits in L1 and eliminates all powf calls.
-
-/// Precomputed `srgb_to_linear(i / 255.0)` for i in 0..=255.
-static SRGB_U8_TO_LINEAR: [f32; 256] = {
-    let mut lut = [0.0_f32; 256];
-    let mut i: usize = 0;
-    while i < 256 {
-        let v = i as f64 / 255.0;
-        let linear = if v <= 0.04045 {
-            v / 12.92
-        } else {
-            // exp(2.4 * ln((v + 0.055) / 1.055))
-            let base = (v + 0.055) / 1.055;
-            r3sizer_core::color::const_pow_2_4(base)
-        };
-        lut[i] = linear as f32;
-        i += 1;
-    }
-    lut
-};
 
 /// Convert RGBA sRGB u8 pixels (from canvas `getImageData`) into a `LinearRgbImage`.
 ///
