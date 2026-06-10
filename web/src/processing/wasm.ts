@@ -109,6 +109,8 @@ function ensureWorker(): Promise<void> {
               cb.resolve(data.strengthsJson ?? "[]");
             } else if (data.type === "dense_result") {
               cb.resolve(data.denseResult ?? null);
+            } else if (data.type === "ingest_result") {
+              cb.resolve(data.ingest ?? undefined);
             } else if (data.type === "base_prepared") {
               cb.resolve(undefined);
             } else if (data.type === "cache_cleared") {
@@ -355,6 +357,22 @@ function callWorker<T>(msg: Omit<WorkerRequest, "id">): Promise<T> {
   });
 }
 
+/** Like callWorker, but transfers the given buffers (zero-copy). */
+function callWorkerTransfer<T>(
+  msg: Omit<WorkerRequest, "id">,
+  transfer: Transferable[],
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Worker request timed out (${msg.type})`));
+    }, WORKER_TIMEOUT);
+    pending.set(id, { resolve, reject, timer });
+    worker!.postMessage({ ...msg, id } as WorkerRequest, transfer);
+  });
+}
+
 /**
  * Pre-compute the base image (resize + classify + baseline + evaluator).
  *
@@ -376,4 +394,64 @@ export async function prepareBaseImage(
     height,
     paramsJson,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Striped ingest — streaming row-stripe input for very large images
+// ---------------------------------------------------------------------------
+
+export interface IngestDims {
+  width: number;
+  height: number;
+}
+
+export async function ingestBegin(
+  srcW: number,
+  srcH: number,
+  targetW: number,
+  targetH: number,
+): Promise<IngestDims> {
+  await ensureWorker();
+  return callWorker<IngestDims>({
+    type: "ingest_begin",
+    width: srcW,
+    height: srcH,
+    targetWidth: targetW,
+    targetHeight: targetH,
+  });
+}
+
+export async function ingestStripe(rgba: Uint8Array, rows: number): Promise<void> {
+  await ensureWorker();
+  await callWorkerTransfer<IngestDims | undefined>(
+    { type: "ingest_stripe", rgbaData: rgba, rows },
+    [rgba.buffer as ArrayBuffer],
+  );
+}
+
+export async function ingestEnd(): Promise<IngestDims> {
+  await ensureWorker();
+  return callWorker<IngestDims>({ type: "ingest_end" });
+}
+
+/** Fire-and-forget: drop partial WASM ingest state (cancellation path). */
+export function ingestAbortFireAndForget(): void {
+  worker?.postMessage({ type: "ingest_abort" } as WorkerRequest);
+}
+
+/**
+ * Emergency recovery for a hung worker: terminate everything and force full
+ * WASM re-initialization (with cache loss) on the next call.
+ */
+export function resetWorker(): void {
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  workerReadyPromise = null;
+  for (const [id, cb] of pending) {
+    clearTimeout(cb.timer);
+    cb.reject(new Error("worker reset"));
+    pending.delete(id);
+  }
 }

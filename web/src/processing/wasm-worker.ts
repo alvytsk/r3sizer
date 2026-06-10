@@ -3,6 +3,7 @@ import {
   get_base_data, process_from_probes, clear_cache,
   resolve_initial_strengths, resolve_dense_strengths,
   compute_probe_detail,
+  ingest_begin, ingest_stripe, ingest_end, ingest_abort,
 } from "../wasm-pkg/r3sizer_wasm";
 
 let ready = false;
@@ -12,7 +13,8 @@ export interface WorkerRequest {
     | "init" | "process" | "prepare" | "prepare_base"
     | "get_base_data" | "compute_detail" | "process_from_probes"
     | "resolve_initial_strengths" | "resolve_dense_strengths"
-    | "clear_cache";
+    | "clear_cache"
+    | "ingest_begin" | "ingest_stripe" | "ingest_end" | "ingest_abort";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -24,13 +26,17 @@ export interface WorkerRequest {
   passDiagnosticsJson?: string;
   coarseSamplesJson?: string;
   effectiveP0?: number;
+  targetWidth?: number;
+  targetHeight?: number;
+  rows?: number;
 }
 
 export interface WorkerResponse {
   type:
     | "ready" | "result" | "prepared" | "base_prepared"
     | "base_data" | "detail" | "progress" | "strengths" | "dense_result"
-    | "cache_cleared";
+    | "cache_cleared"
+    | "ingest_result";
   id?: number;
   stage?: string;
   result?: {
@@ -50,6 +56,7 @@ export interface WorkerResponse {
   detailData?: Float32Array | null;
   strengthsJson?: string;
   denseResult?: string | null;
+  ingest?: { width: number; height: number } | null;
   error?: string;
 }
 
@@ -92,6 +99,74 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       // Non-fatal — process_image falls back to full pipeline.
     }
     (self as unknown as Worker).postMessage({ type: "base_prepared", id } as WorkerResponse);
+    return;
+  }
+
+  if (msg.type === "ingest_begin") {
+    const { id, width, height, targetWidth, targetHeight } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const dims = ingest_begin(width!, height!, targetWidth!, targetHeight!) as {
+        width: number;
+        height: number;
+      };
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+        ingest: dims,
+      } as WorkerResponse);
+    } catch (err) {
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      } as WorkerResponse);
+    }
+    return;
+  }
+
+  if (msg.type === "ingest_stripe") {
+    const { id, rgbaData, rows } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      ingest_stripe(rgbaData!, rows!);
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+      } as WorkerResponse);
+    } catch (err) {
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      } as WorkerResponse);
+    }
+    return;
+  }
+
+  if (msg.type === "ingest_end") {
+    const { id } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const dims = ingest_end() as { width: number; height: number };
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+        ingest: dims,
+      } as WorkerResponse);
+    } catch (err) {
+      (self as unknown as Worker).postMessage({
+        type: "ingest_result",
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      } as WorkerResponse);
+    }
+    return;
+  }
+
+  if (msg.type === "ingest_abort") {
+    // Fire-and-forget: drop partial ingest state.
+    if (ready) ingest_abort();
     return;
   }
 
