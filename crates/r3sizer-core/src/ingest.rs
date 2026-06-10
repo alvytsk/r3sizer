@@ -345,6 +345,81 @@ mod tests {
         ));
     }
 
+    /// Build an RGBA8 buffer from a per-pixel (r, g, b) function.
+    fn rgba_from_fn(w: u32, h: u32, f: impl Fn(u32, u32) -> (u8, u8, u8)) -> Vec<u8> {
+        let mut data = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let (r, g, b) = f(x, y);
+                data.extend_from_slice(&[r, g, b, 255]);
+            }
+        }
+        data
+    }
+
+    fn reduce_whole(src: ImageSize, inter: ImageSize, rgba: &[u8]) -> LinearRgbImage {
+        let mut r = StripedPreReducer::new(src, inter).unwrap();
+        r.push_srgb8_rows(rgba, src.height).unwrap();
+        r.finish().unwrap()
+    }
+
+    #[test]
+    fn solid_color_reduces_to_same_color() {
+        let src = ImageSize { width: 10, height: 7 };
+        let inter = ImageSize { width: 3, height: 2 };
+        let rgba = rgba_from_fn(10, 7, |_, _| (128, 64, 200));
+        let out = reduce_whole(src, inter, &rgba);
+        let expected = [
+            SRGB_U8_TO_LINEAR[128],
+            SRGB_U8_TO_LINEAR[64],
+            SRGB_U8_TO_LINEAR[200],
+        ];
+        for px in out.pixels().chunks_exact(3) {
+            for c in 0..3 {
+                assert!((px[c] - expected[c]).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn checkerboard_reduces_to_exact_mean() {
+        // 4x4 1px checkerboard (0 / 255) -> 2x2: each output cell averages
+        // exactly two black and two white pixels in linear space.
+        let src = ImageSize { width: 4, height: 4 };
+        let inter = ImageSize { width: 2, height: 2 };
+        let rgba = rgba_from_fn(4, 4, |x, y| {
+            let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+            (v, v, v)
+        });
+        let out = reduce_whole(src, inter, &rgba);
+        let expected = (SRGB_U8_TO_LINEAR[255] + SRGB_U8_TO_LINEAR[0]) / 2.0;
+        for px in out.pixels() {
+            assert!((px - expected).abs() < 1e-6, "got {px}, expected {expected}");
+        }
+    }
+
+    #[test]
+    fn row_gradient_reduces_to_exact_row_means() {
+        // Each source row is constant; 4 rows -> 2 output rows, so each
+        // output row is the exact mean of two LUT values.
+        let src = ImageSize { width: 4, height: 4 };
+        let inter = ImageSize { width: 2, height: 2 };
+        let values = [10u8, 80, 160, 240];
+        let rgba = rgba_from_fn(4, 4, |_, y| {
+            let v = values[y as usize];
+            (v, v, v)
+        });
+        let out = reduce_whole(src, inter, &rgba);
+        let expect_row0 = (SRGB_U8_TO_LINEAR[10] + SRGB_U8_TO_LINEAR[80]) / 2.0;
+        let expect_row1 = (SRGB_U8_TO_LINEAR[160] + SRGB_U8_TO_LINEAR[240]) / 2.0;
+        for px in out.row(0) {
+            assert!((px - expect_row0).abs() < 1e-6);
+        }
+        for px in out.row(1) {
+            assert!((px - expect_row1).abs() < 1e-6);
+        }
+    }
+
     #[test]
     fn axis_weights_even_division() {
         // 4 source -> 2 dst, scale 0.5: pixels 0,1 -> cell 0; pixels 2,3 -> cell 1.
