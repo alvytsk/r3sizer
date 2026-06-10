@@ -420,6 +420,100 @@ mod tests {
         }
     }
 
+    /// Deterministic pseudo-detail pattern (no RNG: reproducible).
+    fn patterned_rgba(w: u32, h: u32) -> Vec<u8> {
+        rgba_from_fn(w, h, |x, y| {
+            let r = ((x * 7 + y * 13) % 256) as u8;
+            let g = ((x * 3) % 200) as u8;
+            let b = ((y * 5 + 31) % 256) as u8;
+            (r, g, b)
+        })
+    }
+
+    fn reduce_in_stripes(
+        src: ImageSize,
+        inter: ImageSize,
+        rgba: &[u8],
+        stripe_rows: u32,
+    ) -> LinearRgbImage {
+        let mut r = StripedPreReducer::new(src, inter).unwrap();
+        let row_bytes = src.width as usize * 4;
+        let mut y = 0u32;
+        while y < src.height {
+            let rows = stripe_rows.min(src.height - y);
+            let start = y as usize * row_bytes;
+            let end = start + rows as usize * row_bytes;
+            r.push_srgb8_rows(&rgba[start..end], rows).unwrap();
+            y += rows;
+        }
+        r.finish().unwrap()
+    }
+
+    #[test]
+    fn result_is_independent_of_stripe_slicing() {
+        let src = ImageSize { width: 97, height: 61 };
+        let target = ImageSize { width: 13, height: 11 };
+        let inter = compute_intermediate_size(src, target);
+        let rgba = patterned_rgba(src.width, src.height);
+
+        let whole = reduce_whole(src, inter, &rgba);
+        for stripe_rows in [1u32, 17, 32, 61] {
+            let sliced = reduce_in_stripes(src, inter, &rgba, stripe_rows);
+            // Accumulation order is row-major regardless of stripe
+            // boundaries, so results are bit-identical.
+            assert_eq!(
+                whole.pixels(),
+                sliced.pixels(),
+                "stripe_rows={stripe_rows} changed the result"
+            );
+        }
+    }
+
+    #[test]
+    fn smooth_gradient_close_to_staged_bilinear_prereduce() {
+        // On smooth content the area average and the staged path's bilinear
+        // pre-reduce agree closely. (They are different filters — the spec
+        // explicitly allows numerical differences; sharp content diverges
+        // more, which the pipeline-level test in tests/striped_ingest.rs
+        // covers with an s* tolerance instead.)
+        let src = ImageSize { width: 600, height: 400 };
+        let target = ImageSize { width: 100, height: 66 };
+        let inter = compute_intermediate_size(src, target);
+
+        let rgba = rgba_from_fn(600, 400, |x, y| {
+            (
+                (x as f32 / 599.0 * 255.0) as u8,
+                (y as f32 / 399.0 * 255.0) as u8,
+                128,
+            )
+        });
+
+        let striped = reduce_in_stripes(src, inter, &rgba, 37);
+
+        // Reference: same quantized pixels, linearized identically, then the
+        // staged path's bilinear pre-reduce.
+        let mut linear = Vec::with_capacity((src.width * src.height * 3) as usize);
+        for px in rgba.chunks_exact(4) {
+            linear.push(SRGB_U8_TO_LINEAR[px[0] as usize]);
+            linear.push(SRGB_U8_TO_LINEAR[px[1] as usize]);
+            linear.push(SRGB_U8_TO_LINEAR[px[2] as usize]);
+        }
+        let full = LinearRgbImage::new(src.width, src.height, linear).unwrap();
+        let bilinear = crate::resize::fir_resize(
+            &full,
+            inter.width,
+            inter.height,
+            fast_image_resize::ResizeAlg::Convolution(fast_image_resize::FilterType::Bilinear),
+        )
+        .unwrap();
+
+        let mut max_diff = 0.0f32;
+        for (a, b) in striped.pixels().iter().zip(bilinear.pixels()) {
+            max_diff = max_diff.max((a - b).abs());
+        }
+        assert!(max_diff < 1e-2, "max per-channel diff {max_diff} too large");
+    }
+
     #[test]
     fn axis_weights_even_division() {
         // 4 source -> 2 dst, scale 0.5: pixels 0,1 -> cell 0; pixels 2,3 -> cell 1.
