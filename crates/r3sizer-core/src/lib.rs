@@ -75,4 +75,13 @@ pub enum CoreError {
 
     #[error("empty image: width or height is zero")]
     EmptyImage,
+
+    #[error("target too close to source for large-image mode (shrink ratio {ratio:.2} < 3.0)")]
+    TargetTooCloseForStripedIngest { ratio: f64 },
+
+    #[error("ingest stripe overflow: pushed {pushed} rows but only {remaining} source rows remain")]
+    IngestRowOverflow { pushed: u32, remaining: u32 },
+
+    #[error("ingest incomplete: {supplied} of {expected} source rows supplied at finish()")]
+    IngestIncomplete { supplied: u32, expected: u32 },
 }
