@@ -16,7 +16,8 @@ use r3sizer_core::{
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
-    InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown, MetricComponent,
+    IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown,
+    MetricComponent,
     MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics,
     ProbeSample, QualityEvaluation, Recommendation, RecommendationKind, RegionClass,
     RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags,
@@ -84,6 +85,7 @@ fn export_typescript_bindings() {
         AdaptiveValidationOutcome::decl(&cfg),
         ProbePassDiagnostics::decl(&cfg),
         BaseResizeQuality::decl(&cfg),
+        IngestDiagnostics::decl(&cfg),
         AutoSharpDiagnostics::decl(&cfg),
     ];
 

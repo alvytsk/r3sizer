@@ -1367,6 +1367,10 @@ pub struct AutoSharpDiagnostics {
     /// Active for shrink ratios above ~3×.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub used_staged_shrink: bool,
+
+    // --- Striped ingest ---
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingest: Option<IngestDiagnostics>,
 }
 
 /// Return type of the top-level pipeline function.
@@ -1420,6 +1424,25 @@ pub struct InputIngressDiagnostics {
     /// Fraction of values > 1.0. Present for `LinearRgb` validation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_of_range_fraction: Option<f32>,
+}
+
+/// Diagnostics for the striped (streaming) ingest path used for very large
+/// images. Present only when the input was ingested via
+/// [`crate::ingest::StripedPreReducer`]; the pipeline's `input_size` then
+/// refers to the intermediate image, and the original source dimensions are
+/// recorded here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct IngestDiagnostics {
+    pub original_width: u32,
+    pub original_height: u32,
+    pub intermediate_width: u32,
+    pub intermediate_height: u32,
+    pub striped: bool,
+    /// Content-adaptive resize needs the full source; forced to uniform.
+    pub forced_uniform_resize: bool,
+    /// `full_diagnostics` source-side metrics need the full source; skipped.
+    pub skipped_source_diagnostics: bool,
 }
 
 // --- Branch B: Region-adaptive resize kernels ---

@@ -40,13 +40,15 @@ pub use pipeline::{
     process_from_prepared_with_probes, resolve_dense_strengths, resolve_initial_strengths,
     run_probes_from_detail, run_probes_standalone, PreparedBase,
 };
+pub use ingest::{compute_intermediate_size, validate_striped_shrink, StripedPreReducer};
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
-    ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
+    ImageSize, IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable,
+    LinearRgbImage,
     MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode,
     ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
     Recommendation, RecommendationKind, RegionClass, RegionCoverage, RegionMap, ResizeKernel,

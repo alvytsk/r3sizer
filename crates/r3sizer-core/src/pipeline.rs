@@ -1046,6 +1046,7 @@ fn finish_pipeline(
         base_resize_quality: Some(prepared.base_resize_quality),
         effective_target_artifact_ratio: effective_p0,
         used_staged_shrink: prepared.used_staged_shrink,
+        ingest: None,
     };
 
     diagnostics.recommendations =
