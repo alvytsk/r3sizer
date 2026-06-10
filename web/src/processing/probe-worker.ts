@@ -7,7 +7,7 @@
  * Base image data is sent once via `set_base` and cached for the duration of
  * the processing cycle, avoiding redundant structured clones per batch.
  */
-import { initSync, probe_batch, probe_batch_with_detail } from "./wasm-pkg/r3sizer_wasm";
+import { initSync, probe_batch, probe_batch_with_detail } from "../wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 

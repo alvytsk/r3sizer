@@ -2,7 +2,7 @@ import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/types/wasm-types";
 import type { BaseData } from "./probe-pool";
 import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData, resetBaseCache } from "./probe-pool";
-import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
+import wasmUrl from "../wasm-pkg/r3sizer_wasm_bg.wasm?url";
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;

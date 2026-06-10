@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageParallel, prepareImage, prepareBaseImage, clearAllCaches, setProgressCallback } from "@/wasm";
+import { processImageParallel, prepareImage, prepareBaseImage, clearAllCaches, setProgressCallback } from "@/processing/wasm";
 
 export type ExportFormat = "jpeg" | "png" | "webp";
 

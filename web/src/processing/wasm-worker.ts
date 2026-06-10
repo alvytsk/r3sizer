@@ -3,7 +3,7 @@ import {
   get_base_data, process_from_probes, clear_cache,
   resolve_initial_strengths, resolve_dense_strengths,
   compute_probe_detail,
-} from "./wasm-pkg/r3sizer_wasm";
+} from "../wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 
