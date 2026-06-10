@@ -9,6 +9,7 @@
  * worker, avoiding redundant structured clones on every probe batch.
  */
 import type { ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
+import type { CancellationToken } from "./errors";
 
 /** Base image data extracted from the main worker's PreparedBase. */
 export interface BaseData {
@@ -147,9 +148,16 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
  * Workers must have base data cached via `distributeBaseData` before calling
  * this.  Only strengths and params are sent per batch (no image data).
  */
+export interface ProbeRunOpts {
+  token?: CancellationToken;
+  /** Called as each worker's chunk completes: (probesDone, probesTotal). */
+  onChunkDone?: (done: number, total: number) => void;
+}
+
 export async function runProbesParallel(
   strengths: number[],
   paramsJson: string,
+  opts: ProbeRunOpts = {},
 ): Promise<ProbePoolResult> {
   if (!poolReady || pool.length === 0) {
     throw new Error("Probe pool not initialized");
@@ -163,9 +171,15 @@ export async function runProbesParallel(
   const n = pool.length;
   const chunks = splitStrengths(strengths, n);
 
+  let done = 0;
   const promises = chunks.map((chunk, i) => {
     if (chunk.length === 0) return Promise.resolve("[]");
-    return runProbeOnWorker(pool[i], chunk, paramsJson);
+    opts.token?.throwIfCancelled();
+    return runProbeOnWorker(pool[i], chunk, paramsJson).then((json) => {
+      done += chunk.length;
+      opts.onChunkDone?.(done, strengths.length);
+      return json;
+    });
   });
 
   const results = await Promise.all(promises);

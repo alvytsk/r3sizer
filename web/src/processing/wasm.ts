@@ -2,6 +2,8 @@ import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/types/wasm-types";
 import type { BaseData } from "./probe-pool";
 import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData, resetBaseCache } from "./probe-pool";
+import { CancelledError } from "./errors";
+import type { CancellationToken } from "./errors";
 import wasmUrl from "../wasm-pkg/r3sizer_wasm_bg.wasm?url";
 
 let worker: Worker | null = null;
@@ -224,11 +226,18 @@ export async function prepareImage(
  * Falls back to single-worker `processImageAsync` if pool is unavailable,
  * base preparation fails, or any step in the parallel path errors.
  */
+export interface ParallelOpts {
+  token?: CancellationToken;
+  /** Overall probing fraction 0..1 (coarse round maps to 0..0.6, dense to 0.6..1). */
+  onProbeProgress?: (fraction: number) => void;
+}
+
 export async function processImageParallel(
   rgbaData: Uint8Array,
   width: number,
   height: number,
   paramsJson: string,
+  opts: ParallelOpts = {},
 ): Promise<ProcessResult> {
   await ensureWorker();
 
@@ -237,9 +246,10 @@ export async function processImageParallel(
   }
 
   try {
-    return await runParallelPipeline(rgbaData, width, height, paramsJson);
-  } catch {
-    // Parallel path failed (stale cache, pool error, etc.) — fall back.
+    return await runParallelPipeline(rgbaData, width, height, paramsJson, opts);
+  } catch (err) {
+    // Cancellation propagates; only real failures fall back.
+    if (err instanceof CancelledError) throw err;
     return processImageAsync(rgbaData, width, height, paramsJson);
   }
 }
@@ -250,6 +260,7 @@ async function runParallelPipeline(
   width: number,
   height: number,
   paramsJson: string,
+  opts: ParallelOpts = {},
 ): Promise<ProcessResult> {
   // Step 1: Ensure base is prepared with the CURRENT params.
   // This is a no-op if the cached base already matches (Rust-side check),
@@ -262,6 +273,7 @@ async function runParallelPipeline(
     height,
     paramsJson,
   });
+  opts.token?.throwIfCancelled();
 
   // Step 2: Get base data and precomputed detail from main worker.
   const [baseData, detail] = await Promise.all([
@@ -279,6 +291,7 @@ async function runParallelPipeline(
 
   // Distribute base data + detail to probe workers (cached for subsequent rounds).
   await distributeBaseData(baseData);
+  opts.token?.throwIfCancelled();
 
   // Step 3: Resolve initial strengths via Rust (works for all configs).
   const initialStrengthsJson = await callWorker<string>({
@@ -289,12 +302,15 @@ async function runParallelPipeline(
   if (initialStrengths.length === 0) {
     throw new Error("no probe strengths resolved");
   }
+  opts.token?.throwIfCancelled();
 
   // Step 4: Run initial probes in parallel.
   progressCallback?.("probing");
   const t0 = performance.now();
   const { samplesJson: initialSamplesJson } = await runProbesParallel(
-    initialStrengths, paramsJson,
+    initialStrengths,
+    paramsJson,
+    { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 * (d / t)) },
   );
 
   // Step 5: For TwoPass, resolve dense window and run second round.
@@ -313,8 +329,11 @@ async function runParallelPipeline(
       diagnostics: unknown;
     };
     if (denseResult.strengths.length > 0) {
+      opts.token?.throwIfCancelled();
       const { samplesJson: denseSamplesJson } = await runProbesParallel(
-        denseResult.strengths, paramsJson,
+        denseResult.strengths,
+        paramsJson,
+        { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 + 0.4 * (d / t)) },
       );
       // Merge coarse + dense, sort by strength, dedup.
       const coarse = JSON.parse(initialSamplesJson) as Array<{ strength: number }>;
@@ -329,6 +348,8 @@ async function runParallelPipeline(
   const probingMs = performance.now() - t0;
 
   // Step 6: Send all probes to main worker for fit + sharpen.
+  opts.token?.throwIfCancelled();
+  opts.onProbeProgress?.(1);
   progressCallback?.("fitting");
   return callWorker<ProcessResult>({
     type: "process_from_probes",
