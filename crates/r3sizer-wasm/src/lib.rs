@@ -1,6 +1,9 @@
 mod convert;
 
-use r3sizer_core::{process_auto_sharp_downscale_with_progress, AutoSharpParams, LinearRgbImage};
+use r3sizer_core::{
+    process_auto_sharp_downscale_with_progress, AutoSharpParams, DiagnosticsLevel, ImageSize,
+    IngestDiagnostics, LinearRgbImage, StripedPreReducer,
+};
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -19,6 +22,8 @@ fn parse_params(json: &str) -> Result<AutoSharpParams, JsValue> {
 thread_local! {
     static CACHED_INPUT: RefCell<Option<LinearRgbImage>> = const { RefCell::new(None) };
     static CACHED_BASE: RefCell<Option<r3sizer_core::PreparedBase>> = const { RefCell::new(None) };
+    static CACHED_INGEST: RefCell<Option<StripedPreReducer>> = const { RefCell::new(None) };
+    static CACHED_INGEST_DIAG: RefCell<Option<IngestDiagnostics>> = const { RefCell::new(None) };
 }
 
 /// Pre-convert sRGB RGBA pixels to linear RGB and cache the result.
@@ -49,7 +54,8 @@ pub fn prepare_base(
     height: u32,
     params_json: &str,
 ) -> Result<(), JsValue> {
-    let params = parse_params(params_json)?;
+    let mut params = parse_params(params_json)?;
+    apply_ingest_constraints(&mut params);
 
     // Fast path: cached base already matches these params — skip re-preparation.
     let already_cached = CACHED_BASE.with(|c| {
@@ -74,11 +80,116 @@ pub fn prepare_base(
     Ok(())
 }
 
-/// Drop the cached linear image and prepared base.
+/// Drop the cached linear image, prepared base, and any ingest state.
 #[wasm_bindgen]
 pub fn clear_cache() {
     CACHED_INPUT.with(|c| *c.borrow_mut() = None);
     CACHED_BASE.with(|c| *c.borrow_mut() = None);
+    CACHED_INGEST.with(|c| *c.borrow_mut() = None);
+    CACHED_INGEST_DIAG.with(|c| *c.borrow_mut() = None);
+}
+
+// ---------------------------------------------------------------------------
+// Striped ingest — streaming row-stripe input for very large images
+// ---------------------------------------------------------------------------
+
+/// Begin a striped ingest for a large image. Validates the shrink ratio
+/// (>= 3x), computes the intermediate size, and invalidates all caches from
+/// the previous image. Returns `{ width, height }` of the intermediate.
+#[wasm_bindgen]
+pub fn ingest_begin(
+    src_w: u32,
+    src_h: u32,
+    target_w: u32,
+    target_h: u32,
+) -> Result<JsValue, JsValue> {
+    let src = ImageSize { width: src_w, height: src_h };
+    let target = ImageSize { width: target_w, height: target_h };
+    r3sizer_core::validate_striped_shrink(src, target)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let inter = r3sizer_core::compute_intermediate_size(src, target);
+    let reducer = StripedPreReducer::new(src, inter)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    // A new striped image invalidates everything cached for the previous one.
+    CACHED_INPUT.with(|c| *c.borrow_mut() = None);
+    CACHED_BASE.with(|c| *c.borrow_mut() = None);
+    CACHED_INGEST_DIAG.with(|c| *c.borrow_mut() = None);
+    CACHED_INGEST.with(|c| *c.borrow_mut() = Some(reducer));
+
+    dims_object(inter)
+}
+
+/// Feed the next full-width stripe (strictly sequential, top-to-bottom).
+/// On any error the partial ingest state is dropped.
+#[wasm_bindgen]
+pub fn ingest_stripe(rgba: &[u8], rows: u32) -> Result<(), JsValue> {
+    let result = CACHED_INGEST.with(|c| {
+        let mut cache = c.borrow_mut();
+        match cache.as_mut() {
+            None => Err("no active ingest — call ingest_begin first".to_string()),
+            Some(reducer) => reducer.push_srgb8_rows(rgba, rows).map_err(|e| e.to_string()),
+        }
+    });
+    if let Err(msg) = result {
+        ingest_abort();
+        return Err(JsValue::from_str(&msg));
+    }
+    Ok(())
+}
+
+/// Finish the ingest: the intermediate becomes the cached input image (same
+/// thread-local that `prepare_image` fills), so the entire downstream
+/// protocol works unchanged. Returns `{ width, height }` of the intermediate.
+#[wasm_bindgen]
+pub fn ingest_end() -> Result<JsValue, JsValue> {
+    let reducer = CACHED_INGEST
+        .with(|c| c.borrow_mut().take())
+        .ok_or_else(|| JsValue::from_str("no active ingest — call ingest_begin first"))?;
+    let src = reducer.source_size();
+    let inter = reducer.intermediate_size();
+    let intermediate = reducer
+        .finish()
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    CACHED_INPUT.with(|c| *c.borrow_mut() = Some(intermediate));
+    CACHED_INGEST_DIAG.with(|c| {
+        *c.borrow_mut() = Some(IngestDiagnostics {
+            original_width: src.width,
+            original_height: src.height,
+            intermediate_width: inter.width,
+            intermediate_height: inter.height,
+            striped: true,
+            forced_uniform_resize: true,
+            skipped_source_diagnostics: true,
+        })
+    });
+
+    dims_object(inter)
+}
+
+/// Drop partial ingest state (used by cancellation). Idempotent.
+#[wasm_bindgen]
+pub fn ingest_abort() {
+    CACHED_INGEST.with(|c| *c.borrow_mut() = None);
+}
+
+fn dims_object(size: ImageSize) -> Result<JsValue, JsValue> {
+    let result = js_sys::Object::new();
+    js_sys::Reflect::set(&result, &"width".into(), &JsValue::from(size.width))?;
+    js_sys::Reflect::set(&result, &"height".into(), &JsValue::from(size.height))?;
+    Ok(result.into())
+}
+
+/// Striped-path constraints: content-adaptive resize classifies the full
+/// source and full diagnostics need source-side metrics — neither exists on
+/// the striped path, so force uniform resize and summary diagnostics.
+fn apply_ingest_constraints(params: &mut AutoSharpParams) {
+    let striped = CACHED_INGEST_DIAG.with(|c| c.borrow().is_some());
+    if striped {
+        params.resize_strategy = None;
+        params.diagnostics_level = DiagnosticsLevel::Summary;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +236,10 @@ fn take_matching_base(params: &AutoSharpParams) -> Option<r3sizer_core::Prepared
 }
 
 /// Encode a pipeline output as a JS object with imageData, dimensions, and diagnostics.
-fn serialize_output(output: r3sizer_core::ProcessOutput) -> Result<JsValue, JsValue> {
+fn serialize_output(mut output: r3sizer_core::ProcessOutput) -> Result<JsValue, JsValue> {
+    if let Some(diag) = CACHED_INGEST_DIAG.with(|c| c.borrow().clone()) {
+        output.diagnostics.ingest = Some(diag);
+    }
     post_progress("encoding");
 
     let out_width = output.image.width();
@@ -181,7 +295,8 @@ pub fn process_image(
     height: u32,
     params_json: &str,
 ) -> Result<JsValue, JsValue> {
-    let params = parse_params(params_json)?;
+    let mut params = parse_params(params_json)?;
+    apply_ingest_constraints(&mut params);
 
     let input = get_or_convert_input(srgb_rgba_data, width, height)?;
 
@@ -367,7 +482,8 @@ pub fn process_from_probes(
     probing_us: u32,
     pass_diagnostics_json: &str,
 ) -> Result<JsValue, JsValue> {
-    let params = parse_params(params_json)?;
+    let mut params = parse_params(params_json)?;
+    apply_ingest_constraints(&mut params);
     let probe_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(probes_json)
         .map_err(|e| JsValue::from_str(&format!("invalid probes JSON: {e}")))?;
     let pass_diagnostics: Option<r3sizer_core::ProbePassDiagnostics> =
