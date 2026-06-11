@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Generate 100MP test image</title>
+<p>Generates a 16000×6250 (100MP) PNG with gradient + speckle detail so the
+probing pipeline has artifacts to measure. Open this file directly in a
+browser and click the button.</p>
+<button id="go">Generate panorama-100mp.png</button>
+<script>
+  document.getElementById("go").onclick = async () => {
+    const W = 16000, H = 6250;
+    const canvas = new OffscreenCanvas(W, H);
+    const ctx = canvas.getContext("2d");
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, "#0a2a4a");
+    grad.addColorStop(1, "#e8c87a");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    for (let i = 0; i < 250000; i++) {
+      ctx.fillRect(Math.random() * W, Math.random() * H, 2, 2);
+    }
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "panorama-100mp.png";
+    a.click();
+  };
+</script>
