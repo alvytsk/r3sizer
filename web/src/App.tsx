@@ -11,7 +11,6 @@ import { ProcessingOverlay } from "@/components/ProcessingOverlay";
 import { WelcomeHero } from "@/components/WelcomeHero";
 import { StatusBar } from "@/components/StatusBar";
 import { useProcessorStore } from "@/stores/processor-store";
-import { loadImageAsRgba } from "@/lib/image-loader";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
@@ -19,7 +18,7 @@ export default function App() {
   const { t } = useTranslation();
   const inputFile = useProcessorStore((s) => s.inputFile);
   const isProcessing = useProcessorStore((s) => s.isProcessing);
-  const processingStage = useProcessorStore((s) => s.processingStage);
+  const progress = useProcessorStore((s) => s.progress);
   const error = useProcessorStore((s) => s.error);
   const diagnostics = useProcessorStore((s) => s.diagnostics);
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
@@ -42,9 +41,7 @@ export default function App() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      loadImageAsRgba(file).then(({ data, width, height }) => {
-        setInput(file, data, width, height);
-      });
+      void setInput(file);
       e.target.value = "";
     },
     [setInput]
@@ -120,12 +117,12 @@ export default function App() {
 
         {/* Center column */}
         <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden">
-          {isProcessing && <ProcessingOverlay stage={processingStage} />}
+          {isProcessing && <ProcessingOverlay stage={progress?.stage ?? null} />}
 
           {inputFile && (
             <Toolbar
               isProcessing={isProcessing}
-              processingStage={processingStage}
+              processingStage={progress?.stage ?? null}
               paramsChanged={paramsChanged}
               hasOutput={!!outputRgbaData}
               onProcess={process}

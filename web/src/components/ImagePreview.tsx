@@ -192,14 +192,16 @@ function ComparisonSlider({
 }
 
 export function ImagePreview() {
-  const inputRgbaData = useProcessorStore((s) => s.inputRgbaData);
-  const inputWidth = useProcessorStore((s) => s.inputWidth);
-  const inputHeight = useProcessorStore((s) => s.inputHeight);
+  const previewRgbaData = useProcessorStore((s) => s.previewRgbaData);
+  const previewWidth = useProcessorStore((s) => s.previewWidth);
+  const previewHeight = useProcessorStore((s) => s.previewHeight);
+  const sourceWidth = useProcessorStore((s) => s.sourceWidth);
+  const sourceHeight = useProcessorStore((s) => s.sourceHeight);
   const outputRgbaData = useProcessorStore((s) => s.outputRgbaData);
   const outputWidth = useProcessorStore((s) => s.outputWidth);
   const outputHeight = useProcessorStore((s) => s.outputHeight);
 
-  if (!inputRgbaData) return null;
+  if (!previewRgbaData) return null;
 
   if (outputRgbaData) {
     return (
@@ -209,13 +211,13 @@ export function ImagePreview() {
             Compare
           </span>
           <span className="text-[11px] font-mono text-muted-foreground/40">
-            {inputWidth}&times;{inputHeight} {"\u2192"} {outputWidth}&times;{outputHeight}
+            {sourceWidth}&times;{sourceHeight} {"\u2192"} {outputWidth}&times;{outputHeight}
           </span>
         </div>
         <ComparisonSlider
-          inputRgba={inputRgbaData}
-          inputW={inputWidth}
-          inputH={inputHeight}
+          inputRgba={previewRgbaData}
+          inputW={previewWidth}
+          inputH={previewHeight}
           outputRgba={outputRgbaData}
           outputW={outputWidth}
           outputH={outputHeight}
@@ -231,10 +233,10 @@ export function ImagePreview() {
           Input
         </span>
         <span className="text-[11px] font-mono text-muted-foreground/40">
-          {inputWidth}&times;{inputHeight}
+          {sourceWidth}&times;{sourceHeight}
         </span>
       </div>
-      <FittedCanvas rgbaData={inputRgbaData} width={inputWidth} height={inputHeight} />
+      <FittedCanvas rgbaData={previewRgbaData} width={previewWidth} height={previewHeight} />
     </div>
   );
 }
