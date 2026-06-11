@@ -196,6 +196,12 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
           label={t("diagnostics.input")}
           value={`${diagnostics.input_size.width}\u00d7${diagnostics.input_size.height}`}
         />
+        {diagnostics.ingest?.striped && (
+          <Readout
+            label={t("diagnostics.stripedIngest")}
+            value={`${diagnostics.ingest.original_width}\u00d7${diagnostics.ingest.original_height}`}
+          />
+        )}
         <Readout
           label={t("diagnostics.output")}
           value={`${diagnostics.output_size.width}\u00d7${diagnostics.output_size.height}`}

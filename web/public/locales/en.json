@@ -170,6 +170,7 @@
     "tryAgain": "Try again"
   },
   "diagnostics": {
+    "stripedIngest": "striped ingest (source)",
     "advice": "Advice",
     "summary": "Summary",
     "fit": "Fit",

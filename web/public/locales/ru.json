@@ -170,6 +170,7 @@
     "tryAgain": "Попробовать снова"
   },
   "diagnostics": {
+    "stripedIngest": "потоковый ввод (исходник)",
     "advice": "Советы",
     "summary": "Сводка",
     "fit": "Подбор",
