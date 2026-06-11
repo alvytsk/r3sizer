@@ -17,12 +17,11 @@ use r3sizer_core::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
     IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown,
-    MetricComponent,
-    MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics,
-    ProbeSample, QualityEvaluation, Recommendation, RecommendationKind, RegionClass,
-    RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags,
-    SaturationGuardParams, SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy,
-    StageTiming,
+    MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig,
+    ProbePassDiagnostics, ProbeSample, QualityEvaluation, Recommendation, RecommendationKind,
+    RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
+    RobustnessFlags, SaturationGuardParams, SelectionMode, SelectionPolicy, Severity, SharpenMode,
+    SharpenStrategy, StageTiming,
 };
 
 #[test]

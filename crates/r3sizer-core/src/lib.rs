@@ -34,13 +34,13 @@ pub mod resize_strategy;
 pub mod prelude;
 
 // Re-export the complete public surface.
+pub use ingest::{compute_intermediate_size, validate_striped_shrink, StripedPreReducer};
 pub use pipeline::{
     compute_probe_detail, prepare_base, process_auto_sharp_downscale,
     process_auto_sharp_downscale_with_progress, process_from_prepared,
     process_from_prepared_with_probes, resolve_dense_strengths, resolve_initial_strengths,
     run_probes_from_detail, run_probes_standalone, PreparedBase,
 };
-pub use ingest::{compute_intermediate_size, validate_striped_shrink, StripedPreReducer};
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
@@ -48,9 +48,8 @@ pub use types::{
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
     ImageSize, IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable,
-    LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode,
-    ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
+    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch,
+    PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
     Recommendation, RecommendationKind, RegionClass, RegionCoverage, RegionMap, ResizeKernel,
     ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams,
     SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
@@ -81,7 +80,9 @@ pub enum CoreError {
     #[error("target too close to source for large-image mode (shrink ratio {ratio:.2} < 3.0)")]
     TargetTooCloseForStripedIngest { ratio: f64 },
 
-    #[error("ingest stripe overflow: pushed {pushed} rows but only {remaining} source rows remain")]
+    #[error(
+        "ingest stripe overflow: pushed {pushed} rows but only {remaining} source rows remain"
+    )]
     IngestRowOverflow { pushed: u32, remaining: u32 },
 
     #[error("ingest incomplete: {supplied} of {expected} source rows supplied at finish()")]

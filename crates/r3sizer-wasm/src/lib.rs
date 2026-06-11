@@ -103,13 +103,19 @@ pub fn ingest_begin(
     target_w: u32,
     target_h: u32,
 ) -> Result<JsValue, JsValue> {
-    let src = ImageSize { width: src_w, height: src_h };
-    let target = ImageSize { width: target_w, height: target_h };
+    let src = ImageSize {
+        width: src_w,
+        height: src_h,
+    };
+    let target = ImageSize {
+        width: target_w,
+        height: target_h,
+    };
     r3sizer_core::validate_striped_shrink(src, target)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let inter = r3sizer_core::compute_intermediate_size(src, target);
-    let reducer = StripedPreReducer::new(src, inter)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let reducer =
+        StripedPreReducer::new(src, inter).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // A new striped image invalidates everything cached for the previous one.
     CACHED_INPUT.with(|c| *c.borrow_mut() = None);
@@ -128,7 +134,9 @@ pub fn ingest_stripe(rgba: &[u8], rows: u32) -> Result<(), JsValue> {
         let mut cache = c.borrow_mut();
         match cache.as_mut() {
             None => Err("no active ingest — call ingest_begin first".to_string()),
-            Some(reducer) => reducer.push_srgb8_rows(rgba, rows).map_err(|e| e.to_string()),
+            Some(reducer) => reducer
+                .push_srgb8_rows(rgba, rows)
+                .map_err(|e| e.to_string()),
         }
     });
     if let Err(msg) = result {

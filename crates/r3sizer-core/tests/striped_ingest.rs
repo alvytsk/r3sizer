@@ -39,8 +39,14 @@ fn linear_from_rgba(rgba: &[u8], w: u32, h: u32) -> LinearRgbImage {
 fn striped_ingest_selects_similar_strength_to_monolithic() {
     let (w, h) = (2400u32, 1600u32);
     let rgba = synthetic_rgba(w, h);
-    let src = ImageSize { width: w, height: h };
-    let target = ImageSize { width: 400, height: 267 }; // ratio 6 -> staged path
+    let src = ImageSize {
+        width: w,
+        height: h,
+    };
+    let target = ImageSize {
+        width: 400,
+        height: 267,
+    }; // ratio 6 -> staged path
 
     let params = AutoSharpParams {
         target_width: target.width,

@@ -141,7 +141,10 @@ impl StripedPreReducer {
         }
         let remaining = self.src.height - self.next_row;
         if rows > remaining {
-            return Err(CoreError::IngestRowOverflow { pushed: rows, remaining });
+            return Err(CoreError::IngestRowOverflow {
+                pushed: rows,
+                remaining,
+            });
         }
         let row_bytes = self.src.width as usize * 4;
         let expected_len = row_bytes * rows as usize;
@@ -167,12 +170,36 @@ impl StripedPreReducer {
                 // Up to 2x2 destination cells; second row/col weight may be 0.
                 accumulate(&mut self.acc, &mut self.weight, iw, jx, jy, wx0 * wy0, rgb);
                 if wx1 > 0.0 {
-                    accumulate(&mut self.acc, &mut self.weight, iw, jx + 1, jy, wx1 * wy0, rgb);
+                    accumulate(
+                        &mut self.acc,
+                        &mut self.weight,
+                        iw,
+                        jx + 1,
+                        jy,
+                        wx1 * wy0,
+                        rgb,
+                    );
                 }
                 if wy1 > 0.0 {
-                    accumulate(&mut self.acc, &mut self.weight, iw, jx, jy + 1, wx0 * wy1, rgb);
+                    accumulate(
+                        &mut self.acc,
+                        &mut self.weight,
+                        iw,
+                        jx,
+                        jy + 1,
+                        wx0 * wy1,
+                        rgb,
+                    );
                     if wx1 > 0.0 {
-                        accumulate(&mut self.acc, &mut self.weight, iw, jx + 1, jy + 1, wx1 * wy1, rgb);
+                        accumulate(
+                            &mut self.acc,
+                            &mut self.weight,
+                            iw,
+                            jx + 1,
+                            jy + 1,
+                            wx1 * wy1,
+                            rgb,
+                        );
                     }
                 }
             }
@@ -229,10 +256,22 @@ mod tests {
     fn intermediate_size_matches_staged_shrink_math() {
         // 6000x4000 -> 800x600: max_shrink = 7.5, pre_factor = floor(3.75) = 3
         let inter = compute_intermediate_size(
-            ImageSize { width: 6000, height: 4000 },
-            ImageSize { width: 800, height: 600 },
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 800,
+                height: 600,
+            },
         );
-        assert_eq!(inter, ImageSize { width: 2000, height: 1333 });
+        assert_eq!(
+            inter,
+            ImageSize {
+                width: 2000,
+                height: 1333
+            }
+        );
     }
 
     #[test]
@@ -240,17 +279,35 @@ mod tests {
         // Extremely wide: 40000x800 -> 1600x100. max_shrink = 25, pre = 12.
         // 800/12 = 66.7 -> clamped up to target height 100.
         let inter = compute_intermediate_size(
-            ImageSize { width: 40000, height: 800 },
-            ImageSize { width: 1600, height: 100 },
+            ImageSize {
+                width: 40000,
+                height: 800,
+            },
+            ImageSize {
+                width: 1600,
+                height: 100,
+            },
         );
-        assert_eq!(inter, ImageSize { width: 3333, height: 100 });
+        assert_eq!(
+            inter,
+            ImageSize {
+                width: 3333,
+                height: 100
+            }
+        );
     }
 
     #[test]
     fn validate_rejects_small_shrink_ratio() {
         let err = validate_striped_shrink(
-            ImageSize { width: 6000, height: 4000 },
-            ImageSize { width: 3000, height: 2000 }, // ratio 2.0 < 3.0
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 3000,
+                height: 2000,
+            }, // ratio 2.0 < 3.0
         )
         .unwrap_err();
         assert!(matches!(
@@ -263,8 +320,14 @@ mod tests {
     fn validate_accepts_ratio_at_threshold() {
         // ratio exactly 3.0 is allowed (matches the staged-shrink branch: >= 3.0).
         validate_striped_shrink(
-            ImageSize { width: 6000, height: 4000 },
-            ImageSize { width: 2000, height: 4000 },
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 2000,
+                height: 4000,
+            },
         )
         .unwrap();
     }
@@ -272,8 +335,14 @@ mod tests {
     #[test]
     fn validate_rejects_zero_dimensions() {
         let err = validate_striped_shrink(
-            ImageSize { width: 0, height: 4000 },
-            ImageSize { width: 100, height: 100 },
+            ImageSize {
+                width: 0,
+                height: 4000,
+            },
+            ImageSize {
+                width: 100,
+                height: 100,
+            },
         )
         .unwrap_err();
         assert!(matches!(err, CoreError::EmptyImage));
@@ -281,8 +350,14 @@ mod tests {
 
     fn reducer_4x4_to_2x2() -> StripedPreReducer {
         StripedPreReducer::new(
-            ImageSize { width: 4, height: 4 },
-            ImageSize { width: 2, height: 2 },
+            ImageSize {
+                width: 4,
+                height: 4,
+            },
+            ImageSize {
+                width: 2,
+                height: 2,
+            },
         )
         .unwrap()
     }
@@ -290,8 +365,14 @@ mod tests {
     #[test]
     fn new_rejects_zero_dimensions() {
         let err = StripedPreReducer::new(
-            ImageSize { width: 0, height: 4 },
-            ImageSize { width: 2, height: 2 },
+            ImageSize {
+                width: 0,
+                height: 4,
+            },
+            ImageSize {
+                width: 2,
+                height: 2,
+            },
         )
         .unwrap_err();
         assert!(matches!(err, CoreError::EmptyImage));
@@ -300,8 +381,14 @@ mod tests {
     #[test]
     fn new_rejects_intermediate_larger_than_source() {
         let err = StripedPreReducer::new(
-            ImageSize { width: 4, height: 4 },
-            ImageSize { width: 8, height: 2 },
+            ImageSize {
+                width: 4,
+                height: 4,
+            },
+            ImageSize {
+                width: 8,
+                height: 2,
+            },
         )
         .unwrap_err();
         assert!(matches!(err, CoreError::InvalidParams(_)));
@@ -330,7 +417,10 @@ mod tests {
         let err = r.push_srgb8_rows(&[128u8; 4 * 2 * 4], 2).unwrap_err();
         assert!(matches!(
             err,
-            CoreError::IngestRowOverflow { pushed: 2, remaining: 1 }
+            CoreError::IngestRowOverflow {
+                pushed: 2,
+                remaining: 1
+            }
         ));
     }
 
@@ -341,7 +431,10 @@ mod tests {
         let err = r.finish().unwrap_err();
         assert!(matches!(
             err,
-            CoreError::IngestIncomplete { supplied: 2, expected: 4 }
+            CoreError::IngestIncomplete {
+                supplied: 2,
+                expected: 4
+            }
         ));
     }
 
@@ -365,8 +458,14 @@ mod tests {
 
     #[test]
     fn solid_color_reduces_to_same_color() {
-        let src = ImageSize { width: 10, height: 7 };
-        let inter = ImageSize { width: 3, height: 2 };
+        let src = ImageSize {
+            width: 10,
+            height: 7,
+        };
+        let inter = ImageSize {
+            width: 3,
+            height: 2,
+        };
         let rgba = rgba_from_fn(10, 7, |_, _| (128, 64, 200));
         let out = reduce_whole(src, inter, &rgba);
         let expected = [
@@ -385,8 +484,14 @@ mod tests {
     fn checkerboard_reduces_to_exact_mean() {
         // 4x4 1px checkerboard (0 / 255) -> 2x2: each output cell averages
         // exactly two black and two white pixels in linear space.
-        let src = ImageSize { width: 4, height: 4 };
-        let inter = ImageSize { width: 2, height: 2 };
+        let src = ImageSize {
+            width: 4,
+            height: 4,
+        };
+        let inter = ImageSize {
+            width: 2,
+            height: 2,
+        };
         let rgba = rgba_from_fn(4, 4, |x, y| {
             let v = if (x + y) % 2 == 0 { 255 } else { 0 };
             (v, v, v)
@@ -394,7 +499,10 @@ mod tests {
         let out = reduce_whole(src, inter, &rgba);
         let expected = (SRGB_U8_TO_LINEAR[255] + SRGB_U8_TO_LINEAR[0]) / 2.0;
         for px in out.pixels() {
-            assert!((px - expected).abs() < 1e-6, "got {px}, expected {expected}");
+            assert!(
+                (px - expected).abs() < 1e-6,
+                "got {px}, expected {expected}"
+            );
         }
     }
 
@@ -402,8 +510,14 @@ mod tests {
     fn row_gradient_reduces_to_exact_row_means() {
         // Each source row is constant; 4 rows -> 2 output rows, so each
         // output row is the exact mean of two LUT values.
-        let src = ImageSize { width: 4, height: 4 };
-        let inter = ImageSize { width: 2, height: 2 };
+        let src = ImageSize {
+            width: 4,
+            height: 4,
+        };
+        let inter = ImageSize {
+            width: 2,
+            height: 2,
+        };
         let values = [10u8, 80, 160, 240];
         let rgba = rgba_from_fn(4, 4, |_, y| {
             let v = values[y as usize];
@@ -451,8 +565,14 @@ mod tests {
 
     #[test]
     fn result_is_independent_of_stripe_slicing() {
-        let src = ImageSize { width: 97, height: 61 };
-        let target = ImageSize { width: 13, height: 11 };
+        let src = ImageSize {
+            width: 97,
+            height: 61,
+        };
+        let target = ImageSize {
+            width: 13,
+            height: 11,
+        };
         let inter = compute_intermediate_size(src, target);
         let rgba = patterned_rgba(src.width, src.height);
 
@@ -476,8 +596,14 @@ mod tests {
         // explicitly allows numerical differences; sharp content diverges
         // more, which the pipeline-level test in tests/striped_ingest.rs
         // covers with an s* tolerance instead.)
-        let src = ImageSize { width: 600, height: 400 };
-        let target = ImageSize { width: 100, height: 66 };
+        let src = ImageSize {
+            width: 600,
+            height: 400,
+        };
+        let target = ImageSize {
+            width: 100,
+            height: 66,
+        };
         let inter = compute_intermediate_size(src, target);
 
         let rgba = rgba_from_fn(600, 400, |x, y| {
@@ -518,7 +644,10 @@ mod tests {
     fn axis_weights_even_division() {
         // 4 source -> 2 dst, scale 0.5: pixels 0,1 -> cell 0; pixels 2,3 -> cell 1.
         let aw = axis_weights(4, 2);
-        assert_eq!(aw.spans, vec![(0, 0.5, 0.0), (0, 0.5, 0.0), (1, 0.5, 0.0), (1, 0.5, 0.0)]);
+        assert_eq!(
+            aw.spans,
+            vec![(0, 0.5, 0.0), (0, 0.5, 0.0), (1, 0.5, 0.0), (1, 0.5, 0.0)]
+        );
     }
 
     #[test]
