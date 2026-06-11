@@ -155,7 +155,15 @@
     "ready": "готово"
   },
   "processing": {
-    "starting": "запуск..."
+    "starting": "запуск...",
+    "cancel": "Отмена",
+    "stages": {
+      "decode": "декодирование...",
+      "ingest": "потоковая загрузка...",
+      "prepare": "подготовка...",
+      "probe": "пробы...",
+      "finalize": "финализация..."
+    }
   },
   "error": {
     "panelCrashed": "{{panel}} — ошибка",

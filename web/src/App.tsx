@@ -26,6 +26,7 @@ export default function App() {
   const lastProcessedVersion = useProcessorStore((s) => s.lastProcessedVersion);
   const setInput = useProcessorStore((s) => s.setInput);
   const process = useProcessorStore((s) => s.process);
+  const cancelProcessing = useProcessorStore((s) => s.cancelProcessing);
   const reset = useProcessorStore((s) => s.reset);
   const [sidebarOpen, setSidebarOpen] = useState(
     () => typeof window !== "undefined" && window.innerWidth >= 1024
@@ -117,7 +118,13 @@ export default function App() {
 
         {/* Center column */}
         <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden">
-          {isProcessing && <ProcessingOverlay stage={progress?.stage ?? null} />}
+          {isProcessing && (
+            <ProcessingOverlay
+              stage={progress?.stage ?? null}
+              overall={progress?.overall ?? 0}
+              onCancel={cancelProcessing}
+            />
+          )}
 
           {inputFile && (
             <Toolbar
