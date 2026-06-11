@@ -2,7 +2,9 @@ import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/types/wasm-types";
 import type { BaseData } from "./probe-pool";
 import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData, resetBaseCache } from "./probe-pool";
-import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
+import { CancelledError } from "./errors";
+import type { CancellationToken } from "./errors";
+import wasmUrl from "../wasm-pkg/r3sizer_wasm_bg.wasm?url";
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
@@ -109,6 +111,8 @@ function ensureWorker(): Promise<void> {
               cb.resolve(data.strengthsJson ?? "[]");
             } else if (data.type === "dense_result") {
               cb.resolve(data.denseResult ?? null);
+            } else if (data.type === "ingest_result") {
+              cb.resolve(data.ingest ?? undefined);
             } else if (data.type === "base_prepared") {
               cb.resolve(undefined);
             } else if (data.type === "cache_cleared") {
@@ -222,11 +226,18 @@ export async function prepareImage(
  * Falls back to single-worker `processImageAsync` if pool is unavailable,
  * base preparation fails, or any step in the parallel path errors.
  */
+export interface ParallelOpts {
+  token?: CancellationToken;
+  /** Overall probing fraction 0..1 (coarse round maps to 0..0.6, dense to 0.6..1). */
+  onProbeProgress?: (fraction: number) => void;
+}
+
 export async function processImageParallel(
   rgbaData: Uint8Array,
   width: number,
   height: number,
   paramsJson: string,
+  opts: ParallelOpts = {},
 ): Promise<ProcessResult> {
   await ensureWorker();
 
@@ -235,9 +246,10 @@ export async function processImageParallel(
   }
 
   try {
-    return await runParallelPipeline(rgbaData, width, height, paramsJson);
-  } catch {
-    // Parallel path failed (stale cache, pool error, etc.) — fall back.
+    return await runParallelPipeline(rgbaData, width, height, paramsJson, opts);
+  } catch (err) {
+    // Cancellation propagates; only real failures fall back.
+    if (err instanceof CancelledError) throw err;
     return processImageAsync(rgbaData, width, height, paramsJson);
   }
 }
@@ -248,6 +260,7 @@ async function runParallelPipeline(
   width: number,
   height: number,
   paramsJson: string,
+  opts: ParallelOpts = {},
 ): Promise<ProcessResult> {
   // Step 1: Ensure base is prepared with the CURRENT params.
   // This is a no-op if the cached base already matches (Rust-side check),
@@ -260,6 +273,7 @@ async function runParallelPipeline(
     height,
     paramsJson,
   });
+  opts.token?.throwIfCancelled();
 
   // Step 2: Get base data and precomputed detail from main worker.
   const [baseData, detail] = await Promise.all([
@@ -277,6 +291,7 @@ async function runParallelPipeline(
 
   // Distribute base data + detail to probe workers (cached for subsequent rounds).
   await distributeBaseData(baseData);
+  opts.token?.throwIfCancelled();
 
   // Step 3: Resolve initial strengths via Rust (works for all configs).
   const initialStrengthsJson = await callWorker<string>({
@@ -287,12 +302,15 @@ async function runParallelPipeline(
   if (initialStrengths.length === 0) {
     throw new Error("no probe strengths resolved");
   }
+  opts.token?.throwIfCancelled();
 
   // Step 4: Run initial probes in parallel.
   progressCallback?.("probing");
   const t0 = performance.now();
   const { samplesJson: initialSamplesJson } = await runProbesParallel(
-    initialStrengths, paramsJson,
+    initialStrengths,
+    paramsJson,
+    { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 * (d / t)) },
   );
 
   // Step 5: For TwoPass, resolve dense window and run second round.
@@ -311,8 +329,11 @@ async function runParallelPipeline(
       diagnostics: unknown;
     };
     if (denseResult.strengths.length > 0) {
+      opts.token?.throwIfCancelled();
       const { samplesJson: denseSamplesJson } = await runProbesParallel(
-        denseResult.strengths, paramsJson,
+        denseResult.strengths,
+        paramsJson,
+        { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 + 0.4 * (d / t)) },
       );
       // Merge coarse + dense, sort by strength, dedup.
       const coarse = JSON.parse(initialSamplesJson) as Array<{ strength: number }>;
@@ -327,6 +348,8 @@ async function runParallelPipeline(
   const probingMs = performance.now() - t0;
 
   // Step 6: Send all probes to main worker for fit + sharpen.
+  opts.token?.throwIfCancelled();
+  opts.onProbeProgress?.(1);
   progressCallback?.("fitting");
   return callWorker<ProcessResult>({
     type: "process_from_probes",
@@ -355,6 +378,22 @@ function callWorker<T>(msg: Omit<WorkerRequest, "id">): Promise<T> {
   });
 }
 
+/** Like callWorker, but transfers the given buffers (zero-copy). */
+function callWorkerTransfer<T>(
+  msg: Omit<WorkerRequest, "id">,
+  transfer: Transferable[],
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error(`Worker request timed out (${msg.type})`));
+    }, WORKER_TIMEOUT);
+    pending.set(id, { resolve, reject, timer });
+    worker!.postMessage({ ...msg, id } as WorkerRequest, transfer);
+  });
+}
+
 /**
  * Pre-compute the base image (resize + classify + baseline + evaluator).
  *
@@ -376,4 +415,64 @@ export async function prepareBaseImage(
     height,
     paramsJson,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Striped ingest — streaming row-stripe input for very large images
+// ---------------------------------------------------------------------------
+
+export interface IngestDims {
+  width: number;
+  height: number;
+}
+
+export async function ingestBegin(
+  srcW: number,
+  srcH: number,
+  targetW: number,
+  targetH: number,
+): Promise<IngestDims> {
+  await ensureWorker();
+  return callWorker<IngestDims>({
+    type: "ingest_begin",
+    width: srcW,
+    height: srcH,
+    targetWidth: targetW,
+    targetHeight: targetH,
+  });
+}
+
+export async function ingestStripe(rgba: Uint8Array, rows: number): Promise<void> {
+  await ensureWorker();
+  await callWorkerTransfer<IngestDims | undefined>(
+    { type: "ingest_stripe", rgbaData: rgba, rows },
+    [rgba.buffer as ArrayBuffer],
+  );
+}
+
+export async function ingestEnd(): Promise<IngestDims> {
+  await ensureWorker();
+  return callWorker<IngestDims>({ type: "ingest_end" });
+}
+
+/** Fire-and-forget: drop partial WASM ingest state (cancellation path). */
+export function ingestAbortFireAndForget(): void {
+  worker?.postMessage({ type: "ingest_abort" } as WorkerRequest);
+}
+
+/**
+ * Emergency recovery for a hung worker: terminate everything and force full
+ * WASM re-initialization (with cache loss) on the next call.
+ */
+export function resetWorker(): void {
+  if (worker) {
+    worker.terminate();
+    worker = null;
+  }
+  workerReadyPromise = null;
+  for (const [id, cb] of pending) {
+    clearTimeout(cb.timer);
+    cb.reject(new Error("worker reset"));
+    pending.delete(id);
+  }
 }

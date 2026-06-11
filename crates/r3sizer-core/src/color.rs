@@ -65,6 +65,28 @@ static SRGB_TO_LINEAR_LUT: [f32; LUT_SIZE + 1] = {
     lut
 };
 
+/// Precomputed `srgb_to_linear(i / 255.0)` for i in 0..=255 (exact, const-built).
+///
+/// Used for u8 ingress paths (canvas `getImageData`, striped ingest) — no
+/// interpolation and no `powf` calls.
+pub static SRGB_U8_TO_LINEAR: [f32; 256] = {
+    let mut lut = [0.0_f32; 256];
+    let mut i: usize = 0;
+    while i < 256 {
+        let v = i as f64 / 255.0;
+        let linear = if v <= 0.04045 {
+            v / 12.92
+        } else {
+            // exp(2.4 * ln((v + 0.055) / 1.055))
+            let base = (v + 0.055) / 1.055;
+            const_pow_2_4(base)
+        };
+        lut[i] = linear as f32;
+        i += 1;
+    }
+    lut
+};
+
 /// Const-compatible `base^2.4` via `exp(2.4 * ln(base))`.
 ///
 /// Uses a Padé-style polynomial approximation of ln/exp that is accurate
@@ -393,6 +415,19 @@ pub fn image_linear_to_srgb(img: &mut LinearRgbImage) {
 mod tests {
     use super::*;
     use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn u8_lut_matches_reference_conversion() {
+        for (i, &got) in SRGB_U8_TO_LINEAR.iter().enumerate() {
+            let expected = srgb_to_linear(i as f32 / 255.0);
+            assert!(
+                (got - expected).abs() < 1e-6,
+                "LUT[{i}] = {got}, expected {expected}"
+            );
+        }
+        assert_eq!(SRGB_U8_TO_LINEAR[0], 0.0);
+        assert_eq!(SRGB_U8_TO_LINEAR[255], 1.0);
+    }
 
     #[test]
     fn black_and_white_are_fixed_points() {

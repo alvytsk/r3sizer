@@ -155,13 +155,22 @@
     "ready": "ready"
   },
   "processing": {
-    "starting": "starting..."
+    "starting": "starting...",
+    "cancel": "Cancel",
+    "stages": {
+      "decode": "decoding...",
+      "ingest": "streaming image...",
+      "prepare": "preparing...",
+      "probe": "probing...",
+      "finalize": "finalizing..."
+    }
   },
   "error": {
     "panelCrashed": "{{panel}} crashed",
     "tryAgain": "Try again"
   },
   "diagnostics": {
+    "stripedIngest": "striped ingest (source)",
     "advice": "Advice",
     "summary": "Summary",
     "fit": "Fit",

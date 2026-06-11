@@ -50,7 +50,7 @@ export function ParameterPanel() {
   const setPreserveAspectRatio = useProcessorStore(
     (s) => s.setPreserveAspectRatio
   );
-  const inputWidth = useProcessorStore((s) => s.inputWidth);
+  const sourceWidth = useProcessorStore((s) => s.sourceWidth);
   const lockDimensions = useProcessorStore((s) => s.lockDimensions);
   const setLockDimensions = useProcessorStore((s) => s.setLockDimensions);
 
@@ -183,7 +183,7 @@ export function ParameterPanel() {
             />
           </div>
         </div>
-        {inputWidth > 0 && (
+        {sourceWidth > 0 && (
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <Switch

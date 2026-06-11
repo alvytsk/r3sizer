@@ -2,7 +2,6 @@ import { useCallback, useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProcessorStore } from "@/stores/processor-store";
-import { loadImageAsRgba } from "@/lib/image-loader";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
@@ -14,9 +13,7 @@ export function ImageUpload() {
 
   const handleFile = useCallback(
     (file: File) => {
-      loadImageAsRgba(file).then(({ data, width, height }) => {
-        setInput(file, data, width, height);
-      });
+      void setInput(file);
     },
     [setInput]
   );

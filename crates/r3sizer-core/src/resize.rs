@@ -15,7 +15,7 @@ use fir::pixels::F32x3;
 use crate::{CoreError, ImageSize, LinearRgbImage};
 
 /// Minimum shrink ratio (max of X and Y) that triggers the two-stage path.
-const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
+pub(crate) const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
 
 /// Downscale `src` to `target` size using Lanczos3 resampling.
 ///
@@ -53,14 +53,11 @@ pub fn downscale_with_info(
 
     if max_shrink >= STAGED_SHRINK_THRESHOLD {
         // Two-stage: fast bilinear pre-reduce to ~2× target, then Lanczos3.
-        let pre_factor = (max_shrink / 2.0).floor().max(1.0);
-        let pre_w = ((src.width() as f64 / pre_factor).round() as u32).max(target.width);
-        let pre_h = ((src.height() as f64 / pre_factor).round() as u32).max(target.height);
-
+        let inter = crate::ingest::compute_intermediate_size(src.size(), target);
         let pre = fir_resize(
             src,
-            pre_w,
-            pre_h,
+            inter.width,
+            inter.height,
             fir::ResizeAlg::Convolution(fir::FilterType::Bilinear),
         )?;
         let out = fir_resize(
@@ -86,7 +83,7 @@ pub fn downscale_with_info(
 /// Uses the typed API (`resize_typed<F32x3>`) so only F32x3 convolution code
 /// is monomorphized — the u8/u16 pixel-type code is never compiled, saving
 /// ~250 KB in the WASM binary.
-fn fir_resize(
+pub(crate) fn fir_resize(
     src: &LinearRgbImage,
     dst_w: u32,
     dst_h: u32,

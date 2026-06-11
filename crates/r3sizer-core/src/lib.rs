@@ -16,6 +16,7 @@ pub mod classifier;
 pub mod color;
 pub mod contrast;
 pub mod fit;
+pub mod ingest;
 pub mod metrics;
 pub mod pipeline;
 pub mod resize;
@@ -33,6 +34,7 @@ pub mod resize_strategy;
 pub mod prelude;
 
 // Re-export the complete public surface.
+pub use ingest::{compute_intermediate_size, validate_striped_shrink, StripedPreReducer};
 pub use pipeline::{
     compute_probe_detail, prepare_base, process_auto_sharp_downscale,
     process_auto_sharp_downscale_with_progress, process_from_prepared,
@@ -45,9 +47,9 @@ pub use types::{
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
     FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
-    ImageSize, InputColorSpace, InputIngressDiagnostics, KernelTable, LinearRgbImage,
-    MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode,
-    ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
+    ImageSize, IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable,
+    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch,
+    PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
     Recommendation, RecommendationKind, RegionClass, RegionCoverage, RegionMap, ResizeKernel,
     ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams,
     SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
@@ -74,4 +76,15 @@ pub enum CoreError {
 
     #[error("empty image: width or height is zero")]
     EmptyImage,
+
+    #[error("target too close to source for large-image mode (shrink ratio {ratio:.2} < 3.0)")]
+    TargetTooCloseForStripedIngest { ratio: f64 },
+
+    #[error(
+        "ingest stripe overflow: pushed {pushed} rows but only {remaining} source rows remain"
+    )]
+    IngestRowOverflow { pushed: u32, remaining: u32 },
+
+    #[error("ingest incomplete: {supplied} of {expected} source rows supplied at finish()")]
+    IngestIncomplete { supplied: u32, expected: u32 },
 }

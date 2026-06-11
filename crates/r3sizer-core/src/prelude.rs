@@ -30,7 +30,7 @@ pub use crate::{
 pub use crate::{prepare_base, process_auto_sharp_downscale, process_from_prepared, PreparedBase};
 
 // ── Output and diagnostics ────────────────────────────────────────────────────
-pub use crate::{AutoSharpDiagnostics, ProcessOutput, StageTiming};
+pub use crate::{AutoSharpDiagnostics, IngestDiagnostics, ProcessOutput, StageTiming};
 
 // ── Error type ────────────────────────────────────────────────────────────────
 pub use crate::CoreError;

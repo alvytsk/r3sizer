@@ -83,7 +83,7 @@ export type AutoSharpParams = { target_width: number, target_height: number,
  */
 probe_strengths: ProbeConfig, 
 /**
- * Target artifact ratio P0 (fraction of channel values outside [0,1]).
+ * Target artifact ratio P0 (fraction of channel values outside \[0,1\]).
  * Default: 0.001 (= 0.1%).
  */
 target_artifact_ratio: number, 
@@ -297,6 +297,11 @@ dense_min: number,
 dense_max: number, 
 /**
  * Actual number of coarse probes evaluated (< `coarse_count` when early-stopped).
+ *
+ * `None` means all configured coarse probes ran (no early stop).
+ * Only populated by the internal sequential two-pass path.  The WASM
+ * parallel probe-pool path runs all coarse probes in parallel and does
+ * not support early stopping, so this field is always `None` there.
  */
 coarse_probes_used?: number | null, };
 
@@ -324,6 +329,16 @@ ringing_score: number,
  * Derived as `clamp(1.0 − 2.0 × ringing_score, 0.65, 1.0)`.
  */
 envelope_scale: number, };
+
+export type IngestDiagnostics = { original_width: number, original_height: number, intermediate_width: number, intermediate_height: number, striped: boolean, 
+/**
+ * Content-adaptive resize needs the full source; forced to uniform.
+ */
+forced_uniform_resize: boolean, 
+/**
+ * `full_diagnostics` source-side metrics need the full source; skipped.
+ */
+skipped_source_diagnostics: boolean, };
 
 export type AutoSharpDiagnostics = { input_size: ImageSize, output_size: ImageSize, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, 
 /**
@@ -420,7 +435,7 @@ effective_target_artifact_ratio: number,
  * Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
  * Active for shrink ratios above ~3×.
  */
-used_staged_shrink?: boolean, };
+used_staged_shrink?: boolean, ingest?: IngestDiagnostics | null, };
 
 export type InputColorSpace = "srgb" | "linear_rgb" | "raw_linear";
 

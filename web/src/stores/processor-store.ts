@@ -4,7 +4,7 @@ import type {
   AutoSharpDiagnostics,
 } from "@/types/wasm-types";
 import { DEFAULT_PARAMS } from "@/types/wasm-types";
-import { processImageParallel, prepareImage, prepareBaseImage, clearAllCaches, setProgressCallback } from "@/wasm";
+import { CancelledError, processingClient, type ProcessJob } from "@/processing";
 
 export type ExportFormat = "jpeg" | "png" | "webp";
 
@@ -81,9 +81,14 @@ function loadDimsForOrientation(isPortrait: boolean): OrientationDims {
 interface ProcessorState {
   // Input
   inputFile: File | null;
-  inputRgbaData: Uint8Array | null;
-  inputWidth: number;
-  inputHeight: number;
+  /** Original source dimensions (used for aspect math and labels). */
+  sourceWidth: number;
+  sourceHeight: number;
+  striped: boolean;
+  /** Displayable pixels: full-size for monolithic, downscaled for striped. */
+  previewRgbaData: Uint8Array | null;
+  previewWidth: number;
+  previewHeight: number;
 
   // Parameters
   params: AutoSharpParams;
@@ -96,7 +101,7 @@ interface ProcessorState {
 
   // Processing
   isProcessing: boolean;
-  processingStage: string | null;
+  progress: { stage: string; overall: number } | null;
   error: string | null;
 
   // Output
@@ -111,29 +116,31 @@ interface ProcessorState {
   lastProcessedVersion: number;
 
   // Actions
-  setInput: (
-    file: File,
-    rgbaData: Uint8Array,
-    width: number,
-    height: number
-  ) => void;
+  setInput: (file: File) => Promise<void>;
   updateParams: (partial: Partial<AutoSharpParams>) => void;
   setPreserveAspectRatio: (v: boolean) => void;
   setLockDimensions: (v: boolean) => void;
   setExportFormat: (format: ExportFormat) => void;
   setExportQuality: (quality: number) => void;
   process: () => Promise<void>;
+  cancelProcessing: () => void;
   reset: () => void;
 }
 
 const savedPrefs = loadPrefs();
 const initDims = loadDimsForOrientation(false); // landscape default for pre-load state
 
+/** Active job handle — not UI state, so kept outside the store. */
+let currentJob: ProcessJob | null = null;
+
 export const useProcessorStore = create<ProcessorState>((set, get) => ({
   inputFile: null,
-  inputRgbaData: null,
-  inputWidth: 0,
-  inputHeight: 0,
+  sourceWidth: 0,
+  sourceHeight: 0,
+  striped: false,
+  previewRgbaData: null,
+  previewWidth: 0,
+  previewHeight: 0,
 
   params: {
     ...DEFAULT_PARAMS,
@@ -147,7 +154,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   exportQuality: savedPrefs.exportQuality ?? 90,
 
   isProcessing: false,
-  processingStage: null,
+  progress: null,
   error: null,
 
   outputRgbaData: null,
@@ -158,7 +165,16 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
   paramsVersion: 0,
   lastProcessedVersion: 0,
 
-  setInput: (file, rgbaData, width, height) => {
+  setInput: async (file) => {
+    let decoded;
+    try {
+      decoded = await processingClient.decode(file);
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    const { width, height } = decoded;
+
     const state = get();
     const params = { ...state.params };
     const isPortrait = height > width;
@@ -185,9 +201,12 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
 
     set({
       inputFile: file,
-      inputRgbaData: rgbaData,
-      inputWidth: width,
-      inputHeight: height,
+      sourceWidth: width,
+      sourceHeight: height,
+      striped: decoded.striped,
+      previewRgbaData: decoded.preview.rgbaData,
+      previewWidth: decoded.preview.width,
+      previewHeight: decoded.preview.height,
       params,
       outputRgbaData: null,
       outputWidth: 0,
@@ -196,29 +215,17 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
       error: null,
     });
 
-    // Invalidate all WASM caches before preparing the new image.
-    // Without this, a same-dimension image would reuse stale cached pixels.
-    clearAllCaches()
-      .catch(() => {});
-
-    // Pre-convert sRGB→linear in the background (fire-and-forget).
-    prepareImage(rgbaData, width, height)
-      .then(() => {
-        // After linear conversion, eagerly pre-compute the base image
-        // (resize + classify + baseline + evaluator) while user reviews params.
-        const s = get();
-        const paramsJson = JSON.stringify(s.params);
-        return prepareBaseImage(rgbaData, width, height, paramsJson);
-      })
-      .catch(() => {});
+    // Eagerly pre-compute the base while the user reviews params
+    // (monolithic only — the facade no-ops for striped inputs).
+    processingClient.prewarmBase(params);
   },
 
   updateParams: (partial) => {
     const state = get();
     const newParams = { ...state.params, ...partial };
 
-    if (state.preserveAspectRatio && !state.lockDimensions && state.inputWidth > 0) {
-      const aspect = state.inputWidth / state.inputHeight;
+    if (state.preserveAspectRatio && !state.lockDimensions && state.sourceWidth > 0) {
+      const aspect = state.sourceWidth / state.sourceHeight;
       if ("target_width" in partial && !("target_height" in partial)) {
         newParams.target_height = Math.round(newParams.target_width / aspect);
       } else if ("target_height" in partial && !("target_width" in partial)) {
@@ -227,7 +234,7 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     }
 
     if ("target_width" in partial || "target_height" in partial) {
-      const isPortrait = state.inputHeight > state.inputWidth;
+      const isPortrait = state.sourceHeight > state.sourceWidth;
       saveDims(isPortrait, newParams.target_width, newParams.target_height);
     }
 
@@ -238,9 +245,9 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     set({ preserveAspectRatio: v });
     if (v) {
       const state = get();
-      if (state.inputWidth > 0 && !state.lockDimensions) {
-        const aspect = state.inputWidth / state.inputHeight;
-        const isPortrait = state.inputHeight > state.inputWidth;
+      if (state.sourceWidth > 0 && !state.lockDimensions) {
+        const aspect = state.sourceWidth / state.sourceHeight;
+        const isPortrait = state.sourceHeight > state.sourceWidth;
         const newParams = { ...state.params };
         if (isPortrait) {
           newParams.target_width = Math.round(newParams.target_height * aspect);
@@ -269,24 +276,18 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
 
   process: async () => {
     const state = get();
-    if (!state.inputRgbaData) {
+    if (!state.inputFile) {
       set({ error: "No image loaded" });
       return;
     }
 
-    set({ isProcessing: true, processingStage: null, error: null });
-    setProgressCallback((stage) => set({ processingStage: stage }));
+    set({ isProcessing: true, progress: null, error: null });
 
     try {
-      const paramsJson = JSON.stringify(state.params);
-      // Try parallel probing first (uses probe worker pool).
-      // Falls back to single-worker if pool unavailable or base not cached.
-      const result = await processImageParallel(
-        state.inputRgbaData,
-        state.inputWidth,
-        state.inputHeight,
-        paramsJson
-      );
+      const job = processingClient.process(state.params);
+      currentJob = job;
+      job.onProgress(({ stage, overall }) => set({ progress: { stage, overall } }));
+      const result = await job.promise;
 
       set({
         outputRgbaData: result.imageData,
@@ -296,17 +297,25 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
         lastProcessedParams: { ...state.params },
         lastProcessedVersion: get().paramsVersion,
         isProcessing: false,
-        processingStage: null,
+        progress: null,
       });
     } catch (e) {
-      set({
-        error: e instanceof Error ? e.message : String(e),
-        isProcessing: false,
-        processingStage: null,
-      });
+      if (e instanceof CancelledError) {
+        set({ isProcessing: false, progress: null });
+      } else {
+        set({
+          error: e instanceof Error ? e.message : String(e),
+          isProcessing: false,
+          progress: null,
+        });
+      }
     } finally {
-      setProgressCallback(null);
+      currentJob = null;
     }
+  },
+
+  cancelProcessing: () => {
+    currentJob?.cancel();
   },
 
   // Full reset: clears image + processing state, restores saved landscape dims.
@@ -316,14 +325,17 @@ export const useProcessorStore = create<ProcessorState>((set, get) => ({
     const dims = loadDimsForOrientation(false);
     set({
       inputFile: null,
-      inputRgbaData: null,
-      inputWidth: 0,
-      inputHeight: 0,
+      sourceWidth: 0,
+      sourceHeight: 0,
+      striped: false,
+      previewRgbaData: null,
+      previewWidth: 0,
+      previewHeight: 0,
       params: { ...DEFAULT_PARAMS, target_width: dims.width, target_height: dims.height },
       preserveAspectRatio: true,
       lockDimensions: false,
       isProcessing: false,
-      processingStage: null,
+      progress: null,
       error: null,
       outputRgbaData: null,
       outputWidth: 0,
