@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useImageStore } from "@/entities/image";
 import { useOutputStore } from "@/entities/output";
 
@@ -6,7 +6,7 @@ function renderToCanvas(
   canvas: HTMLCanvasElement,
   rgbaData: Uint8Array,
   width: number,
-  height: number
+  height: number,
 ) {
   canvas.width = width;
   canvas.height = height;
@@ -20,7 +20,7 @@ function renderToCanvas(
 function useFittedDims(
   wrapperRef: React.RefObject<HTMLDivElement | null>,
   aspectW: number,
-  aspectH: number
+  aspectH: number,
 ) {
   const [dims, setDims] = useState({ w: 0, h: 0 });
 
@@ -62,13 +62,15 @@ function FittedCanvas({
   const dims = useFittedDims(wrapperRef, width, height);
 
   useEffect(() => {
-    if (canvasRef.current)
-      renderToCanvas(canvasRef.current, rgbaData, width, height);
+    if (canvasRef.current) renderToCanvas(canvasRef.current, rgbaData, width, height);
   }, [rgbaData, width, height]);
 
   return (
     <div ref={wrapperRef} className="flex-1 flex items-center justify-center min-h-0">
-      <div className="relative" style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}>
+      <div
+        className="relative"
+        style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}
+      >
         <div className="absolute -top-[6px] -left-[6px] w-[14px] h-[14px] border-t-[1.5px] border-l-[1.5px] border-primary/25 rounded-tl-[1px] pointer-events-none z-10" />
         <div className="absolute -top-[6px] -right-[6px] w-[14px] h-[14px] border-t-[1.5px] border-r-[1.5px] border-primary/25 rounded-tr-[1px] pointer-events-none z-10" />
         <div className="absolute -bottom-[6px] -left-[6px] w-[14px] h-[14px] border-b-[1.5px] border-l-[1.5px] border-primary/25 rounded-bl-[1px] pointer-events-none z-10" />
@@ -107,8 +109,7 @@ function ComparisonSlider({
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (inputCanvasRef.current)
-      renderToCanvas(inputCanvasRef.current, inputRgba, inputW, inputH);
+    if (inputCanvasRef.current) renderToCanvas(inputCanvasRef.current, inputRgba, inputW, inputH);
   }, [inputRgba, inputW, inputH]);
 
   useEffect(() => {
@@ -147,7 +148,10 @@ function ComparisonSlider({
   return (
     <div ref={wrapperRef} className="flex-1 flex items-center justify-center min-h-0">
       {/* Crop-mark frame wrapping the comparison viewport */}
-      <div className="relative" style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}>
+      <div
+        className="relative"
+        style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}
+      >
         {/* Corner crop marks */}
         <div className="absolute -top-[6px] -left-[6px] w-[14px] h-[14px] border-t-[1.5px] border-l-[1.5px] border-primary/35 rounded-tl-[1px] pointer-events-none z-20" />
         <div className="absolute -top-[6px] -right-[6px] w-[14px] h-[14px] border-t-[1.5px] border-r-[1.5px] border-primary/35 rounded-tr-[1px] pointer-events-none z-20" />
@@ -172,19 +176,43 @@ function ComparisonSlider({
           >
             <div className="w-px h-full bg-white/80" />
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-background/80 border border-white/50 flex items-center justify-center backdrop-blur-sm">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="text-foreground/60">
-                <path d="M4 3L2 7L4 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M10 3L12 7L10 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                className="text-foreground/60"
+              >
+                <path
+                  d="M4 3L2 7L4 11"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M10 3L12 7L10 11"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </div>
           </div>
 
           {/* Labels overlaid at bottom */}
           <span className="absolute bottom-2 left-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-            <span className="uppercase tracking-widest">Input</span> <span className="text-white/60">{inputW}&times;{inputH}</span>
+            <span className="uppercase tracking-widest">Input</span>{" "}
+            <span className="text-white/60">
+              {inputW}&times;{inputH}
+            </span>
           </span>
           <span className="absolute bottom-2 right-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-            <span className="uppercase tracking-widest">Output</span> <span className="text-white/60">{outputW}&times;{outputH}</span>
+            <span className="uppercase tracking-widest">Output</span>{" "}
+            <span className="text-white/60">
+              {outputW}&times;{outputH}
+            </span>
           </span>
         </div>
       </div>

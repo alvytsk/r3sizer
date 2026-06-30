@@ -1,23 +1,13 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 
 /** Simple JSON syntax highlighter — no external deps. */
 function highlightJson(json: string): string {
-  return json.replace(
-    /("(?:\\.|[^"\\])*")\s*:/g,
-    '<span class="text-sky-400">$1</span>:'
-  ).replace(
-    /:\s*("(?:\\.|[^"\\])*")/g,
-    ': <span class="text-amber-300">$1</span>'
-  ).replace(
-    /:\s*(-?\d+\.?\d*(?:e[+-]?\d+)?)/gi,
-    ': <span class="text-emerald-400">$1</span>'
-  ).replace(
-    /:\s*(true|false)/g,
-    ': <span class="text-violet-400">$1</span>'
-  ).replace(
-    /:\s*(null)/g,
-    ': <span class="text-rose-400/60">$1</span>'
-  );
+  return json
+    .replace(/("(?:\\.|[^"\\])*")\s*:/g, '<span class="text-sky-400">$1</span>:')
+    .replace(/:\s*("(?:\\.|[^"\\])*")/g, ': <span class="text-amber-300">$1</span>')
+    .replace(/:\s*(-?\d+\.?\d*(?:e[+-]?\d+)?)/gi, ': <span class="text-emerald-400">$1</span>')
+    .replace(/:\s*(true|false)/g, ': <span class="text-violet-400">$1</span>')
+    .replace(/:\s*(null)/g, ': <span class="text-rose-400/60">$1</span>');
 }
 
 export function JsonViewer({ data }: { data: unknown }) {

@@ -8,17 +8,52 @@ interface StageEntry {
 }
 
 const STAGES: StageEntry[] = [
-  { key: "ingress_us", label: "Ingress", color: "bg-chart-4/80", hint: "Input color-space conversion" },
+  {
+    key: "ingress_us",
+    label: "Ingress",
+    color: "bg-chart-4/80",
+    hint: "Input color-space conversion",
+  },
   { key: "resize_us", label: "Resize", color: "bg-chart-2", hint: "Lanczos3 downscale" },
   { key: "contrast_us", label: "Contrast", color: "bg-chart-4", hint: "Percentile stretch (stub)" },
-  { key: "classification_us", label: "Classify", color: "bg-chart-5/80", hint: "Region classification (adaptive)" },
-  { key: "baseline_us", label: "Baseline", color: "bg-chart-3", hint: "Pre-sharpen artifact measure" },
+  {
+    key: "classification_us",
+    label: "Classify",
+    color: "bg-chart-5/80",
+    hint: "Region classification (adaptive)",
+  },
+  {
+    key: "baseline_us",
+    label: "Baseline",
+    color: "bg-chart-3",
+    hint: "Pre-sharpen artifact measure",
+  },
   { key: "probing_us", label: "Probing", color: "bg-chart-1", hint: "N-point probe sweep" },
   { key: "fit_us", label: "Fit", color: "bg-primary/70", hint: "Cubic Vandermonde solve" },
-  { key: "robustness_us", label: "Robustness", color: "bg-chart-5", hint: "Monotonicity + LOO checks" },
-  { key: "final_sharpen_us", label: "Sharpen", color: "bg-primary", hint: "Final sharpening at s*" },
-  { key: "adaptive_validation_us", label: "Validate", color: "bg-chart-2/70", hint: "Adaptive validation + backoff" },
-  { key: "evaluator_us", label: "Evaluator", color: "bg-chart-3/70", hint: "Quality evaluation (advisory)" },
+  {
+    key: "robustness_us",
+    label: "Robustness",
+    color: "bg-chart-5",
+    hint: "Monotonicity + LOO checks",
+  },
+  {
+    key: "final_sharpen_us",
+    label: "Sharpen",
+    color: "bg-primary",
+    hint: "Final sharpening at s*",
+  },
+  {
+    key: "adaptive_validation_us",
+    label: "Validate",
+    color: "bg-chart-2/70",
+    hint: "Adaptive validation + backoff",
+  },
+  {
+    key: "evaluator_us",
+    label: "Evaluator",
+    color: "bg-chart-3/70",
+    hint: "Quality evaluation (advisory)",
+  },
   { key: "clamp_us", label: "Clamp", color: "bg-border", hint: "Output clamping to [0,1]" },
 ];
 
@@ -38,10 +73,12 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
   // Filter out optional stages that are absent (undefined/null)
   const activeStages = STAGES.filter((s) => getUs(timing, s.key) != null);
 
-  const stages = activeStages.map((s) => {
-    const us = getUs(timing, s.key) ?? 0;
-    return { ...s, us, pct: (us / total) * 100 };
-  }).sort((a, b) => b.us - a.us);
+  const stages = activeStages
+    .map((s) => {
+      const us = getUs(timing, s.key) ?? 0;
+      return { ...s, us, pct: (us / total) * 100 };
+    })
+    .sort((a, b) => b.us - a.us);
 
   const maxUs = stages[0]?.us ?? 1;
   const dominantKey = stages[0]?.key;
@@ -52,9 +89,7 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
         <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary/70">
           Pipeline Timing
         </span>
-        <span className="font-mono text-sm text-foreground/90">
-          {formatUs(timing.total_us)}
-        </span>
+        <span className="font-mono text-sm text-foreground/90">{formatUs(timing.total_us)}</span>
       </div>
 
       <div className="flex h-1.5 rounded-[2px] overflow-hidden bg-background border border-border/20">
@@ -124,9 +159,8 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
 
       {stages[0] && stages[0].pct > 50 && (
         <p className="text-[11px] font-mono text-muted-foreground/55 border-t border-border/20 pt-2 leading-relaxed">
-          <span className="text-primary/60">{stages[0].label}</span>
-          {" "}dominates at {stages[0].pct.toFixed(0)}% —{" "}
-          {stages[0].hint.toLowerCase()}.
+          <span className="text-primary/60">{stages[0].label}</span> dominates at{" "}
+          {stages[0].pct.toFixed(0)}% — {stages[0].hint.toLowerCase()}.
         </p>
       )}
     </div>

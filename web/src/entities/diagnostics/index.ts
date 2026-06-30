@@ -1,7 +1,7 @@
 export {
   buildDiagnosis,
-  severityStyle,
-  type DiagnosisEntry,
   type ChipVariant,
+  type DiagnosisEntry,
   type Severity,
+  severityStyle,
 } from "./model/diagnosis";

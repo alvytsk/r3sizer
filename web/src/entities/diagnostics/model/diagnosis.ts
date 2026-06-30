@@ -5,7 +5,10 @@ export type ChipVariant = "ok" | "warn" | "error" | "neutral";
 
 export type Severity = "ok" | "warn" | "error";
 
-export const severityStyle: Record<Severity, { border: string; bg: string; dot: string; headline: string }> = {
+export const severityStyle: Record<
+  Severity,
+  { border: string; bg: string; dot: string; headline: string }
+> = {
   ok: {
     border: "border-chart-3/25",
     bg: "bg-chart-3/5",
@@ -67,7 +70,10 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
   }
 
   if (d.fallback_reason) {
-    const reasons: Record<string, { severity: Severity; key: string; interpolation?: Record<string, string> }> = {
+    const reasons: Record<
+      string,
+      { severity: Severity; key: string; interpolation?: Record<string, string> }
+    > = {
       fit_failed: {
         severity: "error",
         key: "diagnostics.fallback.fitFailed",
@@ -98,15 +104,16 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
     if (r) {
       entries.push({
         severity: r.severity,
-        headline: t("diagnostics.fallback.fallbackReason", { reason: d.fallback_reason.replace(/_/g, " ") }),
+        headline: t("diagnostics.fallback.fallbackReason", {
+          reason: d.fallback_reason.replace(/_/g, " "),
+        }),
         detail: t(r.key, r.interpolation),
       });
     }
   }
 
   if (d.robustness) {
-    const { monotonic, quasi_monotonic, r_squared_ok, well_conditioned, loo_stable } =
-      d.robustness;
+    const { monotonic, quasi_monotonic, r_squared_ok, well_conditioned, loo_stable } = d.robustness;
 
     if (!quasi_monotonic) {
       entries.push({
@@ -125,7 +132,9 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
     if (!r_squared_ok && d.fit_quality) {
       entries.push({
         severity: "warn",
-        headline: t("diagnostics.robustness.poorFit", { value: d.fit_quality.r_squared.toFixed(3) }),
+        headline: t("diagnostics.robustness.poorFit", {
+          value: d.fit_quality.r_squared.toFixed(3),
+        }),
         detail: t("diagnostics.robustness.poorFitDetail"),
       });
     }
@@ -141,7 +150,9 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
     if (!loo_stable) {
       entries.push({
         severity: "warn",
-        headline: t("diagnostics.robustness.looUnstable", { value: d.robustness.max_loo_root_change.toFixed(3) }),
+        headline: t("diagnostics.robustness.looUnstable", {
+          value: d.robustness.max_loo_root_change.toFixed(3),
+        }),
         detail: t("diagnostics.robustness.looUnstableDetail"),
       });
     }

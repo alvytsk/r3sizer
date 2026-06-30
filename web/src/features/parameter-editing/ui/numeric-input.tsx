@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Input } from "@/shared/ui/input";
 
 export function NumericInput({
@@ -22,21 +22,18 @@ export function NumericInput({
   const valueRef = useRef(value);
   valueRef.current = value;
 
-  const clamp = useCallback(
-    (n: number) => Math.max(min ?? -Infinity, n),
-    [min]
-  );
+  const clamp = useCallback((n: number) => Math.max(min ?? -Infinity, n), [min]);
 
   const commit = useCallback(() => {
     if (draft === null) return;
     const n = parseInt(draft, 10);
-    if (!isNaN(n)) onCommit(clamp(n));
+    if (!Number.isNaN(n)) onCommit(clamp(n));
     setDraft(null);
   }, [draft, clamp, onCommit]);
 
   const nudge = useCallback(
     (dir: 1 | -1) => onCommit(clamp(value + step * dir)),
-    [value, step, clamp, onCommit]
+    [value, step, clamp, onCommit],
   );
 
   const stopRepeat = useCallback(() => {
@@ -65,7 +62,7 @@ export function NumericInput({
       document.addEventListener("pointerup", stopRepeat);
       document.addEventListener("pointercancel", stopRepeat);
     },
-    [nudge, step, clamp, onCommit, stopRepeat]
+    [nudge, step, clamp, onCommit, stopRepeat],
   );
 
   const chevron = (

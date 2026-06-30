@@ -1,10 +1,10 @@
 import type { ChipVariant } from "@/entities/diagnostics";
 
 const CHIP_STYLES: Record<ChipVariant, { border: string; bg: string; text: string }> = {
-  ok:      { border: "border-chart-3/25",     bg: "bg-chart-3/5",      text: "text-chart-3"          },
-  warn:    { border: "border-primary/25",      bg: "bg-primary/5",      text: "text-primary"          },
-  error:   { border: "border-destructive/30",  bg: "bg-destructive/8",  text: "text-destructive"      },
-  neutral: { border: "border-border/25",       bg: "bg-background",     text: "text-muted-foreground" },
+  ok: { border: "border-chart-3/25", bg: "bg-chart-3/5", text: "text-chart-3" },
+  warn: { border: "border-primary/25", bg: "bg-primary/5", text: "text-primary" },
+  error: { border: "border-destructive/30", bg: "bg-destructive/8", text: "text-destructive" },
+  neutral: { border: "border-border/25", bg: "bg-background", text: "text-muted-foreground" },
 };
 
 export function Readout({ label, value }: { label: React.ReactNode; value: string | number }) {

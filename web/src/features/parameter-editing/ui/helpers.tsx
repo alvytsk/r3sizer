@@ -1,10 +1,6 @@
-import { Label } from "@/shared/ui/label";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/shared/ui/tooltip";
 import { Info } from "lucide-react";
+import { Label } from "@/shared/ui/label";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -33,7 +29,13 @@ export function ValueLabel({ children, tip }: { children: React.ReactNode; tip?:
   );
 }
 
-export function SelectedLabel({ labels, value }: { labels: Record<string, string>; value: string }) {
+export function SelectedLabel({
+  labels,
+  value,
+}: {
+  labels: Record<string, string>;
+  value: string;
+}) {
   return (
     <span className="flex flex-1 text-left truncate" data-slot="select-value">
       {labels[value] ?? value}

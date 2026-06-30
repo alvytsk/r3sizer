@@ -1,8 +1,8 @@
-import path from "path"
-import { defineConfig } from "vite"
-import react from "@vitejs/plugin-react"
-import wasm from "vite-plugin-wasm"
-import tailwindcss from "@tailwindcss/vite"
+import path from "node:path";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+import wasm from "vite-plugin-wasm";
 
 export default defineConfig({
   base: "/r3sizer/",
@@ -18,4 +18,4 @@ export default defineConfig({
   build: {
     target: "esnext",
   },
-})
+});

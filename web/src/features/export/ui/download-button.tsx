@@ -1,10 +1,10 @@
-import { useCallback } from "react";
-import { Button } from "@/shared/ui/button";
 import { Download } from "lucide-react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { type ExportFormat, useExportPrefsStore } from "@/entities/export-preferences";
 import { useImageStore } from "@/entities/image";
 import { useOutputStore } from "@/entities/output";
-import { useExportPrefsStore, type ExportFormat } from "@/entities/export-preferences";
+import { Button } from "@/shared/ui/button";
 
 const FORMAT_EXT: Record<ExportFormat, string> = {
   jpeg: "jpg",
@@ -53,7 +53,7 @@ export function DownloadButton() {
         URL.revokeObjectURL(url);
       },
       FORMAT_MIME[format],
-      q
+      q,
     );
   }, [outputRgbaData, outputWidth, outputHeight, format, quality, inputFile]);
 
@@ -114,9 +114,10 @@ export function DownloadButton() {
         size="sm"
         onClick={handleDownload}
         className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
-        title={isLossy
-          ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })
-          : t("download.saveAsLossless", { format: format.toUpperCase() })
+        title={
+          isLossy
+            ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })
+            : t("download.saveAsLossless", { format: format.toUpperCase() })
         }
       >
         <Download className="h-3.5 w-3.5 mr-1" />

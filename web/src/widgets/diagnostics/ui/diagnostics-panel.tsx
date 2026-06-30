@@ -1,11 +1,11 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { useTranslation } from "react-i18next";
 import { useOutputStore } from "@/entities/output";
-import { TimingBar } from "./timing-bar";
-import { SummaryTab } from "./summary-tab";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { AdviceTab } from "./advice-tab";
 import { FitTab } from "./fit-tab";
 import { JsonViewer } from "./json-viewer";
+import { SummaryTab } from "./summary-tab";
+import { TimingBar } from "./timing-bar";
 
 export function DiagnosticsPanel() {
   const { t } = useTranslation();

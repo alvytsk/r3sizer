@@ -8,8 +8,9 @@
  * Base image data is sent once via `distributeBaseData` and cached in each
  * worker, avoiding redundant structured clones on every probe batch.
  */
-import type { ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
+
 import type { CancellationToken } from "./errors";
+import type { ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
 
 /** Base image data extracted from the main worker's PreparedBase. */
 export interface BaseData {
@@ -63,10 +64,7 @@ export function initProbePool(
     }, 10_000);
 
     for (let i = 0; i < size; i++) {
-      const w = new Worker(
-        new URL("./probe-worker.ts", import.meta.url),
-        { type: "module" },
-      );
+      const w = new Worker(new URL("./probe-worker.ts", import.meta.url), { type: "module" });
 
       w.onmessage = (e: MessageEvent<ProbeWorkerResponse>) => {
         if (e.data.type === "ready") {

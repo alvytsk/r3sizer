@@ -1,12 +1,12 @@
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { useImageStore } from "@/entities/image";
 import type {
   AutoSharpDiagnostics,
   Recommendation,
   RecommendationKind,
   Severity as RecSeverity,
 } from "@/shared/types/wasm-types";
-import { useImageStore } from "@/entities/image";
-import type { TFunction } from "i18next";
 
 interface Advice {
   icon: string;
@@ -21,9 +21,7 @@ function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
   const target = d.target_artifact_ratio;
   const strength = d.selected_strength;
 
-  const recKinds = new Set<RecommendationKind>(
-    (d.recommendations ?? []).map((r) => r.kind)
-  );
+  const recKinds = new Set<RecommendationKind>((d.recommendations ?? []).map((r) => r.kind));
 
   if (d.selection_mode === "polynomial_root" && ratio <= target * 1.1) {
     advice.push({
@@ -59,9 +57,8 @@ function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
     });
   }
 
-  const probeMax = d.probe_samples.length > 0
-    ? Math.max(...d.probe_samples.map((p) => p.strength))
-    : 0;
+  const probeMax =
+    d.probe_samples.length > 0 ? Math.max(...d.probe_samples.map((p) => p.strength)) : 0;
   if (strength > 0 && probeMax > 0 && strength >= probeMax * 0.95) {
     advice.push({
       icon: "\u2191",
@@ -109,13 +106,17 @@ function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
 
   if (d.region_coverage) {
     const rc = d.region_coverage;
-    if (rc.risky_halo_zone_fraction > 0.15
-      && !recKinds.has("switch_to_content_adaptive")
-      && !recKinds.has("lower_strong_edge_gain")) {
+    if (
+      rc.risky_halo_zone_fraction > 0.15 &&
+      !recKinds.has("switch_to_content_adaptive") &&
+      !recKinds.has("lower_strong_edge_gain")
+    ) {
       advice.push({
         icon: "\u25CB",
         title: t("advice.highHaloRisk"),
-        body: t("advice.highHaloRiskBody", { value: (rc.risky_halo_zone_fraction * 100).toFixed(0) }),
+        body: t("advice.highHaloRiskBody", {
+          value: (rc.risky_halo_zone_fraction * 100).toFixed(0),
+        }),
         kind: "tip",
       });
     }
@@ -141,7 +142,10 @@ function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
   return advice;
 }
 
-const ADVICE_STYLES: Record<Advice["kind"], { border: string; bg: string; icon: string; title: string }> = {
+const ADVICE_STYLES: Record<
+  Advice["kind"],
+  { border: string; bg: string; icon: string; title: string }
+> = {
   success: {
     border: "border-chart-3/25",
     bg: "bg-chart-3/5",
@@ -227,9 +231,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
                 <div className={`text-[12px] font-mono font-medium ${s.title}`}>
                   {t(REC_KIND_KEYS[rec.kind] ?? rec.kind)}
                 </div>
-                <p className="text-[12px] text-muted-foreground leading-relaxed">
-                  {rec.reason}
-                </p>
+                <p className="text-[12px] text-muted-foreground leading-relaxed">{rec.reason}</p>
                 <button
                   type="button"
                   className="text-[11px] font-mono font-medium text-primary hover:text-primary/80 transition-colors mt-0.5"
@@ -269,12 +271,8 @@ export function AdviceTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }
                 {item.icon}
               </span>
               <div className="space-y-1 min-w-0">
-                <div className={`text-[12px] font-mono font-medium ${s.title}`}>
-                  {item.title}
-                </div>
-                <p className="text-[12px] text-muted-foreground leading-relaxed">
-                  {item.body}
-                </p>
+                <div className={`text-[12px] font-mono font-medium ${s.title}`}>{item.title}</div>
+                <p className="text-[12px] text-muted-foreground leading-relaxed">{item.body}</p>
               </div>
             </div>
           </div>

@@ -1,18 +1,17 @@
-import { useState, useRef, useCallback } from "react";
-import { ChevronLeft, ChevronRight, BarChart3, AlertTriangle } from "lucide-react";
+import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ImagePreview } from "@/widgets/image-preview";
-import { ParameterPanel } from "@/features/parameter-editing";
-import { DiagnosticsPanel } from "@/widgets/diagnostics";
-import { ErrorBoundary } from "@/shared/ui/error-boundary";
-import { AppHeader } from "@/widgets/header";
-import { Toolbar } from "@/widgets/toolbar";
-import { ProcessingOverlay } from "@/features/image-processing";
-import { WelcomeHero } from "@/widgets/welcome";
-import { StatusBar } from "@/widgets/status-bar";
 import { useImageStore } from "@/entities/image";
 import { useOutputStore } from "@/entities/output";
-import { useProcessingStore } from "@/features/image-processing";
+import { ProcessingOverlay, useProcessingStore } from "@/features/image-processing";
+import { ParameterPanel } from "@/features/parameter-editing";
+import { ErrorBoundary } from "@/shared/ui/error-boundary";
+import { DiagnosticsPanel } from "@/widgets/diagnostics";
+import { AppHeader } from "@/widgets/header";
+import { ImagePreview } from "@/widgets/image-preview";
+import { StatusBar } from "@/widgets/status-bar";
+import { Toolbar } from "@/widgets/toolbar";
+import { WelcomeHero } from "@/widgets/welcome";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 
@@ -40,10 +39,10 @@ export default function App() {
   const error = imageError ?? procError;
 
   const [sidebarOpen, setSidebarOpen] = useState(
-    () => typeof window !== "undefined" && window.innerWidth >= 1024
+    () => typeof window !== "undefined" && window.innerWidth >= 1024,
   );
   const [diagOpen, setDiagOpen] = useState(
-    () => typeof window !== "undefined" && window.innerWidth >= 1280
+    () => typeof window !== "undefined" && window.innerWidth >= 1280,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -57,7 +56,7 @@ export default function App() {
       void setInput(file);
       e.target.value = "";
     },
-    [setInput, clearOutput]
+    [setInput, clearOutput],
   );
 
   const reset = useCallback(() => {
@@ -76,10 +75,7 @@ export default function App() {
         onChange={handleOpenFile}
       />
 
-      <AppHeader
-        onLogoClick={reset}
-        showLogoAction={!!inputFile}
-      />
+      <AppHeader onLogoClick={reset} showLogoAction={!!inputFile} />
 
       {/* Body: params sidebar | center | diagnostics sidebar */}
       <div className="flex-1 flex overflow-hidden">
@@ -118,13 +114,21 @@ export default function App() {
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
                   title={sidebarOpen ? t("sidebar.collapsePanel") : t("sidebar.showParameters")}
                 >
-                  {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  {sidebarOpen ? (
+                    <ChevronLeft className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )}
                 </button>
-                <span className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}>
+                <span
+                  className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}
+                >
                   {t("sidebar.parameters")}
                 </span>
               </div>
-              <div className={`flex-1 overflow-y-auto transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}>
+              <div
+                className={`flex-1 overflow-y-auto transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}
+              >
                 <ErrorBoundary panel="Parameters">
                   <ParameterPanel />
                 </ErrorBoundary>
@@ -196,13 +200,21 @@ export default function App() {
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
                   title={diagOpen ? t("sidebar.collapsePanel") : t("sidebar.showDiagnostics")}
                 >
-                  {diagOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                  {diagOpen ? (
+                    <ChevronRight className="h-4 w-4" />
+                  ) : (
+                    <ChevronLeft className="h-4 w-4" />
+                  )}
                 </button>
-                <span className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}>
+                <span
+                  className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}
+                >
                   {t("sidebar.diagnostics")}
                 </span>
               </div>
-              <div className={`flex-1 overflow-y-auto transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}>
+              <div
+                className={`flex-1 overflow-y-auto transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}
+              >
                 {diagnostics ? (
                   <ErrorBoundary panel="Diagnostics">
                     <DiagnosticsPanel />
@@ -213,7 +225,9 @@ export default function App() {
                       <BarChart3 className="h-5 w-5" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground/50">{t("sidebar.noDiagnostics")}</p>
+                      <p className="text-sm text-muted-foreground/50">
+                        {t("sidebar.noDiagnostics")}
+                      </p>
                       <p className="text-[11px] font-mono text-muted-foreground/30">
                         {t("sidebar.processPrompt")}
                       </p>

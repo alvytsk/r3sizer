@@ -1,18 +1,14 @@
 import { useTranslation } from "react-i18next";
+import type { ChipVariant } from "@/entities/diagnostics";
 import type { AutoSharpDiagnostics, RobustnessFlags } from "@/shared/types/wasm-types";
 import { StatusChip } from "./shared";
-import type { ChipVariant } from "@/entities/diagnostics";
 
-function PolyCoeffTable({
-  a, b, c, d,
-}: {
-  a: number; b: number; c: number; d: number;
-}) {
+function PolyCoeffTable({ a, b, c, d }: { a: number; b: number; c: number; d: number }) {
   const rows: { sup: string; coeff: number }[] = [
     { sup: "s³", coeff: a },
     { sup: "s²", coeff: b },
-    { sup: "s",  coeff: c },
-    { sup: "1",  coeff: d },
+    { sup: "s", coeff: c },
+    { sup: "1", coeff: d },
   ];
   return (
     <div className="rounded-sm border border-border/25 bg-background px-3 py-2.5">
@@ -112,30 +108,53 @@ function PivotBadge({ pivot }: { pivot: number }) {
   );
 }
 
-type RobCheckKey = "monotonic" | "quasi_monotonic" | "r_squared_ok" | "well_conditioned" | "loo_stable";
+type RobCheckKey =
+  | "monotonic"
+  | "quasi_monotonic"
+  | "r_squared_ok"
+  | "well_conditioned"
+  | "loo_stable";
 
 function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
   const { t } = useTranslation();
 
   const ROBUSTNESS_CHECKS: { key: RobCheckKey; short: string; full: string }[] = [
-    { key: "monotonic",       short: t("diagnostics.fitTab.mono"),  full: t("diagnostics.fitTab.strictMonotonicity") },
-    { key: "quasi_monotonic", short: t("diagnostics.fitTab.quasi"), full: t("diagnostics.fitTab.quasiMonotonicity") },
-    { key: "r_squared_ok",    short: t("diagnostics.fitTab.rSquared"), full: t("diagnostics.fitTab.fitR2") },
-    { key: "well_conditioned",short: t("diagnostics.fitTab.cond"),  full: t("diagnostics.fitTab.matrixConditioning") },
-    { key: "loo_stable",      short: t("diagnostics.fitTab.loo"),   full: t("diagnostics.fitTab.looStability") },
+    {
+      key: "monotonic",
+      short: t("diagnostics.fitTab.mono"),
+      full: t("diagnostics.fitTab.strictMonotonicity"),
+    },
+    {
+      key: "quasi_monotonic",
+      short: t("diagnostics.fitTab.quasi"),
+      full: t("diagnostics.fitTab.quasiMonotonicity"),
+    },
+    {
+      key: "r_squared_ok",
+      short: t("diagnostics.fitTab.rSquared"),
+      full: t("diagnostics.fitTab.fitR2"),
+    },
+    {
+      key: "well_conditioned",
+      short: t("diagnostics.fitTab.cond"),
+      full: t("diagnostics.fitTab.matrixConditioning"),
+    },
+    {
+      key: "loo_stable",
+      short: t("diagnostics.fitTab.loo"),
+      full: t("diagnostics.fitTab.looStability"),
+    },
   ];
 
   const ROBUSTNESS_FAIL_HINTS: Record<RobCheckKey, string> = {
-    monotonic:       t("diagnostics.robustnessHints.monotonic"),
+    monotonic: t("diagnostics.robustnessHints.monotonic"),
     quasi_monotonic: t("diagnostics.robustnessHints.quasiMonotonic"),
-    r_squared_ok:    t("diagnostics.robustnessHints.rSquaredOk"),
+    r_squared_ok: t("diagnostics.robustnessHints.rSquaredOk"),
     well_conditioned: t("diagnostics.robustnessHints.wellConditioned"),
-    loo_stable:      t("diagnostics.robustnessHints.looStable"),
+    loo_stable: t("diagnostics.robustnessHints.looStable"),
   };
 
-  const failedKeys = ROBUSTNESS_CHECKS.filter(({ key }) => !robustness[key]).map(
-    ({ key }) => key
-  );
+  const failedKeys = ROBUSTNESS_CHECKS.filter(({ key }) => !robustness[key]).map(({ key }) => key);
 
   return (
     <div className="space-y-2">
@@ -147,9 +166,7 @@ function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
               key={key}
               title={full}
               className={`rounded-sm border text-center py-1.5 px-0.5 ${
-                ok
-                  ? "border-border/20 bg-transparent"
-                  : "border-destructive/30 bg-destructive/5"
+                ok ? "border-border/20 bg-transparent" : "border-destructive/30 bg-destructive/5"
               }`}
             >
               <div

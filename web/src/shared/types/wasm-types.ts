@@ -5,10 +5,10 @@
 //   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 
 import type {
-  AutoSharpParams,
   AutoSharpDiagnostics,
-  SharpenStrategy,
+  AutoSharpParams,
   ResizeStrategy,
+  SharpenStrategy,
 } from "./generated";
 
 import {
@@ -21,62 +21,62 @@ import {
 // ── Re-export all generated types ───────────────────────────────────────
 
 export type {
-  SharpenMode,
-  MetricMode,
-  ArtifactMetric,
-  FitStrategy,
-  ClampPolicy,
-  DiagnosticsLevel,
-  CrossingStatus,
-  SelectionMode,
-  SelectionPolicy,
-  FallbackReason,
-  MetricComponent,
-  RegionClass,
-  ImageSize,
-  MetricWeights,
-  GainTable,
-  ClassificationParams,
-  ProbeConfig,
-  SharpenStrategy,
-  PipelineMode,
-  AutoSharpParams,
-  CubicPolynomial,
-  FitQuality,
-  RobustnessFlags,
-  FitStatus,
-  MetricBreakdown,
-  ProbeSample,
-  StageTiming,
-  RegionCoverage,
   AdaptiveValidationOutcome,
+  ArtifactMetric,
   AutoSharpDiagnostics,
+  AutoSharpParams,
+  ChromaGuardDiagnostics,
+  ClampPolicy,
+  ClassificationParams,
+  CrossingStatus,
+  CubicPolynomial,
+  DiagnosticsLevel,
+  EvaluationColorSpace,
+  EvaluatorConfig,
+  ExperimentalSharpenMode,
+  FallbackReason,
+  FitQuality,
+  FitStatus,
+  FitStrategy,
+  GainTable,
+  ImageFeatures,
+  ImageSize,
   // Experimental types
   InputColorSpace,
-  ResizeKernel,
-  KernelTable,
-  ResizeStrategy,
-  ResizeStrategyDiagnostics,
-  ExperimentalSharpenMode,
-  EvaluationColorSpace,
-  ChromaGuardDiagnostics,
-  EvaluatorConfig,
-  ImageFeatures,
-  QualityEvaluation,
   InputIngressDiagnostics,
+  KernelTable,
+  MetricBreakdown,
+  MetricComponent,
+  MetricMode,
+  MetricWeights,
+  ParamPatch,
+  PipelineMode,
+  ProbeConfig,
+  ProbeSample,
+  QualityEvaluation,
+  Recommendation,
   // Recommendations (v0.5)
   RecommendationKind,
+  RegionClass,
+  RegionCoverage,
+  ResizeKernel,
+  ResizeStrategy,
+  ResizeStrategyDiagnostics,
+  RobustnessFlags,
+  SelectionMode,
+  SelectionPolicy,
   Severity,
-  ParamPatch,
-  Recommendation,
+  SharpenMode,
+  SharpenStrategy,
+  StageTiming,
 } from "./generated";
 
 export {
-  DEFAULT_METRIC_WEIGHTS,
-  DEFAULT_GAIN_TABLE,
   DEFAULT_CLASSIFICATION_PARAMS,
-  DEFAULT_SHARPEN_STRATEGY,
+  DEFAULT_GAIN_TABLE,
   DEFAULT_KERNEL_TABLE,
+  DEFAULT_METRIC_WEIGHTS,
+  DEFAULT_SHARPEN_STRATEGY,
 } from "./generated";
 
 // ── Web-specific defaults ───────────────────────────────────────────────
@@ -92,10 +92,7 @@ export const DEFAULT_PARAMS: AutoSharpParams = {
 // ── Types not in Rust (WASM boundary or TS-only helpers) ────────────────
 
 /** Extract the content-adaptive variant from the SharpenStrategy union. */
-export type ContentAdaptiveStrategy = Extract<
-  SharpenStrategy,
-  { strategy: "content_adaptive" }
->;
+export type ContentAdaptiveStrategy = Extract<SharpenStrategy, { strategy: "content_adaptive" }>;
 
 /** Extract the content-adaptive variant from the ResizeStrategy union. */
 export type ContentAdaptiveResizeStrategy = Extract<
@@ -125,8 +122,11 @@ const _CHROMA_GUARD = {
   luma_plus_chroma_guard: {
     max_chroma_shift: 0.25,
     chroma_region_factors: {
-      flat: 1.0, textured: 0.9, strong_edge: 0.65,
-      microtexture: 0.8, risky_halo_zone: 0.45,
+      flat: 1.0,
+      textured: 0.9,
+      strong_edge: 0.65,
+      microtexture: 0.8,
+      risky_halo_zone: 0.45,
     },
     saturation_guard: { min_scale: 0.6, gamma: 1.5 },
   },
@@ -140,8 +140,11 @@ export const PIPELINE_PRESETS: Record<string, Partial<AutoSharpParams>> = {
     target_artifact_ratio: 0.003,
     probe_strengths: {
       TwoPass: {
-        coarse_count: 7, coarse_min: 0.003, coarse_max: 1.00,
-        dense_count: 4, window_margin: 0.5,
+        coarse_count: 7,
+        coarse_min: 0.003,
+        coarse_max: 1.0,
+        dense_count: 4,
+        window_margin: 0.5,
       },
     },
     sharpen_strategy: { ..._CA_STRATEGY },
@@ -154,8 +157,11 @@ export const PIPELINE_PRESETS: Record<string, Partial<AutoSharpParams>> = {
     target_artifact_ratio: 0.001,
     probe_strengths: {
       TwoPass: {
-        coarse_count: 7, coarse_min: 0.003, coarse_max: 0.50,
-        dense_count: 4, window_margin: 0.5,
+        coarse_count: 7,
+        coarse_min: 0.003,
+        coarse_max: 0.5,
+        dense_count: 4,
+        window_margin: 0.5,
       },
     },
     sharpen_strategy: { ..._CA_STRATEGY },

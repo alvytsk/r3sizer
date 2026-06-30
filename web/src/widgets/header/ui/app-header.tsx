@@ -21,9 +21,7 @@ export function AppHeader({
           title={showLogoAction ? t("app.returnHome") : undefined}
         >
           <LogoMark className="h-[22px] w-[22px] text-primary transition-[filter] duration-150 group-hover:drop-shadow-[0_0_6px_oklch(0.78_0.16_75_/_0.5)]" />
-          <span className="font-mono text-sm font-bold tracking-tight text-primary">
-            r3sizer
-          </span>
+          <span className="font-mono text-sm font-bold tracking-tight text-primary">r3sizer</span>
         </button>
 
         <div className="h-4 w-px bg-border/40 flex-shrink-0" />

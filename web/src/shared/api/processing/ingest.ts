@@ -94,10 +94,7 @@ export async function* extractStripes(
       ctx.drawImage(bitmap, x, y, w, rows, 0, 0, w, rows);
       const chunk = ctx.getImageData(0, 0, w, rows).data;
       for (let r = 0; r < rows; r++) {
-        stripe.set(
-          chunk.subarray(r * w * 4, (r + 1) * w * 4),
-          (r * bitmap.width + x) * 4,
-        );
+        stripe.set(chunk.subarray(r * w * 4, (r + 1) * w * 4), (r * bitmap.width + x) * 4);
       }
     }
     yield { rgba: stripe, rows };
