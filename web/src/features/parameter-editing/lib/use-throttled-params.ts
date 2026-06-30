@@ -82,10 +82,7 @@ function useDebouncedCallback<T extends AnyFn>(fn: T, wait = 300): T {
  */
 export function useThrottledUpdateParams(wait = 80) {
   const updateParams = useImageStore((s) => s.updateParams);
-  return useThrottledCallback(
-    (partial: Partial<AutoSharpParams>) => updateParams(partial),
-    wait,
-  );
+  return useThrottledCallback((partial: Partial<AutoSharpParams>) => updateParams(partial), wait);
 }
 
 /**
@@ -94,8 +91,5 @@ export function useThrottledUpdateParams(wait = 80) {
  */
 export function useDebouncedUpdateParams(wait = 300) {
   const updateParams = useImageStore((s) => s.updateParams);
-  return useDebouncedCallback(
-    (partial: Partial<AutoSharpParams>) => updateParams(partial),
-    wait,
-  );
+  return useDebouncedCallback((partial: Partial<AutoSharpParams>) => updateParams(partial), wait);
 }

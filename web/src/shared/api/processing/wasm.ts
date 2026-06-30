@@ -1,10 +1,16 @@
-import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 import type { ProcessResult } from "@/shared/types/wasm-types";
-import type { BaseData } from "./probe-pool";
-import { initProbePool, isProbePoolReady, runProbesParallel, distributeBaseData, resetBaseCache } from "./probe-pool";
-import { CancelledError } from "./errors";
 import type { CancellationToken } from "./errors";
+import { CancelledError } from "./errors";
+import type { BaseData } from "./probe-pool";
+import {
+  distributeBaseData,
+  initProbePool,
+  isProbePoolReady,
+  resetBaseCache,
+  runProbesParallel,
+} from "./probe-pool";
 import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
+import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
@@ -13,8 +19,10 @@ let nextId = 0;
 /** Timeout for pending worker requests (ms). Prevents permanent hangs. */
 const WORKER_TIMEOUT = 30_000;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pending = new Map<number, { resolve: (r: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+const pending = new Map<
+  number,
+  { resolve: (r: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+>();
 
 // ---------------------------------------------------------------------------
 // Progress callback — set by the store to receive pipeline stage updates.
@@ -57,10 +65,7 @@ function ensureWorker(): Promise<void> {
   workerReadyPromise = new Promise<void>((resolveReady, rejectReady) => {
     compileWasm(wasmUrl)
       .then((wasmModule) => {
-        const w = new Worker(
-          new URL("./wasm-worker.ts", import.meta.url),
-          { type: "module" }
-        );
+        const w = new Worker(new URL("./wasm-worker.ts", import.meta.url), { type: "module" });
 
         w.onerror = (ev) => {
           const msg = ev.message || "Worker failed to load";
@@ -167,7 +172,7 @@ export async function processImageAsync(
   rgbaData: Uint8Array,
   width: number,
   height: number,
-  paramsJson: string
+  paramsJson: string,
 ): Promise<ProcessResult> {
   await ensureWorker();
 
@@ -202,7 +207,7 @@ export async function processImageAsync(
 export async function prepareImage(
   rgbaData: Uint8Array,
   width: number,
-  height: number
+  height: number,
 ): Promise<void> {
   await ensureWorker();
   worker!.postMessage({
@@ -405,7 +410,7 @@ export async function prepareBaseImage(
   rgbaData: Uint8Array,
   width: number,
   height: number,
-  paramsJson: string
+  paramsJson: string,
 ): Promise<void> {
   await ensureWorker();
   return callWorker<void>({

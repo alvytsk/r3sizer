@@ -1,8 +1,9 @@
 import { create } from "zustand";
-import type { AutoSharpParams } from "@/shared/types/wasm-types";
-import { DEFAULT_PARAMS } from "@/shared/types/wasm-types";
+import type { DecodedInput } from "@/shared/api/processing";
 import { processingClient } from "@/shared/api/processing";
 import { loadDimsForOrientation, saveDims } from "@/shared/lib/prefs-storage";
+import type { AutoSharpParams } from "@/shared/types/wasm-types";
+import { DEFAULT_PARAMS } from "@/shared/types/wasm-types";
 
 /**
  * Image entity — the decoded input image together with the sharpen/resize
@@ -66,7 +67,7 @@ export const useImageStore = create<ImageState>((set, get) => ({
   error: null,
 
   setInput: async (file) => {
-    let decoded;
+    let decoded: DecodedInput | undefined;
     try {
       decoded = await processingClient.decode(file);
     } catch (e) {

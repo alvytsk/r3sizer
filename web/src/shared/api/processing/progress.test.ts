@@ -4,9 +4,7 @@ import { ProgressAggregator, type ProgressEvent } from "./progress";
 describe("ProgressAggregator", () => {
   it("normalizes overall progress over the active stages", () => {
     const events: ProgressEvent[] = [];
-    const agg = new ProgressAggregator(["prepare", "probe", "finalize"], (e) =>
-      events.push(e),
-    );
+    const agg = new ProgressAggregator(["prepare", "probe", "finalize"], (e) => events.push(e));
     agg.update("prepare", 1);
     agg.update("probe", 0.5);
     agg.complete("finalize");
@@ -21,9 +19,8 @@ describe("ProgressAggregator", () => {
 
   it("marks earlier stages complete when a later stage reports", () => {
     const events: ProgressEvent[] = [];
-    const agg = new ProgressAggregator(
-      ["ingest", "prepare", "probe", "finalize"],
-      (e) => events.push(e),
+    const agg = new ProgressAggregator(["ingest", "prepare", "probe", "finalize"], (e) =>
+      events.push(e),
     );
     // Jump straight to probe: ingest + prepare count as done.
     agg.update("probe", 0);

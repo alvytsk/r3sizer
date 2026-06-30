@@ -1,20 +1,38 @@
 import {
-  initSync, process_image, prepare_image, prepare_base,
-  get_base_data, process_from_probes, clear_cache,
-  resolve_initial_strengths, resolve_dense_strengths,
+  clear_cache,
   compute_probe_detail,
-  ingest_begin, ingest_stripe, ingest_end, ingest_abort,
+  get_base_data,
+  ingest_abort,
+  ingest_begin,
+  ingest_end,
+  ingest_stripe,
+  initSync,
+  prepare_base,
+  prepare_image,
+  process_from_probes,
+  process_image,
+  resolve_dense_strengths,
+  resolve_initial_strengths,
 } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
 
 export interface WorkerRequest {
   type:
-    | "init" | "process" | "prepare" | "prepare_base"
-    | "get_base_data" | "compute_detail" | "process_from_probes"
-    | "resolve_initial_strengths" | "resolve_dense_strengths"
+    | "init"
+    | "process"
+    | "prepare"
+    | "prepare_base"
+    | "get_base_data"
+    | "compute_detail"
+    | "process_from_probes"
+    | "resolve_initial_strengths"
+    | "resolve_dense_strengths"
     | "clear_cache"
-    | "ingest_begin" | "ingest_stripe" | "ingest_end" | "ingest_abort";
+    | "ingest_begin"
+    | "ingest_stripe"
+    | "ingest_end"
+    | "ingest_abort";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -33,8 +51,15 @@ export interface WorkerRequest {
 
 export interface WorkerResponse {
   type:
-    | "ready" | "result" | "prepared" | "base_prepared"
-    | "base_data" | "detail" | "progress" | "strengths" | "dense_result"
+    | "ready"
+    | "result"
+    | "prepared"
+    | "base_prepared"
+    | "base_data"
+    | "detail"
+    | "progress"
+    | "strengths"
+    | "dense_result"
     | "cache_cleared"
     | "ingest_result";
   id?: number;
@@ -178,14 +203,16 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       const resp: WorkerResponse = {
         type: "base_data",
         id,
-        baseData: data ? {
-          basePixels: data.basePixels,
-          luminance: data.luminance,
-          width: data.width,
-          height: data.height,
-          baseline: data.baseline,
-          effectiveP0: data.effectiveP0,
-        } : null,
+        baseData: data
+          ? {
+              basePixels: data.basePixels,
+              luminance: data.luminance,
+              width: data.width,
+              height: data.height,
+              baseline: data.baseline,
+              effectiveP0: data.effectiveP0,
+            }
+          : null,
       };
       (self as unknown as Worker).postMessage(resp);
     } catch (err) {
@@ -208,7 +235,8 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       (self as unknown as Worker).postMessage(resp);
     } catch (err) {
       const resp: WorkerResponse = {
-        type: "detail", id,
+        type: "detail",
+        id,
         error: err instanceof Error ? err.message : String(err),
       };
       (self as unknown as Worker).postMessage(resp);
@@ -222,7 +250,10 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       if (!ready) throw new Error("WASM not initialized");
 
       const result = process_from_probes(
-        paramsJson!, probesJson!, probingUs!, passDiagnosticsJson ?? "",
+        paramsJson!,
+        probesJson!,
+        probingUs!,
+        passDiagnosticsJson ?? "",
       );
       const resp: WorkerResponse = {
         type: "result",
@@ -255,7 +286,8 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       (self as unknown as Worker).postMessage(resp);
     } catch (err) {
       const resp: WorkerResponse = {
-        type: "strengths", id,
+        type: "strengths",
+        id,
         error: err instanceof Error ? err.message : String(err),
       };
       (self as unknown as Worker).postMessage(resp);
@@ -269,13 +301,15 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       if (!ready) throw new Error("WASM not initialized");
       const result = resolve_dense_strengths(coarseSamplesJson!, paramsJson!, effectiveP0!);
       const resp: WorkerResponse = {
-        type: "dense_result", id,
+        type: "dense_result",
+        id,
         denseResult: result != null ? result : null,
       };
       (self as unknown as Worker).postMessage(resp);
     } catch (err) {
       const resp: WorkerResponse = {
-        type: "dense_result", id,
+        type: "dense_result",
+        id,
         error: err instanceof Error ? err.message : String(err),
       };
       (self as unknown as Worker).postMessage(resp);

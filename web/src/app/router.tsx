@@ -1,12 +1,13 @@
 /* eslint-disable react-refresh/only-export-components -- router config module, not HMR-eligible */
-import { Suspense, lazy } from "react";
+
 import {
-  createRouter,
-  createRoute,
   createRootRoute,
-  Outlet,
+  createRoute,
+  createRouter,
   Navigate,
+  Outlet,
 } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 import App from "@/pages/studio/ui/studio-page";
 
 /**

@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { CancelledError, processingClient, type ProcessJob } from "@/shared/api/processing";
 import { useImageStore } from "@/entities/image";
 import { useOutputStore } from "@/entities/output";
+import { CancelledError, type ProcessJob, processingClient } from "@/shared/api/processing";
 
 /**
  * Image-processing feature — owns the process/cancel lifecycle only.

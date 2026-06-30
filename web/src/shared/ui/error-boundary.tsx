@@ -1,5 +1,5 @@
-import { Component, type ReactNode } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Component, type ReactNode } from "react";
 
 interface Props {
   /** Label shown in the fallback UI to identify which panel crashed. */
@@ -31,9 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <AlertTriangle className="h-5 w-5" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm text-destructive/80">
-              {this.props.panel} crashed
-            </p>
+            <p className="text-sm text-destructive/80">{this.props.panel} crashed</p>
             <p className="text-[11px] font-mono text-muted-foreground/50 max-w-[260px] break-words">
               {this.state.error.message}
             </p>

@@ -1,23 +1,16 @@
-import { Slider } from "@/shared/ui/slider";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/shared/ui/collapsible";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ValueLabel } from "./helpers";
-import { sliderValue } from "../lib/constants";
 import type {
   AutoSharpParams,
-  GainTable,
   ClassificationParams,
   ContentAdaptiveStrategy,
+  GainTable,
 } from "@/shared/types/wasm-types";
-import {
-  DEFAULT_GAIN_TABLE,
-  DEFAULT_CLASSIFICATION_PARAMS,
-} from "@/shared/types/wasm-types";
+import { DEFAULT_CLASSIFICATION_PARAMS, DEFAULT_GAIN_TABLE } from "@/shared/types/wasm-types";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui/collapsible";
+import { Slider } from "@/shared/ui/slider";
+import { sliderValue } from "../lib/constants";
+import { ValueLabel } from "./helpers";
 
 export function AdaptiveSettings({
   strategy,
@@ -36,7 +29,13 @@ export function AdaptiveSettings({
     ["risky_halo_zone", t("params.riskyHalo")],
   ];
 
-  const CLASSIFICATION_ENTRIES: [keyof Omit<ClassificationParams, "variance_window">, string, number, number, number][] = [
+  const CLASSIFICATION_ENTRIES: [
+    keyof Omit<ClassificationParams, "variance_window">,
+    string,
+    number,
+    number,
+    number,
+  ][] = [
     ["gradient_low_threshold", t("params.gradLow"), 0, 1, 0.01],
     ["gradient_high_threshold", t("params.gradHigh"), 0, 2, 0.01],
     ["variance_low_threshold", t("params.varLow"), 0, 0.1, 0.001],
@@ -94,7 +93,9 @@ export function AdaptiveSettings({
             <button
               type="button"
               className="text-[10px] font-mono text-muted-foreground/60 hover:text-primary transition-colors"
-              onClick={() => updateStrategy({ classification: { ...DEFAULT_CLASSIFICATION_PARAMS } })}
+              onClick={() =>
+                updateStrategy({ classification: { ...DEFAULT_CLASSIFICATION_PARAMS } })
+              }
             >
               {t("params.reset")}
             </button>
@@ -145,30 +146,30 @@ export function AdaptiveSettings({
           <ValueLabel>{t("params.backoff")}</ValueLabel>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <span className="text-[11px] text-muted-foreground/70">{t("params.maxIterations")}</span>
+              <span className="text-[11px] text-muted-foreground/70">
+                {t("params.maxIterations")}
+              </span>
               <Slider
                 min={0}
                 max={10}
                 step={1}
                 value={[strategy.max_backoff_iterations]}
-                onValueChange={(v) =>
-                  updateStrategy({ max_backoff_iterations: sliderValue(v) })
-                }
+                onValueChange={(v) => updateStrategy({ max_backoff_iterations: sliderValue(v) })}
               />
               <span className="text-[10px] font-mono text-primary">
                 {strategy.max_backoff_iterations}
               </span>
             </div>
             <div>
-              <span className="text-[11px] text-muted-foreground/70">{t("params.scaleFactor")}</span>
+              <span className="text-[11px] text-muted-foreground/70">
+                {t("params.scaleFactor")}
+              </span>
               <Slider
                 min={0.1}
                 max={0.95}
                 step={0.05}
                 value={[strategy.backoff_scale_factor]}
-                onValueChange={(v) =>
-                  updateStrategy({ backoff_scale_factor: sliderValue(v) })
-                }
+                onValueChange={(v) => updateStrategy({ backoff_scale_factor: sliderValue(v) })}
               />
               <span className="text-[10px] font-mono text-primary">
                 {strategy.backoff_scale_factor.toFixed(2)}

@@ -1,13 +1,8 @@
 import type { AutoSharpParams, ProcessResult } from "@/shared/types/wasm-types";
 import { CancellationToken } from "./errors";
-import {
-  bitmapToRgba,
-  decodeToBitmap,
-  extractStripes,
-  makePreview,
-  planStripes,
-} from "./ingest";
+import { bitmapToRgba, decodeToBitmap, extractStripes, makePreview, planStripes } from "./ingest";
 import { destroyProbePool } from "./probe-pool";
+import { type ProcessingStage, ProgressAggregator, type ProgressEvent } from "./progress";
 import {
   clearAllCaches,
   ingestAbortFireAndForget,
@@ -20,7 +15,6 @@ import {
   resetWorker,
   setProgressCallback,
 } from "./wasm";
-import { ProgressAggregator, type ProcessingStage, type ProgressEvent } from "./progress";
 
 /**
  * Images above this pixel count take the striped ingest path. This is a web
@@ -66,8 +60,7 @@ export class ProcessingClient {
     this.input = null;
 
     const bitmap = await decodeToBitmap(file);
-    const striped =
-      bitmap.width * bitmap.height > DEFAULT_STRIPED_INGEST_THRESHOLD_PIXELS;
+    const striped = bitmap.width * bitmap.height > DEFAULT_STRIPED_INGEST_THRESHOLD_PIXELS;
     const rgba = striped ? null : bitmapToRgba(bitmap);
     this.input = { file, bitmap, striped, rgba };
 
@@ -151,8 +144,7 @@ class JobImpl implements ProcessJob {
     // Map the worker's legacy progress strings onto coarse stage events.
     setProgressCallback((stage) => {
       if (stage === "probing") this.aggregator.update("probe", 0);
-      else if (stage === "fitting" || stage === "encoding")
-        this.aggregator.update("finalize", 0.5);
+      else if (stage === "fitting" || stage === "encoding") this.aggregator.update("finalize", 0.5);
       else this.aggregator.update("prepare", 0.5);
     });
     try {
@@ -166,10 +158,7 @@ class JobImpl implements ProcessJob {
     }
   }
 
-  private async runMonolithic(
-    input: ClientInput,
-    params: AutoSharpParams,
-  ): Promise<ProcessResult> {
+  private async runMonolithic(input: ClientInput, params: AutoSharpParams): Promise<ProcessResult> {
     this.token.throwIfCancelled();
     this.aggregator.update("prepare", 0);
     const { data, width, height } = input.rgba!;
@@ -181,10 +170,7 @@ class JobImpl implements ProcessJob {
     return result;
   }
 
-  private async runStriped(
-    input: ClientInput,
-    params: AutoSharpParams,
-  ): Promise<ProcessResult> {
+  private async runStriped(input: ClientInput, params: AutoSharpParams): Promise<ProcessResult> {
     // Content-adaptive resize and full source-side diagnostics need the
     // whole source image, which never exists on this path.
     const effectiveParams: AutoSharpParams = {
@@ -197,12 +183,7 @@ class JobImpl implements ProcessJob {
     this.aggregator.update("ingest", 0);
     let inter: { width: number; height: number };
     try {
-      await ingestBegin(
-        bitmap.width,
-        bitmap.height,
-        params.target_width,
-        params.target_height,
-      );
+      await ingestBegin(bitmap.width, bitmap.height, params.target_width, params.target_height);
       const { count } = planStripes(bitmap.width, bitmap.height);
       let sent = 0;
       for await (const { rgba, rows } of extractStripes(bitmap)) {

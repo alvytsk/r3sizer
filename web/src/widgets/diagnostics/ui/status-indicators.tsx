@@ -29,11 +29,7 @@ const fallbackLabels: Record<string, string> = {
   direct_search_configured: "Direct Search",
 };
 
-export function StatusIndicators({
-  diagnostics,
-}: {
-  diagnostics: AutoSharpDiagnostics;
-}) {
+export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
   const style = selectionStyles[diagnostics.selection_mode] ?? {
     dot: "bg-muted-foreground",
     text: "text-muted-foreground",
@@ -51,8 +47,12 @@ export function StatusIndicators({
 
       {/* Budget status */}
       <div className="flex items-center gap-1.5">
-        <div className={`w-2 h-2 rounded-full ${diagnostics.budget_reachable ? "bg-chart-3" : "bg-destructive"}`} />
-        <span className={`text-[13px] font-mono ${diagnostics.budget_reachable ? "text-chart-3" : "text-destructive"}`}>
+        <div
+          className={`w-2 h-2 rounded-full ${diagnostics.budget_reachable ? "bg-chart-3" : "bg-destructive"}`}
+        />
+        <span
+          className={`text-[13px] font-mono ${diagnostics.budget_reachable ? "text-chart-3" : "text-destructive"}`}
+        >
           {diagnostics.budget_reachable ? "Budget OK" : "Unreachable"}
         </span>
       </div>

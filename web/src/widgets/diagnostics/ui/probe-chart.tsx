@@ -9,10 +9,10 @@ function evaluateCubic(a: number, b: number, c: number, d: number, x: number) {
 
 /** ~5 "nice" tick values across [min, max]. */
 function niceTicks(min: number, max: number, count = 5): number[] {
-  if (!isFinite(min) || !isFinite(max) || min === max) return [min];
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return [min];
   const span = max - min;
   const rawStep = span / count;
-  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const mag = 10 ** Math.floor(Math.log10(rawStep));
   const norm = rawStep / mag;
   const niceStep = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
   const start = Math.ceil(min / niceStep) * niceStep;
@@ -37,11 +37,7 @@ const MONO = "JetBrains Mono Variable, monospace";
 const HEIGHT = 260;
 const MARGIN = { top: 14, right: 16, bottom: 38, left: 54 };
 
-export function ProbeChart({
-  diagnostics,
-}: {
-  diagnostics: AutoSharpDiagnostics;
-}) {
+export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(640);
   const [selStart, setSelStart] = useState<number | null>(null);
@@ -92,7 +88,7 @@ export function ProbeChart({
       ...probeData.filter((s) => s.strength >= x0 && s.strength <= x1).map((s) => s.metric_value),
       ...curveData.filter((d) => d.s >= x0 && d.s <= x1).map((d) => d.fitted),
       diagnostics.target_artifact_ratio,
-    ].filter(isFinite);
+    ].filter(Number.isFinite);
     if (ys.length === 0) return [0, 0.01];
     const mn = Math.min(...ys);
     const mx = Math.max(...ys);
@@ -123,7 +119,7 @@ export function ProbeChart({
     }
     return d.trim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curveData, xDomain, yDomain, width]);
+  }, [curveData, sy, sx]);
 
   const withinBudget = probeData.filter((d) => d.metric_value <= diagnostics.target_artifact_ratio);
   const overBudget = probeData.filter((d) => d.metric_value > diagnostics.target_artifact_ratio);
@@ -142,7 +138,7 @@ export function ProbeChart({
       setSelCurrent(invX(px));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [plotW, xDomain],
+    [plotW, invX],
   );
 
   const onPointerMove = useCallback(
@@ -166,7 +162,7 @@ export function ProbeChart({
       if (best) setHover({ sx: sx(best.s), sy: sy(best.v), s: best.s, v: best.v });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selStart, plotW, xDomain, yDomain, width, probeData],
+    [selStart, plotW, probeData, sx, sy, invX],
   );
 
   const endSelection = useCallback(() => {
@@ -215,7 +211,11 @@ export function ProbeChart({
 
       <div
         ref={wrapRef}
-        style={{ userSelect: "none", cursor: isSelecting ? "crosshair" : "default", position: "relative" }}
+        style={{
+          userSelect: "none",
+          cursor: isSelecting ? "crosshair" : "default",
+          position: "relative",
+        }}
       >
         <svg width={width} height={HEIGHT} role="img" aria-label="P(s) probe curve">
           <defs>
@@ -230,8 +230,23 @@ export function ProbeChart({
             if (y < MARGIN.top - 0.5 || y > MARGIN.top + plotH + 0.5) return null;
             return (
               <g key={`y${i}`}>
-                <line x1={MARGIN.left} y1={y} x2={MARGIN.left + plotW} y2={y} stroke={GRID} strokeDasharray="2 4" />
-                <text x={MARGIN.left - 6} y={y} dy="0.32em" textAnchor="end" fontSize={9} fontFamily={MONO} fill={TEXT_DIM}>
+                <line
+                  x1={MARGIN.left}
+                  y1={y}
+                  x2={MARGIN.left + plotW}
+                  y2={y}
+                  stroke={GRID}
+                  strokeDasharray="2 4"
+                />
+                <text
+                  x={MARGIN.left - 6}
+                  y={y}
+                  dy="0.32em"
+                  textAnchor="end"
+                  fontSize={9}
+                  fontFamily={MONO}
+                  fill={TEXT_DIM}
+                >
                   {t.toExponential(1)}
                 </text>
               </g>
@@ -244,9 +259,29 @@ export function ProbeChart({
             if (x < MARGIN.left - 0.5 || x > MARGIN.left + plotW + 0.5) return null;
             return (
               <g key={`x${i}`}>
-                <line x1={x} y1={MARGIN.top} x2={x} y2={MARGIN.top + plotH} stroke={GRID} strokeDasharray="2 4" />
-                <line x1={x} y1={MARGIN.top + plotH} x2={x} y2={MARGIN.top + plotH + 4} stroke={GRID} />
-                <text x={x} y={MARGIN.top + plotH + 16} textAnchor="middle" fontSize={9} fontFamily={MONO} fill={TEXT_DIM}>
+                <line
+                  x1={x}
+                  y1={MARGIN.top}
+                  x2={x}
+                  y2={MARGIN.top + plotH}
+                  stroke={GRID}
+                  strokeDasharray="2 4"
+                />
+                <line
+                  x1={x}
+                  y1={MARGIN.top + plotH}
+                  x2={x}
+                  y2={MARGIN.top + plotH + 4}
+                  stroke={GRID}
+                />
+                <text
+                  x={x}
+                  y={MARGIN.top + plotH + 16}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fontFamily={MONO}
+                  fill={TEXT_DIM}
+                >
                   {t.toFixed(2)}
                 </text>
               </g>
@@ -265,7 +300,13 @@ export function ProbeChart({
 
           {/* fitted cubic */}
           {curvePath && (
-            <path d={curvePath} fill="none" stroke={BLUE} strokeWidth={1.5} clipPath="url(#probe-plot-clip)" />
+            <path
+              d={curvePath}
+              fill="none"
+              stroke={BLUE}
+              strokeWidth={1.5}
+              clipPath="url(#probe-plot-clip)"
+            />
           )}
 
           {/* scatter */}
@@ -281,8 +322,23 @@ export function ProbeChart({
           {/* P0 reference (horizontal, red) */}
           {P0 >= yDomain[0] && P0 <= yDomain[1] && (
             <g>
-              <line x1={MARGIN.left} y1={sy(P0)} x2={MARGIN.left + plotW} y2={sy(P0)} stroke={RED} strokeDasharray="4 4" strokeWidth={1} />
-              <text x={MARGIN.left + plotW - 3} y={sy(P0) - 4} textAnchor="end" fontSize={9} fontFamily={MONO} fill={RED}>
+              <line
+                x1={MARGIN.left}
+                y1={sy(P0)}
+                x2={MARGIN.left + plotW}
+                y2={sy(P0)}
+                stroke={RED}
+                strokeDasharray="4 4"
+                strokeWidth={1}
+              />
+              <text
+                x={MARGIN.left + plotW - 3}
+                y={sy(P0) - 4}
+                textAnchor="end"
+                fontSize={9}
+                fontFamily={MONO}
+                fill={RED}
+              >
                 {`P\u2080 = ${P0.toExponential(1)}`}
               </text>
             </g>
@@ -291,8 +347,22 @@ export function ProbeChart({
           {/* s* reference (vertical, amber) */}
           {sStar > 0 && sStar >= xDomain[0] && sStar <= xDomain[1] && (
             <g>
-              <line x1={sx(sStar)} y1={MARGIN.top} x2={sx(sStar)} y2={MARGIN.top + plotH} stroke={AMBER} strokeDasharray="4 4" strokeWidth={1} />
-              <text x={sx(sStar) + 3} y={MARGIN.top + 10} fontSize={9} fontFamily={MONO} fill={AMBER}>
+              <line
+                x1={sx(sStar)}
+                y1={MARGIN.top}
+                x2={sx(sStar)}
+                y2={MARGIN.top + plotH}
+                stroke={AMBER}
+                strokeDasharray="4 4"
+                strokeWidth={1}
+              />
+              <text
+                x={sx(sStar) + 3}
+                y={MARGIN.top + 10}
+                fontSize={9}
+                fontFamily={MONO}
+                fill={AMBER}
+              >
                 {`s* = ${sStar.toFixed(3)}`}
               </text>
             </g>
@@ -316,13 +386,33 @@ export function ProbeChart({
           {/* hover marker */}
           {hover && !isSelecting && (
             <g pointerEvents="none">
-              <line x1={hover.sx} y1={MARGIN.top} x2={hover.sx} y2={MARGIN.top + plotH} stroke={GRID} />
-              <circle cx={hover.sx} cy={hover.sy} r={4.5} fill="none" stroke={BLUE} strokeWidth={1.2} />
+              <line
+                x1={hover.sx}
+                y1={MARGIN.top}
+                x2={hover.sx}
+                y2={MARGIN.top + plotH}
+                stroke={GRID}
+              />
+              <circle
+                cx={hover.sx}
+                cy={hover.sy}
+                r={4.5}
+                fill="none"
+                stroke={BLUE}
+                strokeWidth={1.2}
+              />
             </g>
           )}
 
           {/* axis titles */}
-          <text x={MARGIN.left + plotW / 2} y={HEIGHT - 4} textAnchor="middle" fontSize={10} fontFamily={MONO} fill={TEXT_DIM}>
+          <text
+            x={MARGIN.left + plotW / 2}
+            y={HEIGHT - 4}
+            textAnchor="middle"
+            fontSize={10}
+            fontFamily={MONO}
+            fill={TEXT_DIM}
+          >
             Sharpening Strength (s)
           </text>
           <text

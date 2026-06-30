@@ -1,7 +1,7 @@
-import { Button } from "@/shared/ui/button";
-import { Loader2, FolderOpen, SlidersHorizontal, BarChart3, Play, RefreshCw } from "lucide-react";
+import { BarChart3, FolderOpen, Loader2, Play, RefreshCw, SlidersHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DownloadButton } from "@/features/export";
+import { Button } from "@/shared/ui/button";
 
 export function Toolbar({
   isProcessing,
@@ -27,7 +27,10 @@ export function Toolbar({
   return (
     <div className="px-4 py-2 border-b border-border/30 flex items-center gap-2 flex-shrink-0">
       {paramsChanged && (
-        <div className="w-2 h-2 rounded-full bg-primary animate-pulse" title={t("toolbar.paramsChanged")} />
+        <div
+          className="w-2 h-2 rounded-full bg-primary animate-pulse"
+          title={t("toolbar.paramsChanged")}
+        />
       )}
       <Button
         onClick={onProcess}
@@ -48,7 +51,9 @@ export function Toolbar({
             ? t("toolbar.reprocess")
             : t("toolbar.process")}
       </Button>
-      <span className={`text-[11px] font-mono hidden sm:inline ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}>
+      <span
+        className={`text-[11px] font-mono hidden sm:inline ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}
+      >
         {isProcessing
           ? processingStage || t("toolbar.starting")
           : paramsChanged

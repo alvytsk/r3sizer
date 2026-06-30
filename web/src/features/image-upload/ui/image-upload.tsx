@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
 import { Upload } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useImageStore } from "@/entities/image";
 
@@ -15,7 +15,7 @@ export function ImageUpload() {
     (file: File) => {
       void setInput(file);
     },
-    [setInput]
+    [setInput],
   );
 
   const onDrop = useCallback(
@@ -25,7 +25,7 @@ export function ImageUpload() {
       const file = e.dataTransfer.files[0];
       if (file) handleFile(file);
     },
-    [handleFile]
+    [handleFile],
   );
 
   const onChange = useCallback(
@@ -33,46 +33,42 @@ export function ImageUpload() {
       const file = e.target.files?.[0];
       if (file) handleFile(file);
     },
-    [handleFile]
+    [handleFile],
   );
 
   return (
     <div
       className={`
         relative cursor-pointer rounded-lg border border-dashed transition-all duration-200
-        ${isDragging
-          ? "border-primary bg-primary/5 glow-amber"
-          : "upload-idle hover:border-primary/60 hover:bg-surface/50"
+        ${
+          isDragging
+            ? "border-primary bg-primary/5 glow-amber"
+            : "upload-idle hover:border-primary/60 hover:bg-surface/50"
         }
       `}
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={onDrop}
       onClick={() => inputRef.current?.click()}
     >
       <div className="flex flex-col items-center justify-center py-14 px-6 gap-3">
-        <div className={`
+        <div
+          className={`
           rounded-full p-3 transition-colors duration-200
           ${isDragging ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"}
-        `}>
+        `}
+        >
           <Upload className="h-5 w-5" />
         </div>
         <div className="text-center space-y-1">
-          <p className="text-sm font-medium text-foreground/80">
-            {t("upload.dropOrClick")}
-          </p>
-          <p className="text-[11px] font-mono text-muted-foreground/60">
-            {t("upload.formats")}
-          </p>
+          <p className="text-sm font-medium text-foreground/80">{t("upload.dropOrClick")}</p>
+          <p className="text-[11px] font-mono text-muted-foreground/60">{t("upload.formats")}</p>
         </div>
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPTED}
-        className="hidden"
-        onChange={onChange}
-      />
+      <input ref={inputRef} type="file" accept={ACCEPTED} className="hidden" onChange={onChange} />
     </div>
   );
 }

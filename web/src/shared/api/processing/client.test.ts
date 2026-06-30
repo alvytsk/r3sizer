@@ -37,10 +37,10 @@ vi.mock("./ingest", () => ({
   }),
 }));
 
-import * as wasm from "./wasm";
-import * as ingest from "./ingest";
-import { CancelledError } from "./errors";
 import { ProcessingClient } from "./client";
+import { CancelledError } from "./errors";
+import * as ingest from "./ingest";
+import * as wasm from "./wasm";
 
 function fakeBitmap(width: number, height: number): ImageBitmap {
   return { width, height, close: () => {} } as unknown as ImageBitmap;

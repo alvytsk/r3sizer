@@ -22,7 +22,7 @@ export function loadPrefs(): Partial<PersistedPrefs> {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return {};
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // biome-ignore lint/suspicious/noExplicitAny: parsed shape is validated below before use
     const parsed = JSON.parse(raw) as any;
     // Migrate old flat targetWidth/targetHeight → per-orientation
     if ("targetWidth" in parsed && !("landscape" in parsed)) {
@@ -51,9 +51,7 @@ export function savePrefs(patch: Partial<PersistedPrefs>): void {
 
 /** Save target dimensions for the current image orientation. */
 export function saveDims(isPortrait: boolean, width: number, height: number): void {
-  savePrefs(
-    isPortrait ? { portrait: { width, height } } : { landscape: { width, height } },
-  );
+  savePrefs(isPortrait ? { portrait: { width, height } } : { landscape: { width, height } });
 }
 
 /** Load saved dimensions for the given orientation, with sensible defaults. */
