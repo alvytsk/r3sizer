@@ -23,9 +23,9 @@ RUN --mount=type=cache,target=/workspace/target \
         -Oz -o /wasm-out/r3sizer_wasm_bg.wasm /wasm-out/r3sizer_wasm_bg.wasm
 
 # Generate TypeScript type definitions from Rust types (ts-rs).
-# Output goes to web/src/types/generated.ts which is copied in stage 2.
+# Output goes to web/src/shared/lib/types/generated.ts which is copied in stage 2.
 RUN --mount=type=cache,target=/workspace/target \
-    mkdir -p web/src/types && \
+    mkdir -p web/src/shared/lib/types && \
     cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 
 
@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.npm \
 # Copy source, then inject artifacts built in stage 1
 COPY web/ ./
 COPY --from=wasm-builder /wasm-out ./src/wasm-pkg
-COPY --from=wasm-builder /workspace/web/src/types/generated.ts ./src/types/generated.ts
+COPY --from=wasm-builder /workspace/web/src/shared/lib/types/generated.ts ./src/shared/lib/types/generated.ts
 
 # Run TypeScript check + Vite build (skip the build:wasm step; already done above)
 RUN npx tsc -b && npx vite build

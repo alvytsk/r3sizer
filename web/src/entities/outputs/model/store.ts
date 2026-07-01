@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AutoSharpDiagnostics, AutoSharpParams } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics, AutoSharpParams } from "@/shared/lib";
 
 /**
  * Output entity — the processed result (sharpened image + diagnostics).

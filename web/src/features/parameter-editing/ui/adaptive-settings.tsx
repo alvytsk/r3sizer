@@ -5,8 +5,8 @@ import type {
   ClassificationParams,
   ContentAdaptiveStrategy,
   GainTable,
-} from "@/shared/types/wasm-types";
-import { DEFAULT_CLASSIFICATION_PARAMS, DEFAULT_GAIN_TABLE } from "@/shared/types/wasm-types";
+} from "@/shared/lib";
+import { DEFAULT_CLASSIFICATION_PARAMS, DEFAULT_GAIN_TABLE } from "@/shared/lib";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui/collapsible";
 import { Slider } from "@/shared/ui/slider";
 import { sliderValue } from "../lib/constants";

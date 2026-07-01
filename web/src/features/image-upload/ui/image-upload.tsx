@@ -1,7 +1,7 @@
 import { Upload } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useImageStore } from "@/entities/image";
+import { useImageStore } from "@/entities/images";
 
 const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 

@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { useImageStore } from "@/entities/image";
-import { useOutputStore } from "@/entities/output";
-import { CancelledError, type ProcessJob, processingClient } from "@/shared/api/processing";
+import { useImageStore } from "@/entities/images";
+import { useOutputStore } from "@/entities/outputs";
+import { CancelledError, type ProcessJob, processingClient } from "@/shared/api";
 
 /**
  * Image-processing feature — owns the process/cancel lifecycle only.
@@ -9,7 +9,7 @@ import { CancelledError, type ProcessJob, processingClient } from "@/shared/api/
  * Reads the current image + params from the image entity, runs the pipeline
  * via the shared WASM API, and writes the result to the output entity. It holds
  * no result state itself, so consumers (export feature, preview/diagnostics
- * widgets) read the result from `entities/output` without feature-to-feature
+ * widgets) read the result from `entities/outputs` without feature-to-feature
  * coupling.
  *
  * One active job at a time: starting a new process while another is running

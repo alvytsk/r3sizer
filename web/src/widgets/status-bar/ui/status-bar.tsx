@@ -1,6 +1,6 @@
 import { Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { AutoSharpDiagnostics } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics } from "@/shared/lib";
 
 export function StatusBar({ diagnostics }: { diagnostics: AutoSharpDiagnostics | null }) {
   const { t } = useTranslation();

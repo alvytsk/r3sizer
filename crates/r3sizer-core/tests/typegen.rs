@@ -3,7 +3,7 @@
 //! Run with:
 //!   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 //!
-//! Output: web/src/types/generated.ts
+//! Output: web/src/shared/lib/types/generated.ts
 
 #![cfg(feature = "typegen")]
 
@@ -186,7 +186,8 @@ fn export_typescript_bindings() {
 
     // Write to web directory
     let out_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types/generated.ts");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/src/shared/lib/types/generated.ts");
     std::fs::write(&out_path, &output).expect("failed to write generated.ts");
 
     println!("✓ Wrote {}", out_path.display());

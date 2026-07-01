@@ -1,4 +1,4 @@
-import type { AutoSharpDiagnostics } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics } from "@/shared/lib";
 
 const selectionStyles: Record<string, { dot: string; text: string }> = {
   polynomial_root: { dot: "bg-chart-3", text: "text-chart-3" },

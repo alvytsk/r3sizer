@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { ChipVariant } from "@/entities/diagnostics";
-import type { AutoSharpDiagnostics, RobustnessFlags } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics, RobustnessFlags } from "@/shared/lib";
 import { StatusChip } from "./shared";
 
 function PolyCoeffTable({ a, b, c, d }: { a: number; b: number; c: number; d: number }) {

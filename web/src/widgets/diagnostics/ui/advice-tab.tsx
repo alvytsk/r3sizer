@@ -1,12 +1,12 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useImageStore } from "@/entities/image";
+import { useImageStore } from "@/entities/images";
 import type {
   AutoSharpDiagnostics,
   Recommendation,
   RecommendationKind,
   Severity as RecSeverity,
-} from "@/shared/types/wasm-types";
+} from "@/shared/lib";
 
 interface Advice {
   icon: string;

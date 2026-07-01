@@ -66,7 +66,7 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 
 ### TypeScript type generation (`ts-rs`)
 
-All serializable types in `r3sizer-core/src/types.rs` have `#[cfg_attr(feature = "typegen", derive(TS))]`. Running `cargo test -p r3sizer-core --features typegen export_typescript_bindings` writes `web/src/types/generated.ts` containing all type definitions and serialized `Default` constants. The web app imports from `web/src/types/wasm-types.ts` which re-exports everything from `generated.ts` and adds WASM-specific types (`ProcessResult`) and web overrides (e.g. `diagnostics_level: "full"`). When changing types in Rust, regenerate and commit `generated.ts`.
+All serializable types in `r3sizer-core/src/types.rs` have `#[cfg_attr(feature = "typegen", derive(TS))]`. Running `cargo test -p r3sizer-core --features typegen export_typescript_bindings` writes `web/src/shared/lib/types/generated.ts` containing all type definitions and serialized `Default` constants. The web app imports from `web/src/shared/lib/types/wasm-types.ts` which re-exports everything from `generated.ts` and adds WASM-specific types (`ProcessResult`) and web overrides (e.g. `diagnostics_level: "full"`). When changing types in Rust, regenerate and commit `generated.ts`.
 
 ## Deployment
 

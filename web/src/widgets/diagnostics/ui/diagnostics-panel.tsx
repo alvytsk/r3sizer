@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useOutputStore } from "@/entities/output";
+import { useOutputStore } from "@/entities/outputs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { AdviceTab } from "./advice-tab";
 import { FitTab } from "./fit-tab";

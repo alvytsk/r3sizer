@@ -3,7 +3,7 @@ import { MotionConfig } from "motion/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./app/index.css";
-import "@/shared/config/i18n";
+import "@/shared/config";
 import { router } from "./app/router";
 
 createRoot(document.getElementById("root")!).render(

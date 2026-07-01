@@ -1,16 +1,16 @@
 import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useImageStore } from "@/entities/image";
+import { useImageStore } from "@/entities/images";
 import { useDebouncedUpdateParams, useThrottledUpdateParams } from "@/features/parameter-editing";
-import type { MetricWeights } from "@/shared/types/wasm-types";
+import type { MetricWeights } from "@/shared/lib";
 import {
   DEFAULT_CONTENT_ADAPTIVE_RESIZE_STRATEGY,
   DEFAULT_CONTENT_ADAPTIVE_STRATEGY,
   DEFAULT_METRIC_WEIGHTS,
   DEFAULT_PARAMS,
   PIPELINE_PRESETS,
-} from "@/shared/types/wasm-types";
+} from "@/shared/lib";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/shared/ui/collapsible";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";

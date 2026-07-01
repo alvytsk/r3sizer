@@ -1,10 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { buildDiagnosis, severityStyle } from "@/entities/diagnostics";
-import type {
-  AdaptiveValidationOutcome,
-  AutoSharpDiagnostics,
-  RegionCoverage,
-} from "@/shared/types/wasm-types";
+import type { AdaptiveValidationOutcome, AutoSharpDiagnostics, RegionCoverage } from "@/shared/lib";
 import { ProbeChart } from "./probe-chart";
 import { Readout } from "./shared";
 import { StatusIndicators } from "./status-indicators";
