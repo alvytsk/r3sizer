@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy source, then inject artifacts built in stage 1
 COPY web/ ./
-COPY --from=wasm-builder /wasm-out ./src/wasm-pkg
+COPY --from=wasm-builder /wasm-out ./src/shared/api/processing/wasm-pkg
 COPY --from=wasm-builder /workspace/web/src/shared/lib/types/generated.ts ./src/shared/lib/types/generated.ts
 
 # Run TypeScript check + Vite build (skip the build:wasm step; already done above)
