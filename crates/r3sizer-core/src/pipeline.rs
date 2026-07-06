@@ -986,6 +986,7 @@ fn finish_pipeline(
     // --- Assemble diagnostics ---
     // Total timing includes pre-computed stages from PreparedBase.
     let full_total_us = total_us
+        + probing_us
         + prepared.resize_us
         + prepared.base_quality_us
         + prepared.contrast_us
@@ -1802,5 +1803,34 @@ mod tests {
         assert!((p[0] - 1.0).abs() < 1e-6); // 2.0 / 2.0
         assert!((p[1] - 0.5).abs() < 1e-6); // 1.0 / 2.0
         assert!((p[3] - 0.0).abs() < 1e-6); // -0.5 floored to 0
+    }
+
+    fn gradient(w: u32, h: u32) -> LinearRgbImage {
+        let mut data = vec![0.0f32; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = ((y * w + x) * 3) as usize;
+                data[idx] = x as f32 / w as f32;
+                data[idx + 1] = y as f32 / h as f32;
+                data[idx + 2] = 0.5;
+            }
+        }
+        LinearRgbImage::new(w, h, data).unwrap()
+    }
+
+    #[test]
+    fn total_time_includes_probing() {
+        // 256x256 source so probing over ~11 probes is reliably > 1µs.
+        let img = gradient(256, 256);
+        let params = AutoSharpParams::photo(64, 64);
+        let out = crate::process_auto_sharp_downscale(&img, &params).unwrap();
+        let t = &out.diagnostics.timing;
+        assert!(t.probing_us > 0, "probing_us should be measured");
+        assert!(
+            t.total_us >= t.probing_us,
+            "total_us ({}) must include probing_us ({})",
+            t.total_us,
+            t.probing_us
+        );
     }
 }
