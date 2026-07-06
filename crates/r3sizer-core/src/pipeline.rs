@@ -379,6 +379,9 @@ pub fn process_from_prepared(
 /// The `probing_us` field should reflect the wall-clock time of the parallel
 /// probing phase (not the sum of per-worker times).
 ///
+/// `probe_samples` may be supplied in any order; they are sorted internally by
+/// ascending strength before fitting and solving.
+///
 /// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
 /// (useful for TwoPass parallel probing where JS resolved the dense window).
 pub fn process_from_prepared_with_probes(
@@ -421,6 +424,10 @@ pub fn resolve_initial_strengths(params: &AutoSharpParams) -> Result<Vec<f32>, C
 ///
 /// Only meaningful for [`ProbeConfig::TwoPass`].  Returns `Ok(None)` for other
 /// configs (no second pass needed).
+///
+/// `coarse_samples` may be supplied in any order (e.g. collected out of order
+/// by the parallel probe pool); they are sorted internally by ascending
+/// strength before the crossing window is located.
 pub fn resolve_dense_strengths(
     coarse_samples: &[ProbeSample],
     params: &AutoSharpParams,
@@ -434,8 +441,16 @@ pub fn resolve_dense_strengths(
             dense_count,
             window_margin,
         } => {
+            // Samples may arrive in any order (parallel probe pool); the
+            // window search assumes ascending strength.
+            let mut sorted = coarse_samples.to_vec();
+            sorted.sort_by(|a, b| {
+                a.strength
+                    .partial_cmp(&b.strength)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let (dense_lo, dense_hi) = find_dense_window(
-                coarse_samples,
+                &sorted,
                 effective_p0,
                 *coarse_min,
                 *coarse_max,
@@ -688,10 +703,19 @@ fn finish_pipeline(
         .map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
 
     let ProbeResult {
-        samples: probe_samples,
+        samples: mut probe_samples,
         pass_diagnostics: probe_pass_diagnostics,
         probing_us,
     } = probe_result;
+
+    // Samples may arrive unsorted (externally-collected parallel probes).
+    // Downstream fit/solve/monotonicity/window logic assumes ascending
+    // strength, so sort defensively (idempotent for already-sorted input).
+    probe_samples.sort_by(|a, b| {
+        a.strength
+            .partial_cmp(&b.strength)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // --- Fit + Solve ---
     let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
@@ -1832,5 +1856,36 @@ mod tests {
             t.total_us,
             t.probing_us
         );
+    }
+
+    fn sample(strength: f32, metric_value: f32) -> ProbeSample {
+        ProbeSample {
+            strength,
+            artifact_ratio: metric_value,
+            metric_value,
+            breakdown: None,
+        }
+    }
+
+    #[test]
+    fn resolve_dense_strengths_tolerates_unsorted_input() {
+        // TwoPass params so resolve_dense_strengths returns Some.
+        let params = AutoSharpParams::photo(16, 16);
+
+        // Crossing of p0=0.005 lies between strengths 0.5 (0.002) and 0.8 (0.010).
+        let sorted = vec![
+            sample(0.2, 0.001),
+            sample(0.5, 0.002),
+            sample(0.8, 0.010),
+            sample(1.0, 0.020),
+        ];
+        let mut unsorted = sorted.clone();
+        unsorted.swap(0, 3);
+        unsorted.swap(1, 2);
+
+        let a = resolve_dense_strengths(&sorted, &params, 0.005).unwrap();
+        let b = resolve_dense_strengths(&unsorted, &params, 0.005).unwrap();
+        // Same dense window regardless of input order.
+        assert_eq!(a.unwrap().1.dense_min, b.unwrap().1.dense_min);
     }
 }
