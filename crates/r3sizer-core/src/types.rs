@@ -547,9 +547,10 @@ pub struct AutoSharpParams {
     pub evaluator_config: Option<EvaluatorConfig>,
 
     // --- Runtime mode ---
-    /// Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
-    /// called automatically during [`AutoSharpParams::validate`], overriding
-    /// the speed-sensitive fields before pipeline execution.
+    /// Performance-quality tradeoff.  Not applied automatically: call
+    /// [`AutoSharpParams::resolved`] before pipeline entry to fold this mode's
+    /// overrides into the speed-sensitive fields (as the CLI and WASM callers
+    /// do).  [`AutoSharpParams::validate`] does not modify params.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline_mode: Option<PipelineMode>,
 }
