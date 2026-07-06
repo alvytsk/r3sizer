@@ -25,7 +25,8 @@ use crate::{
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
     CoreError, DiagnosticsLevel, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, RegionCoverage,
+    MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
+    RegionCoverage,
     RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
 };
 
@@ -497,6 +498,8 @@ pub fn run_probes_standalone(
         baseline_artifact_ratio,
         &kernel,
         None,
+        params.needs_probe_breakdown(),
+        params.metric_weights,
     )
 }
 
@@ -562,6 +565,8 @@ pub fn run_probes_from_detail(
         baseline_artifact_ratio,
         metric_mode: params.metric_mode,
         metric_override: None,
+        need_breakdown: params.needs_probe_breakdown(),
+        metric_weights: params.metric_weights,
     };
     let mut scratch = ProbeScratch {
         luma: match params.sharpen_mode {
@@ -628,6 +633,8 @@ fn run_probes_for_prepared(
             baseline_artifact_ratio,
             &kernel,
             metric_override,
+            params.needs_probe_breakdown(),
+            params.metric_weights,
         )?,
         _ => {
             let strengths = params.probe_strengths.resolve()?;
@@ -641,6 +648,8 @@ fn run_probes_for_prepared(
                 baseline_artifact_ratio,
                 &kernel,
                 metric_override,
+                params.needs_probe_breakdown(),
+                params.metric_weights,
             )?;
             (samples, None)
         }
@@ -1161,6 +1170,8 @@ fn probe_strengths(
     baseline_artifact_ratio: f32,
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    need_breakdown: bool,
+    metric_weights: MetricWeights,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     use crate::sharpen;
 
@@ -1185,6 +1196,8 @@ fn probe_strengths(
         baseline_artifact_ratio,
         metric_mode,
         metric_override,
+        need_breakdown,
+        metric_weights,
     };
 
     #[cfg(feature = "parallel")]
@@ -1645,6 +1658,8 @@ fn run_two_pass_probing(
     baseline_artifact_ratio: f32,
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    need_breakdown: bool,
+    metric_weights: MetricWeights,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
     use crate::sharpen;
 
@@ -1676,6 +1691,8 @@ fn run_two_pass_probing(
         baseline_artifact_ratio,
         metric_mode,
         metric_override,
+        need_breakdown,
+        metric_weights,
     };
     let mut scratch = ProbeScratch {
         luma: match sharpen_mode {
@@ -1750,6 +1767,10 @@ struct ProbeContext<'a> {
     baseline_artifact_ratio: f32,
     metric_mode: MetricMode,
     metric_override: Option<&'a (dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    /// Compute a per-probe [`MetricBreakdown`] (composite policies / diagnostics).
+    need_breakdown: bool,
+    /// Weights for the composite score in the per-probe breakdown.
+    metric_weights: MetricWeights,
 }
 
 /// Mutable scratch buffers reused across probes to avoid per-probe allocation.
@@ -1793,11 +1814,43 @@ fn probe_one_reuse(
         None => crate::metrics::compute_selection_metric(&scratch.rgb, ctx.artifact_metric),
     };
     let metric_value = compute_metric_value(p_total, ctx.baseline_artifact_ratio, ctx.metric_mode);
+
+    let breakdown = if ctx.need_breakdown {
+        // luma_sharpened: reuse scratch.luma in Lightness mode; extract in RGB mode.
+        let sharp_luma_owned;
+        let sharp_luma: &[f32] = match ctx.sharpen_mode {
+            SharpenMode::Lightness => &scratch.luma,
+            SharpenMode::Rgb => {
+                sharp_luma_owned = color::extract_luminance(&scratch.rgb);
+                &sharp_luma_owned
+            }
+        };
+        // luma_original: prefer precomputed base luminance, else extract.
+        let base_luma_owned;
+        let base_luma: &[f32] = match ctx.base_luminance {
+            Some(l) => l,
+            None => {
+                base_luma_owned = color::extract_luminance(ctx.base);
+                &base_luma_owned
+            }
+        };
+        Some(crate::metrics::compute_metric_breakdown(
+            &scratch.rgb,
+            ctx.base,
+            base_luma,
+            sharp_luma,
+            ctx.artifact_metric,
+            &ctx.metric_weights,
+        ))
+    } else {
+        None
+    };
+
     ProbeSample {
         strength,
         artifact_ratio: p_total,
         metric_value,
-        breakdown: None,
+        breakdown,
     }
 }
 
@@ -1887,5 +1940,31 @@ mod tests {
         let b = resolve_dense_strengths(&unsorted, &params, 0.005).unwrap();
         // Same dense window regardless of input order.
         assert_eq!(a.unwrap().1.dense_min, b.unwrap().1.dense_min);
+    }
+
+    #[test]
+    fn probes_carry_breakdown_only_under_composite_policy() {
+        use crate::SelectionPolicy;
+
+        let base = gradient(24, 24);
+        let luma = color::extract_luminance(&base);
+        let strengths = [0.5f32, 1.0, 2.0, 3.0];
+
+        // GamutOnly (default): fast path, no per-probe breakdown.
+        let mut params = AutoSharpParams::photo(24, 24);
+        params.selection_policy = SelectionPolicy::GamutOnly;
+        let gamut = crate::run_probes_standalone(
+            base.pixels(), base.width(), base.height(), &luma, &strengths, &params, 0.0,
+        )
+        .unwrap();
+        assert!(gamut.iter().all(|s| s.breakdown.is_none()));
+
+        // Hybrid: per-probe breakdown must be populated.
+        params.selection_policy = SelectionPolicy::Hybrid;
+        let hybrid = crate::run_probes_standalone(
+            base.pixels(), base.width(), base.height(), &luma, &strengths, &params, 0.0,
+        )
+        .unwrap();
+        assert!(hybrid.iter().all(|s| s.breakdown.is_some()));
     }
 }

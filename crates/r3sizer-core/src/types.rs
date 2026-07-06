@@ -658,6 +658,14 @@ impl AutoSharpParams {
         self
     }
 
+    /// Whether the probe loop should compute a per-probe [`MetricBreakdown`].
+    ///
+    /// Only the composite-aware selection policies need it; the default
+    /// `GamutOnly` path skips it to keep probing fast.
+    pub(crate) fn needs_probe_breakdown(&self) -> bool {
+        self.selection_policy != SelectionPolicy::GamutOnly
+    }
+
     /// Validate that parameters are internally consistent. Called at pipeline entry.
     pub fn validate(&self) -> Result<(), CoreError> {
         if self.target_width == 0 || self.target_height == 0 {
