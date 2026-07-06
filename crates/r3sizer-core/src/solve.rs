@@ -268,7 +268,7 @@ fn select_best_qualifying<'a>(
             // Maximize strength (current behavior).
             qualifying
                 .iter()
-                .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                .max_by(|a, b| a.strength.total_cmp(&b.strength))
                 .copied()
         }
         SelectionPolicy::Hybrid | SelectionPolicy::CompositeOnly => {
@@ -281,13 +281,13 @@ fn select_best_qualifying<'a>(
                     .min_by(|a, b| {
                         let ca = composite_score_of(a);
                         let cb = composite_score_of(b);
-                        ca.partial_cmp(&cb).unwrap()
+                        ca.total_cmp(&cb)
                     })
                     .copied()
             } else {
                 qualifying
                     .iter()
-                    .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                    .max_by(|a, b| a.strength.total_cmp(&b.strength))
                     .copied()
             }
         }
@@ -301,7 +301,7 @@ fn select_least_bad(samples: &[ProbeSample], policy: SelectionPolicy) -> &ProbeS
             // Minimize gamut metric_value (current behavior).
             samples
                 .iter()
-                .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
+                .min_by(|a, b| a.metric_value.total_cmp(&b.metric_value))
                 .unwrap()
         }
         SelectionPolicy::Hybrid | SelectionPolicy::CompositeOnly => {
@@ -313,13 +313,13 @@ fn select_least_bad(samples: &[ProbeSample], policy: SelectionPolicy) -> &ProbeS
                     .min_by(|a, b| {
                         let ca = composite_score_of(a);
                         let cb = composite_score_of(b);
-                        ca.partial_cmp(&cb).unwrap()
+                        ca.total_cmp(&cb)
                     })
                     .unwrap()
             } else {
                 samples
                     .iter()
-                    .min_by(|a, b| a.metric_value.partial_cmp(&b.metric_value).unwrap())
+                    .min_by(|a, b| a.metric_value.total_cmp(&b.metric_value))
                     .unwrap()
             }
         }
@@ -587,5 +587,20 @@ mod tests {
             result_composite.selection_mode,
             result_hybrid.selection_mode
         );
+    }
+
+    #[test]
+    fn direct_search_does_not_panic_on_nan_metric() {
+        // One sample has a NaN metric_value (degenerate input). Ranking must
+        // not panic (partial_cmp(...).unwrap() would).
+        // All samples exceed budget (0.001), forcing select_least_bad to rank them.
+        let samples = vec![
+            ProbeSample { strength: 0.5, artifact_ratio: 0.001, metric_value: 0.010, breakdown: None },
+            ProbeSample { strength: 1.0, artifact_ratio: f32::NAN, metric_value: f32::NAN, breakdown: None },
+            ProbeSample { strength: 2.0, artifact_ratio: 0.002, metric_value: 0.020, breakdown: None },
+            ProbeSample { strength: 3.0, artifact_ratio: 0.005, metric_value: 0.030, breakdown: None },
+        ];
+        let result = find_sharpness_direct(&samples, 0.001).unwrap();
+        assert!(result.selected_strength.is_finite());
     }
 }
