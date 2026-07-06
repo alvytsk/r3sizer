@@ -399,7 +399,9 @@ pub enum FitStrategy {
 pub enum ClampPolicy {
     /// Hard clamp: values < 0.0 -> 0.0, values > 1.0 -> 1.0.
     Clamp,
-    /// Rescale entire image by its global maximum.
+    /// Rescale by `max(global maximum, 1.0)`: images already in `[0, 1]` pass
+    /// through unchanged; only images with values above 1.0 are compressed.
+    /// Negative values are floored to 0.
     Normalize,
 }
 

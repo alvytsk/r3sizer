@@ -653,14 +653,12 @@ fn apply_clamp_policy(image: &mut LinearRgbImage, policy: ClampPolicy) {
                 .iter()
                 .copied()
                 .fold(f32::NEG_INFINITY, f32::max);
-            if max_val > 0.0 {
-                for v in image.pixels_mut() {
-                    *v = (*v / max_val).max(0.0);
-                }
-            } else {
-                for v in image.pixels_mut() {
-                    *v = 0.0;
-                }
+            // Divide by max(global maximum, 1.0): in-gamut images (max <= 1.0)
+            // pass through unchanged; only values above 1.0 are compressed.
+            // Negatives are floored to 0.
+            let denom = max_val.max(1.0);
+            for v in image.pixels_mut() {
+                *v = (*v / denom).max(0.0);
             }
         }
     }
@@ -1775,5 +1773,34 @@ fn probe_one_reuse(
         artifact_ratio: p_total,
         metric_value,
         breakdown: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ClampPolicy;
+
+    #[test]
+    fn normalize_leaves_in_gamut_image_unchanged() {
+        // Max is 0.9 (< 1.0): the image is already in gamut, so it must pass
+        // through unchanged rather than being brightened.
+        let mut img = LinearRgbImage::new(1, 2, vec![0.1, 0.5, 0.9, 0.2, 0.4, 0.6]).unwrap();
+        let before = img.pixels().to_vec();
+        apply_clamp_policy(&mut img, ClampPolicy::Normalize);
+        for (a, b) in before.iter().zip(img.pixels()) {
+            assert!((a - b).abs() < 1e-6, "in-gamut value changed: {a} -> {b}");
+        }
+    }
+
+    #[test]
+    fn normalize_compresses_out_of_range_and_floors_negatives() {
+        // Max is 2.0 (> 1.0): everything scales by 1/2.0; the negative floors to 0.
+        let mut img = LinearRgbImage::new(1, 2, vec![2.0, 1.0, 0.0, -0.5, 0.5, 0.5]).unwrap();
+        apply_clamp_policy(&mut img, ClampPolicy::Normalize);
+        let p = img.pixels();
+        assert!((p[0] - 1.0).abs() < 1e-6); // 2.0 / 2.0
+        assert!((p[1] - 0.5).abs() < 1e-6); // 1.0 / 2.0
+        assert!((p[3] - 0.0).abs() < 1e-6); // -0.5 floored to 0
     }
 }
