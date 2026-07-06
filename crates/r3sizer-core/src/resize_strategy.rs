@@ -25,6 +25,19 @@ fn to_filter_type(kernel: ResizeKernel) -> image::imageops::FilterType {
     }
 }
 
+/// Collapse kernels that map to the same underlying resize operation.
+///
+/// `MitchellNetravali` currently aliases to the same `image`-crate filter as
+/// `CatmullRom` (see [`to_filter_type`]), so treat them as one operation: this
+/// avoids running the identical resize twice and reports the kernel actually
+/// used.  Lanczos3 stays distinct (it uses the staged `downscale` path).
+fn canonical_kernel(kernel: ResizeKernel) -> ResizeKernel {
+    match kernel {
+        ResizeKernel::MitchellNetravali => ResizeKernel::CatmullRom,
+        other => other,
+    }
+}
+
 /// Downscale using a specific kernel.
 pub fn downscale_with_kernel(
     src: &LinearRgbImage,
@@ -66,7 +79,8 @@ pub fn downscale_adaptive(
     // 1. Classify the source image
     let region_map = classify(src, classification);
 
-    // 2. Determine which distinct kernels are needed
+    // 2. Determine which distinct resize operations are needed (aliased
+    //    kernels collapse to a single canonical form).
     let all_kernels: Vec<ResizeKernel> = [
         kernel_table.flat,
         kernel_table.textured,
@@ -75,6 +89,7 @@ pub fn downscale_adaptive(
         kernel_table.risky_halo_zone,
     ]
     .into_iter()
+    .map(canonical_kernel)
     .collect::<BTreeSet<_>>()
     .into_iter()
     .collect();
@@ -118,7 +133,7 @@ pub fn downscale_adaptive(
             let sx = ((x as f32 + 0.5) * sw / target.width as f32).min(sw - 1.0) as u32;
             let sy = ((y as f32 + 0.5) * sh / target.height as f32).min(sh - 1.0) as u32;
             let region = region_map.get(sx, sy);
-            let kernel = kernel_table.kernel_for(region);
+            let kernel = canonical_kernel(kernel_table.kernel_for(region));
 
             let src_img = &kernel_results[&kernel];
             let src_data = src_img.pixels();
@@ -270,5 +285,30 @@ mod tests {
         .unwrap();
         assert_eq!(result.width(), 4);
         assert_eq!(diag.kernels_used, vec![ResizeKernel::CatmullRom]);
+    }
+
+    #[test]
+    fn adaptive_dedups_mitchell_into_catmullrom() {
+        // Mitchell and CatmullRom alias to the same filter; the table below has
+        // both, but only CatmullRom (their canonical form) + Lanczos3 should be
+        // resized/reported — never MitchellNetravali.
+        let src = gradient_image(32, 32);
+        let target = ImageSize { width: 8, height: 8 };
+        let table = KernelTable {
+            flat: ResizeKernel::MitchellNetravali,
+            textured: ResizeKernel::CatmullRom,
+            strong_edge: ResizeKernel::Lanczos3,
+            microtexture: ResizeKernel::CatmullRom,
+            risky_halo_zone: ResizeKernel::MitchellNetravali,
+        };
+        let (result, diag) =
+            downscale_adaptive(&src, target, &ClassificationParams::default(), &table).unwrap();
+        assert_eq!(result.width(), 8);
+        assert!(!diag.kernels_used.contains(&ResizeKernel::MitchellNetravali));
+        assert!(diag.kernels_used.contains(&ResizeKernel::CatmullRom));
+        // No key named "MitchellNetravali" in the per-kernel counts.
+        assert!(!diag.per_kernel_pixel_count.contains_key("MitchellNetravali"));
+        let total: u32 = diag.per_kernel_pixel_count.values().sum();
+        assert_eq!(total, 64);
     }
 }
