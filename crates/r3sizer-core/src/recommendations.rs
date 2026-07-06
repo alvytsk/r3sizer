@@ -623,6 +623,7 @@ mod tests {
             resize_strategy_diagnostics: None,
             chroma_guard: None,
             evaluator_result: None,
+            evaluator_cap: None,
             recommendations: Vec::new(),
             probe_pass_diagnostics: None,
             base_resize_quality: None,

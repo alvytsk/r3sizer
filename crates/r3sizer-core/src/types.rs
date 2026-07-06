@@ -1367,6 +1367,10 @@ pub struct AutoSharpDiagnostics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_result: Option<QualityEvaluation>,
 
+    /// Set when the evaluator's advisory strength cap lowered the final s\*.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_cap: Option<EvaluatorCapDiagnostics>,
+
     /// Actionable recommendations derived from pipeline diagnostics.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<Recommendation>,
@@ -1714,8 +1718,9 @@ pub struct ChromaPerRegionDiagnostics {
 
 /// Configuration for the quality evaluator.
 ///
-/// The evaluator runs after final sharpening and produces advisory diagnostics.
-/// It does **not** alter the pipeline's s* selection.
+/// The evaluator contributes an advisory strength cap that can lower the final
+/// s* (recorded in [`AutoSharpDiagnostics::evaluator_cap`] when it binds) and a
+/// post-hoc quality evaluation that is diagnostic-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1742,6 +1747,21 @@ pub struct ImageFeatures {
     pub laplacian_variance: f32,
     /// Shannon entropy of the 64-bin luminance histogram.
     pub luminance_histogram_entropy: f32,
+}
+
+/// Records that the advisory quality evaluator lowered the final sharpening
+/// strength below the solver's selected value.
+///
+/// Present only when the evaluator's strength cap actually bound; `None` when
+/// the solver's strength was already at or below the cap, or the evaluator was
+/// disabled.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct EvaluatorCapDiagnostics {
+    /// The evaluator's suggested strength ceiling.
+    pub cap: f32,
+    /// The solver's selected strength before the cap was applied.
+    pub strength_before_cap: f32,
 }
 
 /// Quality evaluation result from a [`QualityEvaluator`](crate::evaluator::QualityEvaluator).

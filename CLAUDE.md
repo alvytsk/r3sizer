@@ -52,7 +52,7 @@ Four crates with a strict dependency direction: `r3sizer-core` ← `r3sizer-io` 
 - `contrast.rs` — placeholder contrast leveling (percentile stretch); real formula unknown
 - `chroma_guard.rs` — soft chroma clamping with context-aware thresholds per region
 - `base_quality.rs` — resize quality scoring (edge retention, texture retention, ringing); `full_diagnostics` flag skips expensive source-side metrics in fast/balanced modes
-- `evaluator.rs` — heuristic quality evaluator (feature extraction + advisory strength cap)
+- `evaluator.rs` — heuristic quality evaluator: an advisory strength cap that can lower the final s\* (recorded in `AutoSharpDiagnostics::evaluator_cap` when it binds) plus a diagnostic-only post-sharpen quality score
 - `recommendations.rs` — diagnostic-driven parameter suggestions
 - `pipeline.rs` — orchestrates all stages in a **two-phase architecture**: `prepare_base` (resize, classify, baseline — cached as `PreparedBase`) and `process_from_prepared` (probing, fit, solve, sharpen). Also exposes `resolve_initial_strengths` and `resolve_dense_strengths` for JS-side TwoPass parallel probing, and `compute_probe_detail` / `run_probes_from_detail` for parallel probe workers that receive precomputed detail signal. Early stopping in coarse probing exits as soon as a P0 bracket is found. Detail precomputation (`D = input - blur(input)`) computes the Gaussian blur once and shares the result across coarse and dense phases. `PreparedBase` carries a `BaseParamsKey` fingerprint so cache reuse is safe across param changes. One-shot entry point `process_auto_sharp_downscale` remains for CLI use.
 

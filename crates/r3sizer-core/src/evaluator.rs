@@ -4,8 +4,10 @@
 //! Feature-flag gating is planned for a future release.
 //!
 //! Branch A: defines a `QualityEvaluator` trait and a hand-crafted
-//! `HeuristicEvaluator` implementation. The evaluator is purely
-//! diagnostic — it does not alter the pipeline's s* selection.
+//! `HeuristicEvaluator` implementation. The evaluator has two roles: an
+//! advisory strength cap that can lower the final s* (a genuine selection
+//! stage, recorded in `AutoSharpDiagnostics::evaluator_cap` when it binds) and
+//! a post-hoc quality evaluation that is purely diagnostic.
 //!
 //! The trait is designed for future extensibility: an ONNX-based
 //! implementation could be plugged in without changing the pipeline.
@@ -20,7 +22,9 @@ use crate::types::{ImageFeatures, LinearRgbImage, QualityEvaluation};
 /// Quality evaluator interface.
 ///
 /// Designed to be object-safe for dynamic dispatch, but the pipeline
-/// currently uses static dispatch via `HeuristicEvaluator`.
+/// currently uses static dispatch via `HeuristicEvaluator`.  `suggest_strength`
+/// feeds an advisory cap that can lower the final s*; `evaluate` produces a
+/// post-hoc, diagnostic-only quality score.
 pub trait QualityEvaluator: Send + Sync {
     /// Evaluate the quality of a sharpened image relative to the downscaled base.
     fn evaluate(

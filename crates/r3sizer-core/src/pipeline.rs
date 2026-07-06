@@ -24,7 +24,8 @@ use crate::{
     sharpen::{make_kernel, unsharp_mask_single_channel_with_kernel, unsharp_mask_with_kernel},
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
-    CoreError, DiagnosticsLevel, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
+    CoreError, DiagnosticsLevel, EvaluatorCapDiagnostics, FallbackReason, FitStatus, FitStrategy,
+    ImageSize, LinearRgbImage,
     MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
     RegionCoverage,
     RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
@@ -688,6 +689,27 @@ fn apply_clamp_policy(image: &mut LinearRgbImage, policy: ClampPolicy) {
     }
 }
 
+/// Apply the evaluator's advisory strength cap and record it when it binds.
+///
+/// The evaluator is an advisory *selection* stage: it may lower the final
+/// strength below the solver's value.  Returns the (possibly capped) strength
+/// and a diagnostic record that is `Some` only when the cap actually bound.
+fn apply_evaluator_cap(
+    solved_strength: f32,
+    cap: Option<f32>,
+) -> (f32, Option<EvaluatorCapDiagnostics>) {
+    match cap {
+        Some(c) if solved_strength > c => (
+            c,
+            Some(EvaluatorCapDiagnostics {
+                cap: c,
+                strength_before_cap: solved_strength,
+            }),
+        ),
+        _ => (solved_strength, None),
+    }
+}
+
 /// Post-probing pipeline: fit → solve → sharpen → metrics → diagnostics.
 fn finish_pipeline(
     prepared: &PreparedBase,
@@ -852,11 +874,9 @@ fn finish_pipeline(
         &solve_result.crossing_status,
     );
 
-    // Evaluator cap
-    let selected_strength = match prepared.evaluator_cap {
-        Some(cap) if solve_result.selected_strength > cap => cap,
-        _ => solve_result.selected_strength,
-    };
+    // Evaluator cap — advisory selection stage; recorded when it binds.
+    let (selected_strength, evaluator_cap_diag) =
+        apply_evaluator_cap(solve_result.selected_strength, prepared.evaluator_cap);
 
     // --- Final sharpening ---
     on_stage("sharpening");
@@ -1073,6 +1093,7 @@ fn finish_pipeline(
         resize_strategy_diagnostics: prepared.resize_strategy_diag.clone(), // contains Vec
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
+        evaluator_cap: evaluator_cap_diag,
         recommendations: Vec::new(),
         probe_pass_diagnostics,
         base_resize_quality: Some(prepared.base_resize_quality),
@@ -1858,6 +1879,28 @@ fn probe_one_reuse(
 mod tests {
     use super::*;
     use crate::ClampPolicy;
+
+    #[test]
+    fn evaluator_cap_records_when_it_binds() {
+        use crate::EvaluatorCapDiagnostics;
+
+        // Cap below solver strength → capped + recorded.
+        let (s, diag) = apply_evaluator_cap(1.0, Some(0.25));
+        assert!((s - 0.25).abs() < 1e-6);
+        let d: EvaluatorCapDiagnostics = diag.expect("cap should be recorded");
+        assert!((d.cap - 0.25).abs() < 1e-6);
+        assert!((d.strength_before_cap - 1.0).abs() < 1e-6);
+
+        // Cap at/above solver strength → no change, no record.
+        let (s, diag) = apply_evaluator_cap(0.2, Some(0.25));
+        assert!((s - 0.2).abs() < 1e-6);
+        assert!(diag.is_none());
+
+        // No cap → no change, no record.
+        let (s, diag) = apply_evaluator_cap(1.0, None);
+        assert!((s - 1.0).abs() < 1e-6);
+        assert!(diag.is_none());
+    }
 
     #[test]
     fn normalize_leaves_in_gamut_image_unchanged() {

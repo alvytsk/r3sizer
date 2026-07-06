@@ -3,7 +3,7 @@
 //! Run with:
 //!   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
 //!
-//! Output: web/src/types/generated.ts
+//! Output: web/src/shared/types/generated.ts
 
 #![cfg(feature = "typegen")]
 
@@ -14,8 +14,9 @@ use r3sizer_core::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
     BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
-    DiagnosticsLevel, EvaluationColorSpace, EvaluatorConfig, ExperimentalSharpenMode,
-    FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable, ImageFeatures, ImageSize,
+    DiagnosticsLevel, EvaluationColorSpace, EvaluatorCapDiagnostics, EvaluatorConfig,
+    ExperimentalSharpenMode, FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable,
+    ImageFeatures, ImageSize,
     IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable, MetricBreakdown,
     MetricComponent, MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig,
     ProbePassDiagnostics, ProbeSample, QualityEvaluation, Recommendation, RecommendationKind,
@@ -105,6 +106,7 @@ fn export_typescript_bindings() {
             ChromaPerRegionDiagnostics::decl(&cfg),
             ChromaGuardDiagnostics::decl(&cfg),
             EvaluatorConfig::decl(&cfg),
+            EvaluatorCapDiagnostics::decl(&cfg),
             ImageFeatures::decl(&cfg),
             QualityEvaluation::decl(&cfg),
             InputIngressDiagnostics::decl(&cfg),
@@ -185,8 +187,8 @@ fn export_typescript_bindings() {
     ));
 
     // Write to web directory
-    let out_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/types/generated.ts");
+    let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../web/src/shared/types/generated.ts");
     std::fs::write(&out_path, &output).expect("failed to write generated.ts");
 
     println!("✓ Wrote {}", out_path.display());
