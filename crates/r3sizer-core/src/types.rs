@@ -303,6 +303,11 @@ impl ProbeConfig {
                         "explicit probe list must have at least 4 values".into(),
                     ));
                 }
+                if v.iter().any(|&s| s <= 0.0) {
+                    return Err(CoreError::InvalidParams(
+                        "explicit probe values must all be positive".into(),
+                    ));
+                }
                 v.clone()
             }
             ProbeConfig::TwoPass { .. } => {
@@ -313,6 +318,14 @@ impl ProbeConfig {
             }
         };
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Reject fewer than 4 distinct values (e.g. an Explicit list of
+        // duplicates), which would otherwise produce a degenerate fit.
+        let distinct = values.windows(2).filter(|w| (w[1] - w[0]).abs() > 1e-9).count() + 1;
+        if distinct < 4 {
+            return Err(CoreError::InvalidParams(
+                "probe strengths must include at least 4 distinct values".into(),
+            ));
+        }
         Ok(values)
     }
 }
@@ -1962,5 +1975,27 @@ mod adaptive_tests {
         assert_eq!(rc.flat, 2);
         assert_eq!(rc.textured, 1);
         assert_eq!(rc.strong_edge, 1);
+    }
+
+    #[test]
+    fn explicit_rejects_non_positive_values() {
+        let cfg = ProbeConfig::Explicit(vec![0.5, 0.0, 1.0, 1.5]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+        let cfg = ProbeConfig::Explicit(vec![0.5, -0.2, 1.0, 1.5]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn explicit_rejects_fewer_than_four_distinct() {
+        // Four values but only two distinct.
+        let cfg = ProbeConfig::Explicit(vec![0.5, 0.5, 1.0, 1.0]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn explicit_accepts_four_distinct_positive() {
+        let cfg = ProbeConfig::Explicit(vec![0.25, 0.5, 1.0, 2.0]);
+        let out = cfg.resolve().unwrap();
+        assert_eq!(out, vec![0.25, 0.5, 1.0, 2.0]);
     }
 }
