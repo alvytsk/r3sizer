@@ -2,8 +2,8 @@ import { Download } from "lucide-react";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { type ExportFormat, useExportPrefsStore } from "@/entities/export-preferences";
-import { useImageStore } from "@/entities/image";
-import { useOutputStore } from "@/entities/output";
+import { useImageStore } from "@/entities/images";
+import { useOutputStore } from "@/entities/outputs";
 import { Button } from "@/shared/ui/button";
 
 const FORMAT_EXT: Record<ExportFormat, string> = {

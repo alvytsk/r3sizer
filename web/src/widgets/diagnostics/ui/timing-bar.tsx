@@ -1,4 +1,4 @@
-import type { StageTiming } from "@/shared/types/wasm-types";
+import type { StageTiming } from "@/shared/lib";
 
 interface StageEntry {
   key: string;

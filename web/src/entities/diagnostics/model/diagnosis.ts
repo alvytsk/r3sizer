@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { AutoSharpDiagnostics } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics } from "@/shared/lib";
 
 export type ChipVariant = "ok" | "warn" | "error" | "neutral";
 

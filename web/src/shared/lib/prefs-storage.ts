@@ -2,10 +2,10 @@
  * localStorage-backed preferences store (dimensions + export prefs).
  *
  * Lives in `shared/lib` so it can be consumed by multiple entity/feature slices
- * (`entities/image` for target dimensions, `entities/export-preferences` for
+ * (`entities/images` for target dimensions, `entities/export-preferences` for
  * format/quality) without introducing cross-slice coupling.
  */
-import { DEFAULT_PARAMS } from "@/shared/types/wasm-types";
+import { DEFAULT_PARAMS } from "./types/wasm-types";
 
 const PREFS_KEY = "r3sizer-prefs";
 

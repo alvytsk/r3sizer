@@ -45,8 +45,8 @@ TypeScript bindings and commit the result:
 
 ```sh
 cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
-# Writes web/src/types/generated.ts
-git add web/src/types/generated.ts
+# Writes web/src/shared/lib/types/generated.ts
+git add web/src/shared/lib/types/generated.ts
 ```
 
 ## Project structure
@@ -75,7 +75,7 @@ Before opening a PR, make sure:
 - [ ] `cargo doc --workspace --no-deps` is warning-free (`RUSTDOCFLAGS="-D warnings"`)
 - [ ] New public API has doc comments; internal helpers don't need them
 - [ ] Unsafe code has a `// SAFETY:` comment explaining the invariant
-- [ ] If you changed `types.rs`, regenerated `web/src/types/generated.ts`
+- [ ] If you changed `types.rs`, regenerated `web/src/shared/lib/types/generated.ts`
 
 CI enforces all of the above on every push and PR.
 

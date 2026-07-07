@@ -1,9 +1,8 @@
 import { create } from "zustand";
-import type { DecodedInput } from "@/shared/api/processing";
-import { processingClient } from "@/shared/api/processing";
-import { loadDimsForOrientation, saveDims } from "@/shared/lib/prefs-storage";
-import type { AutoSharpParams } from "@/shared/types/wasm-types";
-import { DEFAULT_PARAMS } from "@/shared/types/wasm-types";
+import type { DecodedInput } from "@/shared/api";
+import { processingClient } from "@/shared/api";
+import type { AutoSharpParams } from "@/shared/lib";
+import { DEFAULT_PARAMS, loadDimsForOrientation, saveDims } from "@/shared/lib";
 
 /**
  * Image entity — the decoded input image together with the sharpen/resize

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AutoSharpDiagnostics } from "@/shared/types/wasm-types";
+import type { AutoSharpDiagnostics } from "@/shared/lib";
 
 /* ---------- math helpers ---------- */
 
@@ -118,7 +118,7 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
       d += `${i === 0 ? "M" : "L"}${sx(p.s).toFixed(2)} ${sy(p.fitted).toFixed(2)} `;
     }
     return d.trim();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // biome-ignore lint/correctness/useExhaustiveDependencies: sx/sy are per-render scale helpers, intentionally tracked
   }, [curveData, sy, sx]);
 
   const withinBudget = probeData.filter((d) => d.metric_value <= diagnostics.target_artifact_ratio);
@@ -137,7 +137,7 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
       setSelStart(invX(px));
       setSelCurrent(invX(px));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // biome-ignore lint/correctness/useExhaustiveDependencies: invX is a per-render scale helper, intentionally tracked
     [plotW, invX],
   );
 
@@ -161,7 +161,7 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
       }
       if (best) setHover({ sx: sx(best.s), sy: sy(best.v), s: best.s, v: best.v });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // biome-ignore lint/correctness/useExhaustiveDependencies: sx/sy/invX are per-render scale helpers, intentionally tracked
     [selStart, plotW, probeData, sx, sy, invX],
   );
 

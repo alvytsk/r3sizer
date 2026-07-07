@@ -1,4 +1,4 @@
-import type { AutoSharpParams, ProcessResult } from "@/shared/types/wasm-types";
+import type { AutoSharpParams, ProcessResult } from "@/shared/lib";
 import { CancellationToken } from "./errors";
 import { bitmapToRgba, decodeToBitmap, extractStripes, makePreview, planStripes } from "./ingest";
 import { destroyProbePool } from "./probe-pool";

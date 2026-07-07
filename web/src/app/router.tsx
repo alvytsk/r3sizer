@@ -1,5 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- router config module, not HMR-eligible */
-
 import {
   createRootRoute,
   createRoute,
@@ -8,13 +6,13 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
-import App from "@/pages/studio/ui/studio-page";
+import StudioPage from "@/pages/studio";
 
 /**
  * AlgorithmPage is lazy-loaded so its KaTeX dependency (JS + ~1 MB of fonts)
  * lands in a separate chunk fetched only when the user opens /algorithm.
  */
-const AlgorithmPage = lazy(() => import("@/pages/algorithm/ui/algorithm-page"));
+const AlgorithmPage = lazy(() => import("@/pages/algorithm"));
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -28,7 +26,7 @@ const rootRoute = createRootRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: App,
+  component: StudioPage,
 });
 
 const algorithmRoute = createRoute({

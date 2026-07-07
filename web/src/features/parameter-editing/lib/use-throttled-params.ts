@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useImageStore } from "@/entities/image";
-import type { AutoSharpParams } from "@/shared/types/wasm-types";
+import { useImageStore } from "@/entities/images";
+import type { AutoSharpParams } from "@/shared/lib";
 
 type AnyFn = (...args: never[]) => void;
 

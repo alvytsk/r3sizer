@@ -1,4 +1,4 @@
-import type { ProcessResult } from "@/shared/types/wasm-types";
+import type { ProcessResult } from "@/shared/lib";
 import type { CancellationToken } from "./errors";
 import { CancelledError } from "./errors";
 import type { BaseData } from "./probe-pool";

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { loadPrefs, savePrefs } from "@/shared/lib/prefs-storage";
+import { loadPrefs, savePrefs } from "@/shared/lib";
 
 /** Output container format chosen by the user (persisted across sessions). */
 export type ExportFormat = "jpeg" | "png" | "webp";

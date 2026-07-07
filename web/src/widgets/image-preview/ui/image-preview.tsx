@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useImageStore } from "@/entities/image";
-import { useOutputStore } from "@/entities/output";
+import { useImageStore } from "@/entities/images";
+import { useOutputStore } from "@/entities/outputs";
 
 function renderToCanvas(
   canvas: HTMLCanvasElement,

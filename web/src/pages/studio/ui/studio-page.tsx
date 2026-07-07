@@ -1,8 +1,8 @@
 import { AlertTriangle, BarChart3, ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useImageStore } from "@/entities/image";
-import { useOutputStore } from "@/entities/output";
+import { useImageStore } from "@/entities/images";
+import { useOutputStore } from "@/entities/outputs";
 import { ProcessingOverlay, useProcessingStore } from "@/features/image-processing";
 import { ParameterPanel } from "@/features/parameter-editing";
 import { ErrorBoundary } from "@/shared/ui/error-boundary";

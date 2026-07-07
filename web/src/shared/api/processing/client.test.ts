@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AutoSharpParams } from "@/shared/types/wasm-types";
-import { DEFAULT_PARAMS } from "@/shared/types/wasm-types";
+import type { AutoSharpParams } from "@/shared/lib";
+import { DEFAULT_PARAMS } from "@/shared/lib";
 
 // Mock everything below the facade.
 vi.mock("./wasm", () => ({

@@ -12,7 +12,7 @@
       "**",
       "!!dist",
       "!src/shared/api/processing/wasm-pkg",
-      "!src/shared/types/generated.ts"
+      "!src/shared/lib/types/generated.ts"
     ]
   },
   "formatter": {
