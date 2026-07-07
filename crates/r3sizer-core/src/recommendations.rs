@@ -369,6 +369,13 @@ fn rule_lower_sigma(
 ///
 /// Only fires when the solver used fallback (BestSampleWithinBudget or
 /// LeastBadSample) — polynomial root selection is identical across policies.
+///
+/// **Dormant by design under policy-only breakdown gating:** per-probe
+/// `MetricBreakdown`s are only computed when `selection_policy != GamutOnly`,
+/// but this rule only runs while the current policy *is* `GamutOnly`.  The two
+/// never overlap, so with the current gating this rule produces no output.  It
+/// stays in place for when per-probe breakdowns become available under
+/// `GamutOnly` (e.g. a future opt-in).
 fn rule_switch_to_hybrid(
     diag: &AutoSharpDiagnostics,
     params: &AutoSharpParams,
@@ -616,6 +623,7 @@ mod tests {
             resize_strategy_diagnostics: None,
             chroma_guard: None,
             evaluator_result: None,
+            evaluator_cap: None,
             recommendations: Vec::new(),
             probe_pass_diagnostics: None,
             base_resize_quality: None,
