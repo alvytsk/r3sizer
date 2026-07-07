@@ -320,7 +320,11 @@ impl ProbeConfig {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         // Reject fewer than 4 distinct values (e.g. an Explicit list of
         // duplicates), which would otherwise produce a degenerate fit.
-        let distinct = values.windows(2).filter(|w| (w[1] - w[0]).abs() > 1e-9).count() + 1;
+        let distinct = values
+            .windows(2)
+            .filter(|w| (w[1] - w[0]).abs() > 1e-9)
+            .count()
+            + 1;
         if distinct < 4 {
             return Err(CoreError::InvalidParams(
                 "probe strengths must include at least 4 distinct values".into(),

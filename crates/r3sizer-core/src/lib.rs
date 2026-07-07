@@ -46,15 +46,14 @@ pub use types::{
     BaseResizeQuality, ChromaGuardDiagnostics, ChromaPerRegionDiagnostics, ChromaRegionClampStats,
     ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, CubicPolynomial,
     DiagnosticsLevel, EvaluationColorSpace, EvaluatorCapDiagnostics, EvaluatorConfig,
-    ExperimentalSharpenMode,
-    FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap, GainTable, ImageFeatures,
-    ImageSize, IngestDiagnostics, InputColorSpace, InputIngressDiagnostics, KernelTable,
-    LinearRgbImage, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch,
-    PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, QualityEvaluation,
-    Recommendation, RecommendationKind, RegionClass, RegionCoverage, RegionMap, ResizeKernel,
-    ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams,
-    SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
-    REGION_CLASS_COUNT,
+    ExperimentalSharpenMode, FallbackReason, FitQuality, FitStatus, FitStrategy, GainMap,
+    GainTable, ImageFeatures, ImageSize, IngestDiagnostics, InputColorSpace,
+    InputIngressDiagnostics, KernelTable, LinearRgbImage, MetricBreakdown, MetricComponent,
+    MetricMode, MetricWeights, ParamPatch, PipelineMode, ProbeConfig, ProbePassDiagnostics,
+    ProbeSample, ProcessOutput, QualityEvaluation, Recommendation, RecommendationKind, RegionClass,
+    RegionCoverage, RegionMap, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics,
+    RobustnessFlags, SaturationGuardParams, SelectionMode, SelectionPolicy, Severity, SharpenMode,
+    SharpenStrategy, StageTiming, REGION_CLASS_COUNT,
 };
 
 // ---------------------------------------------------------------------------

@@ -25,10 +25,9 @@ use crate::{
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
     CoreError, DiagnosticsLevel, EvaluatorCapDiagnostics, FallbackReason, FitStatus, FitStrategy,
-    ImageSize, LinearRgbImage,
-    MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput,
-    RegionCoverage,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
+    ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics,
+    ProbeSample, ProcessOutput, RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode,
+    SharpenStrategy, StageTiming,
 };
 
 /// Pipeline-internal result of a sharpening step.
@@ -1997,7 +1996,13 @@ mod tests {
         let mut params = AutoSharpParams::photo(24, 24);
         params.selection_policy = SelectionPolicy::GamutOnly;
         let gamut = crate::run_probes_standalone(
-            base.pixels(), base.width(), base.height(), &luma, &strengths, &params, 0.0,
+            base.pixels(),
+            base.width(),
+            base.height(),
+            &luma,
+            &strengths,
+            &params,
+            0.0,
         )
         .unwrap();
         assert!(gamut.iter().all(|s| s.breakdown.is_none()));
@@ -2005,7 +2010,13 @@ mod tests {
         // Hybrid: per-probe breakdown must be populated.
         params.selection_policy = SelectionPolicy::Hybrid;
         let hybrid = crate::run_probes_standalone(
-            base.pixels(), base.width(), base.height(), &luma, &strengths, &params, 0.0,
+            base.pixels(),
+            base.width(),
+            base.height(),
+            &luma,
+            &strengths,
+            &params,
+            0.0,
         )
         .unwrap();
         assert!(hybrid.iter().all(|s| s.breakdown.is_some()));

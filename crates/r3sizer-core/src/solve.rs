@@ -595,10 +595,30 @@ mod tests {
         // not panic (partial_cmp(...).unwrap() would).
         // All samples exceed budget (0.001), forcing select_least_bad to rank them.
         let samples = vec![
-            ProbeSample { strength: 0.5, artifact_ratio: 0.001, metric_value: 0.010, breakdown: None },
-            ProbeSample { strength: 1.0, artifact_ratio: f32::NAN, metric_value: f32::NAN, breakdown: None },
-            ProbeSample { strength: 2.0, artifact_ratio: 0.002, metric_value: 0.020, breakdown: None },
-            ProbeSample { strength: 3.0, artifact_ratio: 0.005, metric_value: 0.030, breakdown: None },
+            ProbeSample {
+                strength: 0.5,
+                artifact_ratio: 0.001,
+                metric_value: 0.010,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 1.0,
+                artifact_ratio: f32::NAN,
+                metric_value: f32::NAN,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 2.0,
+                artifact_ratio: 0.002,
+                metric_value: 0.020,
+                breakdown: None,
+            },
+            ProbeSample {
+                strength: 3.0,
+                artifact_ratio: 0.005,
+                metric_value: 0.030,
+                breakdown: None,
+            },
         ];
         let result = find_sharpness_direct(&samples, 0.001).unwrap();
         assert!(result.selected_strength.is_finite());

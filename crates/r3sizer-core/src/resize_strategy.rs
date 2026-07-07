@@ -293,7 +293,10 @@ mod tests {
         // both, but only CatmullRom (their canonical form) + Lanczos3 should be
         // resized/reported — never MitchellNetravali.
         let src = gradient_image(32, 32);
-        let target = ImageSize { width: 8, height: 8 };
+        let target = ImageSize {
+            width: 8,
+            height: 8,
+        };
         let table = KernelTable {
             flat: ResizeKernel::MitchellNetravali,
             textured: ResizeKernel::CatmullRom,
@@ -307,7 +310,9 @@ mod tests {
         assert!(!diag.kernels_used.contains(&ResizeKernel::MitchellNetravali));
         assert!(diag.kernels_used.contains(&ResizeKernel::CatmullRom));
         // No key named "MitchellNetravali" in the per-kernel counts.
-        assert!(!diag.per_kernel_pixel_count.contains_key("MitchellNetravali"));
+        assert!(!diag
+            .per_kernel_pixel_count
+            .contains_key("MitchellNetravali"));
         let total: u32 = diag.per_kernel_pixel_count.values().sum();
         assert_eq!(total, 64);
     }
