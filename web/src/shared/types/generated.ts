@@ -144,9 +144,10 @@ evaluation_color_space?: EvaluationColorSpace | null,
  */
 evaluator_config?: EvaluatorConfig | null, 
 /**
- * Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
- * called automatically during [`AutoSharpParams::validate`], overriding
- * the speed-sensitive fields before pipeline execution.
+ * Performance-quality tradeoff.  Not applied automatically: call
+ * [`AutoSharpParams::resolved`] before pipeline entry to fold this mode's
+ * overrides into the speed-sensitive fields (as the CLI and WASM callers
+ * do).  [`AutoSharpParams::validate`] does not modify params.
  */
 pipeline_mode?: PipelineMode | null, };
 
@@ -414,6 +415,10 @@ chroma_guard?: ChromaGuardDiagnostics | null,
  */
 evaluator_result?: QualityEvaluation | null, 
 /**
+ * Set when the evaluator's advisory strength cap lowered the final s\*.
+ */
+evaluator_cap?: EvaluatorCapDiagnostics | null, 
+/**
  * Actionable recommendations derived from pipeline diagnostics.
  */
 recommendations?: Array<Recommendation>, 
@@ -523,6 +528,16 @@ effective_threshold_max?: number | null,
 per_region?: ChromaPerRegionDiagnostics | null, };
 
 export type EvaluatorConfig = "heuristic";
+
+export type EvaluatorCapDiagnostics = { 
+/**
+ * The evaluator's suggested strength ceiling.
+ */
+cap: number, 
+/**
+ * The solver's selected strength before the cap was applied.
+ */
+strength_before_cap: number, };
 
 export type ImageFeatures = { 
 /**

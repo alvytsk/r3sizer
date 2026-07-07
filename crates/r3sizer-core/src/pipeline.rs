@@ -24,9 +24,10 @@ use crate::{
     sharpen::{make_kernel, unsharp_mask_single_channel_with_kernel, unsharp_mask_with_kernel},
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
-    CoreError, DiagnosticsLevel, FallbackReason, FitStatus, FitStrategy, ImageSize, LinearRgbImage,
-    MetricMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, ProcessOutput, RegionCoverage,
-    RobustnessFlags, SelectionMode, SharpenMode, SharpenStrategy, StageTiming,
+    CoreError, DiagnosticsLevel, EvaluatorCapDiagnostics, FallbackReason, FitStatus, FitStrategy,
+    ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics,
+    ProbeSample, ProcessOutput, RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode,
+    SharpenStrategy, StageTiming,
 };
 
 /// Pipeline-internal result of a sharpening step.
@@ -379,6 +380,9 @@ pub fn process_from_prepared(
 /// The `probing_us` field should reflect the wall-clock time of the parallel
 /// probing phase (not the sum of per-worker times).
 ///
+/// `probe_samples` may be supplied in any order; they are sorted internally by
+/// ascending strength before fitting and solving.
+///
 /// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
 /// (useful for TwoPass parallel probing where JS resolved the dense window).
 pub fn process_from_prepared_with_probes(
@@ -421,6 +425,10 @@ pub fn resolve_initial_strengths(params: &AutoSharpParams) -> Result<Vec<f32>, C
 ///
 /// Only meaningful for [`ProbeConfig::TwoPass`].  Returns `Ok(None)` for other
 /// configs (no second pass needed).
+///
+/// `coarse_samples` may be supplied in any order (e.g. collected out of order
+/// by the parallel probe pool); they are sorted internally by ascending
+/// strength before the crossing window is located.
 pub fn resolve_dense_strengths(
     coarse_samples: &[ProbeSample],
     params: &AutoSharpParams,
@@ -434,8 +442,16 @@ pub fn resolve_dense_strengths(
             dense_count,
             window_margin,
         } => {
+            // Samples may arrive in any order (parallel probe pool); the
+            // window search assumes ascending strength.
+            let mut sorted = coarse_samples.to_vec();
+            sorted.sort_by(|a, b| {
+                a.strength
+                    .partial_cmp(&b.strength)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let (dense_lo, dense_hi) = find_dense_window(
-                coarse_samples,
+                &sorted,
                 effective_p0,
                 *coarse_min,
                 *coarse_max,
@@ -482,6 +498,8 @@ pub fn run_probes_standalone(
         baseline_artifact_ratio,
         &kernel,
         None,
+        params.needs_probe_breakdown(),
+        params.metric_weights,
     )
 }
 
@@ -547,6 +565,8 @@ pub fn run_probes_from_detail(
         baseline_artifact_ratio,
         metric_mode: params.metric_mode,
         metric_override: None,
+        need_breakdown: params.needs_probe_breakdown(),
+        metric_weights: params.metric_weights,
     };
     let mut scratch = ProbeScratch {
         luma: match params.sharpen_mode {
@@ -613,6 +633,8 @@ fn run_probes_for_prepared(
             baseline_artifact_ratio,
             &kernel,
             metric_override,
+            params.needs_probe_breakdown(),
+            params.metric_weights,
         )?,
         _ => {
             let strengths = params.probe_strengths.resolve()?;
@@ -626,6 +648,8 @@ fn run_probes_for_prepared(
                 baseline_artifact_ratio,
                 &kernel,
                 metric_override,
+                params.needs_probe_breakdown(),
+                params.metric_weights,
             )?;
             (samples, None)
         }
@@ -653,16 +677,35 @@ fn apply_clamp_policy(image: &mut LinearRgbImage, policy: ClampPolicy) {
                 .iter()
                 .copied()
                 .fold(f32::NEG_INFINITY, f32::max);
-            if max_val > 0.0 {
-                for v in image.pixels_mut() {
-                    *v = (*v / max_val).max(0.0);
-                }
-            } else {
-                for v in image.pixels_mut() {
-                    *v = 0.0;
-                }
+            // Divide by max(global maximum, 1.0): in-gamut images (max <= 1.0)
+            // pass through unchanged; only values above 1.0 are compressed.
+            // Negatives are floored to 0.
+            let denom = max_val.max(1.0);
+            for v in image.pixels_mut() {
+                *v = (*v / denom).max(0.0);
             }
         }
+    }
+}
+
+/// Apply the evaluator's advisory strength cap and record it when it binds.
+///
+/// The evaluator is an advisory *selection* stage: it may lower the final
+/// strength below the solver's value.  Returns the (possibly capped) strength
+/// and a diagnostic record that is `Some` only when the cap actually bound.
+fn apply_evaluator_cap(
+    solved_strength: f32,
+    cap: Option<f32>,
+) -> (f32, Option<EvaluatorCapDiagnostics>) {
+    match cap {
+        Some(c) if solved_strength > c => (
+            c,
+            Some(EvaluatorCapDiagnostics {
+                cap: c,
+                strength_before_cap: solved_strength,
+            }),
+        ),
+        _ => (solved_strength, None),
     }
 }
 
@@ -690,10 +733,19 @@ fn finish_pipeline(
         .map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
 
     let ProbeResult {
-        samples: probe_samples,
+        samples: mut probe_samples,
         pass_diagnostics: probe_pass_diagnostics,
         probing_us,
     } = probe_result;
+
+    // Samples may arrive unsorted (externally-collected parallel probes).
+    // Downstream fit/solve/monotonicity/window logic assumes ascending
+    // strength, so sort defensively (idempotent for already-sorted input).
+    probe_samples.sort_by(|a, b| {
+        a.strength
+            .partial_cmp(&b.strength)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // --- Fit + Solve ---
     let s_min = if matches!(params.metric_mode, MetricMode::RelativeToBase) {
@@ -821,11 +873,9 @@ fn finish_pipeline(
         &solve_result.crossing_status,
     );
 
-    // Evaluator cap
-    let selected_strength = match prepared.evaluator_cap {
-        Some(cap) if solve_result.selected_strength > cap => cap,
-        _ => solve_result.selected_strength,
-    };
+    // Evaluator cap — advisory selection stage; recorded when it binds.
+    let (selected_strength, evaluator_cap_diag) =
+        apply_evaluator_cap(solve_result.selected_strength, prepared.evaluator_cap);
 
     // --- Final sharpening ---
     on_stage("sharpening");
@@ -988,6 +1038,7 @@ fn finish_pipeline(
     // --- Assemble diagnostics ---
     // Total timing includes pre-computed stages from PreparedBase.
     let full_total_us = total_us
+        + probing_us
         + prepared.resize_us
         + prepared.base_quality_us
         + prepared.contrast_us
@@ -1041,6 +1092,7 @@ fn finish_pipeline(
         resize_strategy_diagnostics: prepared.resize_strategy_diag.clone(), // contains Vec
         chroma_guard: _chroma_guard_diag,
         evaluator_result: _evaluator_result,
+        evaluator_cap: evaluator_cap_diag,
         recommendations: Vec::new(),
         probe_pass_diagnostics,
         base_resize_quality: Some(prepared.base_resize_quality),
@@ -1138,6 +1190,8 @@ fn probe_strengths(
     baseline_artifact_ratio: f32,
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    need_breakdown: bool,
+    metric_weights: MetricWeights,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     use crate::sharpen;
 
@@ -1162,6 +1216,8 @@ fn probe_strengths(
         baseline_artifact_ratio,
         metric_mode,
         metric_override,
+        need_breakdown,
+        metric_weights,
     };
 
     #[cfg(feature = "parallel")]
@@ -1622,6 +1678,8 @@ fn run_two_pass_probing(
     baseline_artifact_ratio: f32,
     kernel: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    need_breakdown: bool,
+    metric_weights: MetricWeights,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
     use crate::sharpen;
 
@@ -1653,6 +1711,8 @@ fn run_two_pass_probing(
         baseline_artifact_ratio,
         metric_mode,
         metric_override,
+        need_breakdown,
+        metric_weights,
     };
     let mut scratch = ProbeScratch {
         luma: match sharpen_mode {
@@ -1727,6 +1787,10 @@ struct ProbeContext<'a> {
     baseline_artifact_ratio: f32,
     metric_mode: MetricMode,
     metric_override: Option<&'a (dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
+    /// Compute a per-probe [`MetricBreakdown`] (composite policies / diagnostics).
+    need_breakdown: bool,
+    /// Weights for the composite score in the per-probe breakdown.
+    metric_weights: MetricWeights,
 }
 
 /// Mutable scratch buffers reused across probes to avoid per-probe allocation.
@@ -1770,10 +1834,191 @@ fn probe_one_reuse(
         None => crate::metrics::compute_selection_metric(&scratch.rgb, ctx.artifact_metric),
     };
     let metric_value = compute_metric_value(p_total, ctx.baseline_artifact_ratio, ctx.metric_mode);
+
+    let breakdown = if ctx.need_breakdown {
+        // luma_sharpened: reuse scratch.luma in Lightness mode; extract in RGB mode.
+        let sharp_luma_owned;
+        let sharp_luma: &[f32] = match ctx.sharpen_mode {
+            SharpenMode::Lightness => &scratch.luma,
+            SharpenMode::Rgb => {
+                sharp_luma_owned = color::extract_luminance(&scratch.rgb);
+                &sharp_luma_owned
+            }
+        };
+        // luma_original: prefer precomputed base luminance, else extract.
+        let base_luma_owned;
+        let base_luma: &[f32] = match ctx.base_luminance {
+            Some(l) => l,
+            None => {
+                base_luma_owned = color::extract_luminance(ctx.base);
+                &base_luma_owned
+            }
+        };
+        Some(crate::metrics::compute_metric_breakdown(
+            &scratch.rgb,
+            ctx.base,
+            base_luma,
+            sharp_luma,
+            ctx.artifact_metric,
+            &ctx.metric_weights,
+        ))
+    } else {
+        None
+    };
+
     ProbeSample {
         strength,
         artifact_ratio: p_total,
         metric_value,
-        breakdown: None,
+        breakdown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ClampPolicy;
+
+    #[test]
+    fn evaluator_cap_records_when_it_binds() {
+        use crate::EvaluatorCapDiagnostics;
+
+        // Cap below solver strength → capped + recorded.
+        let (s, diag) = apply_evaluator_cap(1.0, Some(0.25));
+        assert!((s - 0.25).abs() < 1e-6);
+        let d: EvaluatorCapDiagnostics = diag.expect("cap should be recorded");
+        assert!((d.cap - 0.25).abs() < 1e-6);
+        assert!((d.strength_before_cap - 1.0).abs() < 1e-6);
+
+        // Cap at/above solver strength → no change, no record.
+        let (s, diag) = apply_evaluator_cap(0.2, Some(0.25));
+        assert!((s - 0.2).abs() < 1e-6);
+        assert!(diag.is_none());
+
+        // No cap → no change, no record.
+        let (s, diag) = apply_evaluator_cap(1.0, None);
+        assert!((s - 1.0).abs() < 1e-6);
+        assert!(diag.is_none());
+    }
+
+    #[test]
+    fn normalize_leaves_in_gamut_image_unchanged() {
+        // Max is 0.9 (< 1.0): the image is already in gamut, so it must pass
+        // through unchanged rather than being brightened.
+        let mut img = LinearRgbImage::new(1, 2, vec![0.1, 0.5, 0.9, 0.2, 0.4, 0.6]).unwrap();
+        let before = img.pixels().to_vec();
+        apply_clamp_policy(&mut img, ClampPolicy::Normalize);
+        for (a, b) in before.iter().zip(img.pixels()) {
+            assert!((a - b).abs() < 1e-6, "in-gamut value changed: {a} -> {b}");
+        }
+    }
+
+    #[test]
+    fn normalize_compresses_out_of_range_and_floors_negatives() {
+        // Max is 2.0 (> 1.0): everything scales by 1/2.0; the negative floors to 0.
+        let mut img = LinearRgbImage::new(1, 2, vec![2.0, 1.0, 0.0, -0.5, 0.5, 0.5]).unwrap();
+        apply_clamp_policy(&mut img, ClampPolicy::Normalize);
+        let p = img.pixels();
+        assert!((p[0] - 1.0).abs() < 1e-6); // 2.0 / 2.0
+        assert!((p[1] - 0.5).abs() < 1e-6); // 1.0 / 2.0
+        assert!((p[3] - 0.0).abs() < 1e-6); // -0.5 floored to 0
+    }
+
+    fn gradient(w: u32, h: u32) -> LinearRgbImage {
+        let mut data = vec![0.0f32; (w * h * 3) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let idx = ((y * w + x) * 3) as usize;
+                data[idx] = x as f32 / w as f32;
+                data[idx + 1] = y as f32 / h as f32;
+                data[idx + 2] = 0.5;
+            }
+        }
+        LinearRgbImage::new(w, h, data).unwrap()
+    }
+
+    #[test]
+    fn total_time_includes_probing() {
+        // 256x256 source so probing over ~11 probes is reliably > 1µs.
+        let img = gradient(256, 256);
+        let params = AutoSharpParams::photo(64, 64);
+        let out = crate::process_auto_sharp_downscale(&img, &params).unwrap();
+        let t = &out.diagnostics.timing;
+        assert!(t.probing_us > 0, "probing_us should be measured");
+        assert!(
+            t.total_us >= t.probing_us,
+            "total_us ({}) must include probing_us ({})",
+            t.total_us,
+            t.probing_us
+        );
+    }
+
+    fn sample(strength: f32, metric_value: f32) -> ProbeSample {
+        ProbeSample {
+            strength,
+            artifact_ratio: metric_value,
+            metric_value,
+            breakdown: None,
+        }
+    }
+
+    #[test]
+    fn resolve_dense_strengths_tolerates_unsorted_input() {
+        // TwoPass params so resolve_dense_strengths returns Some.
+        let params = AutoSharpParams::photo(16, 16);
+
+        // Crossing of p0=0.005 lies between strengths 0.5 (0.002) and 0.8 (0.010).
+        let sorted = vec![
+            sample(0.2, 0.001),
+            sample(0.5, 0.002),
+            sample(0.8, 0.010),
+            sample(1.0, 0.020),
+        ];
+        let mut unsorted = sorted.clone();
+        unsorted.swap(0, 3);
+        unsorted.swap(1, 2);
+
+        let a = resolve_dense_strengths(&sorted, &params, 0.005).unwrap();
+        let b = resolve_dense_strengths(&unsorted, &params, 0.005).unwrap();
+        // Same dense window regardless of input order.
+        assert_eq!(a.unwrap().1.dense_min, b.unwrap().1.dense_min);
+    }
+
+    #[test]
+    fn probes_carry_breakdown_only_under_composite_policy() {
+        use crate::SelectionPolicy;
+
+        let base = gradient(24, 24);
+        let luma = color::extract_luminance(&base);
+        let strengths = [0.5f32, 1.0, 2.0, 3.0];
+
+        // GamutOnly (default): fast path, no per-probe breakdown.
+        let mut params = AutoSharpParams::photo(24, 24);
+        params.selection_policy = SelectionPolicy::GamutOnly;
+        let gamut = crate::run_probes_standalone(
+            base.pixels(),
+            base.width(),
+            base.height(),
+            &luma,
+            &strengths,
+            &params,
+            0.0,
+        )
+        .unwrap();
+        assert!(gamut.iter().all(|s| s.breakdown.is_none()));
+
+        // Hybrid: per-probe breakdown must be populated.
+        params.selection_policy = SelectionPolicy::Hybrid;
+        let hybrid = crate::run_probes_standalone(
+            base.pixels(),
+            base.width(),
+            base.height(),
+            &luma,
+            &strengths,
+            &params,
+            0.0,
+        )
+        .unwrap();
+        assert!(hybrid.iter().all(|s| s.breakdown.is_some()));
     }
 }

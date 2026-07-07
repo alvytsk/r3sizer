@@ -303,6 +303,11 @@ impl ProbeConfig {
                         "explicit probe list must have at least 4 values".into(),
                     ));
                 }
+                if v.iter().any(|&s| s <= 0.0) {
+                    return Err(CoreError::InvalidParams(
+                        "explicit probe values must all be positive".into(),
+                    ));
+                }
                 v.clone()
             }
             ProbeConfig::TwoPass { .. } => {
@@ -313,6 +318,18 @@ impl ProbeConfig {
             }
         };
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Reject fewer than 4 distinct values (e.g. an Explicit list of
+        // duplicates), which would otherwise produce a degenerate fit.
+        let distinct = values
+            .windows(2)
+            .filter(|w| (w[1] - w[0]).abs() > 1e-9)
+            .count()
+            + 1;
+        if distinct < 4 {
+            return Err(CoreError::InvalidParams(
+                "probe strengths must include at least 4 distinct values".into(),
+            ));
+        }
         Ok(values)
     }
 }
@@ -386,7 +403,9 @@ pub enum FitStrategy {
 pub enum ClampPolicy {
     /// Hard clamp: values < 0.0 -> 0.0, values > 1.0 -> 1.0.
     Clamp,
-    /// Rescale entire image by its global maximum.
+    /// Rescale by `max(global maximum, 1.0)`: images already in `[0, 1]` pass
+    /// through unchanged; only images with values above 1.0 are compressed.
+    /// Negative values are floored to 0.
     Normalize,
 }
 
@@ -547,9 +566,10 @@ pub struct AutoSharpParams {
     pub evaluator_config: Option<EvaluatorConfig>,
 
     // --- Runtime mode ---
-    /// Performance-quality tradeoff.  When set, [`PipelineMode::apply`] is
-    /// called automatically during [`AutoSharpParams::validate`], overriding
-    /// the speed-sensitive fields before pipeline execution.
+    /// Performance-quality tradeoff.  Not applied automatically: call
+    /// [`AutoSharpParams::resolved`] before pipeline entry to fold this mode's
+    /// overrides into the speed-sensitive fields (as the CLI and WASM callers
+    /// do).  [`AutoSharpParams::validate`] does not modify params.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline_mode: Option<PipelineMode>,
 }
@@ -640,6 +660,14 @@ impl AutoSharpParams {
             mode.apply(&mut self);
         }
         self
+    }
+
+    /// Whether the probe loop should compute a per-probe [`MetricBreakdown`].
+    ///
+    /// Only the composite-aware selection policies need it; the default
+    /// `GamutOnly` path skips it to keep probing fast.
+    pub(crate) fn needs_probe_breakdown(&self) -> bool {
+        self.selection_policy != SelectionPolicy::GamutOnly
     }
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.
@@ -1343,6 +1371,10 @@ pub struct AutoSharpDiagnostics {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluator_result: Option<QualityEvaluation>,
 
+    /// Set when the evaluator's advisory strength cap lowered the final s\*.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluator_cap: Option<EvaluatorCapDiagnostics>,
+
     /// Actionable recommendations derived from pipeline diagnostics.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recommendations: Vec<Recommendation>,
@@ -1690,8 +1722,9 @@ pub struct ChromaPerRegionDiagnostics {
 
 /// Configuration for the quality evaluator.
 ///
-/// The evaluator runs after final sharpening and produces advisory diagnostics.
-/// It does **not** alter the pipeline's s* selection.
+/// The evaluator contributes an advisory strength cap that can lower the final
+/// s* (recorded in [`AutoSharpDiagnostics::evaluator_cap`] when it binds) and a
+/// post-hoc quality evaluation that is diagnostic-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 #[serde(rename_all = "snake_case")]
@@ -1718,6 +1751,21 @@ pub struct ImageFeatures {
     pub laplacian_variance: f32,
     /// Shannon entropy of the 64-bin luminance histogram.
     pub luminance_histogram_entropy: f32,
+}
+
+/// Records that the advisory quality evaluator lowered the final sharpening
+/// strength below the solver's selected value.
+///
+/// Present only when the evaluator's strength cap actually bound; `None` when
+/// the solver's strength was already at or below the cap, or the evaluator was
+/// disabled.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(TS))]
+pub struct EvaluatorCapDiagnostics {
+    /// The evaluator's suggested strength ceiling.
+    pub cap: f32,
+    /// The solver's selected strength before the cap was applied.
+    pub strength_before_cap: f32,
 }
 
 /// Quality evaluation result from a [`QualityEvaluator`](crate::evaluator::QualityEvaluator).
@@ -1961,5 +2009,27 @@ mod adaptive_tests {
         assert_eq!(rc.flat, 2);
         assert_eq!(rc.textured, 1);
         assert_eq!(rc.strong_edge, 1);
+    }
+
+    #[test]
+    fn explicit_rejects_non_positive_values() {
+        let cfg = ProbeConfig::Explicit(vec![0.5, 0.0, 1.0, 1.5]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+        let cfg = ProbeConfig::Explicit(vec![0.5, -0.2, 1.0, 1.5]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn explicit_rejects_fewer_than_four_distinct() {
+        // Four values but only two distinct.
+        let cfg = ProbeConfig::Explicit(vec![0.5, 0.5, 1.0, 1.0]);
+        assert!(matches!(cfg.resolve(), Err(CoreError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn explicit_accepts_four_distinct_positive() {
+        let cfg = ProbeConfig::Explicit(vec![0.25, 0.5, 1.0, 2.0]);
+        let out = cfg.resolve().unwrap();
+        assert_eq!(out, vec![0.25, 0.5, 1.0, 2.0]);
     }
 }
