@@ -97,6 +97,22 @@ describe("ProcessingClient", () => {
     expect(sent.diagnostics_level).toBe("summary");
   });
 
+  it("falls back to the monolithic path when a large image has a modest downscale", async () => {
+    // 8000x6000 (48MP) is classified striped at decode, but target 4000x3000
+    // is only a 2x shrink — below the 3.0 striped-ingest threshold, so the
+    // striped ingest would reject it. The job must run monolithic instead.
+    await client.decode(new File([], "big.jpg"));
+    await client.process({ ...params(), target_width: 4000, target_height: 3000 }).promise;
+    expect(wasm.ingestBegin).not.toHaveBeenCalled();
+    expect(wasm.processImageParallel).toHaveBeenCalledWith(
+      expect.objectContaining({ length: 8000 * 6000 * 4 }),
+      8000,
+      6000,
+      expect.any(String),
+      expect.anything(),
+    );
+  });
+
   it("uses the monolithic path for small images", async () => {
     vi.mocked(ingest.decodeToBitmap).mockResolvedValueOnce(fakeBitmap(4000, 3000)); // 12MP
     await client.decode(new File([], "small.jpg"));
