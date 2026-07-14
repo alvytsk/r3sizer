@@ -23,6 +23,14 @@ import {
  */
 export const DEFAULT_STRIPED_INGEST_THRESHOLD_PIXELS = 24_000_000;
 
+/**
+ * Minimum shrink ratio (max of the two axes) the striped ingest path accepts.
+ * Below this the pre-reduce to ~2x target is meaningless and core rejects it
+ * (`validate_striped_shrink`). Mirrors core's `STAGED_SHRINK_THRESHOLD`. A
+ * large image with a modest downscale falls back to the monolithic path.
+ */
+export const STRIPED_INGEST_MIN_SHRINK = 3.0;
+
 export interface DecodedInput {
   /** Original source dimensions. */
   width: number;
@@ -121,9 +129,21 @@ class JobImpl implements ProcessJob {
   private readonly token = new CancellationToken();
   private readonly listeners: Array<(e: ProgressEvent) => void> = [];
   private readonly aggregator: ProgressAggregator;
+  /**
+   * Whether this job actually runs striped. The input's `striped` flag is set
+   * at decode time from source size alone; the striped ingest also needs a
+   * shrink ratio >= threshold, which only the target dimensions (known here)
+   * determine. A modest downscale of a large image falls back to monolithic.
+   */
+  private readonly striped: boolean;
 
   constructor(input: ClientInput, params: AutoSharpParams) {
-    const stages: ProcessingStage[] = input.striped
+    const shrink = Math.max(
+      input.bitmap.width / params.target_width,
+      input.bitmap.height / params.target_height,
+    );
+    this.striped = input.striped && shrink >= STRIPED_INGEST_MIN_SHRINK;
+    const stages: ProcessingStage[] = this.striped
       ? ["ingest", "prepare", "probe", "finalize"]
       : ["prepare", "probe", "finalize"];
     this.aggregator = new ProgressAggregator(stages, (e) => {
@@ -148,7 +168,7 @@ class JobImpl implements ProcessJob {
       else this.aggregator.update("prepare", 0.5);
     });
     try {
-      const result = input.striped
+      const result = this.striped
         ? await this.runStriped(input, params)
         : await this.runMonolithic(input, params);
       this.aggregator.complete("finalize");
@@ -161,7 +181,9 @@ class JobImpl implements ProcessJob {
   private async runMonolithic(input: ClientInput, params: AutoSharpParams): Promise<ProcessResult> {
     this.token.throwIfCancelled();
     this.aggregator.update("prepare", 0);
-    const { data, width, height } = input.rgba!;
+    // rgba is null when a striped-classified input falls back to monolithic
+    // (modest downscale); materialize it now from the retained bitmap.
+    const { data, width, height } = input.rgba ?? bitmapToRgba(input.bitmap);
     const result = await processImageParallel(data, width, height, JSON.stringify(params), {
       token: this.token,
       onProbeProgress: (f) => this.aggregator.update("probe", f),
