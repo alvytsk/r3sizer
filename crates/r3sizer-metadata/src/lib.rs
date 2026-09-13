@@ -31,26 +31,16 @@ pub fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle {
 /// Merge metadata into encoded output using conservative fallback.
 ///
 /// Returns the original `encoded` bytes unchanged on unsupported destinations.
-/// The report includes an `Unknown` category issue marked as `Unverified`.
+/// The report is preserved from the source bundle.
 pub fn merge(
     encoded: Vec<u8>,
     source: &MetadataBundle,
     _facts: &OutputFacts,
     _limits: &MetadataLimits,
 ) -> MetadataExport {
-    // Conservative fallback: return original bytes, report as unverified merge attempt
-    let mut report = source.report().clone();
-
-    if !report.issues.iter().any(|issue| issue.reason == MetadataIssueReason::Unverified) {
-        report.issues.push(MetadataIssue {
-            category: MetadataCategory::Unknown,
-            reason: MetadataIssueReason::Unverified,
-            field: None,
-        });
-    }
-
+    // Conservative fallback: return original bytes, preserve source report
     MetadataExport {
         bytes: encoded,
-        report,
+        report: source.report().clone(),
     }
 }

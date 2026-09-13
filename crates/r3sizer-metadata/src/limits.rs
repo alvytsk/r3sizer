@@ -1,7 +1,12 @@
 //! Metadata size and complexity limits.
 
+use serde::{Deserialize, Serialize};
+
 /// Configurable limits for metadata extraction and merging.
-#[derive(Debug, Clone)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, PartialEq, Eq,
+)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct MetadataLimits {
     /// Maximum source file size in bytes
     pub max_source_bytes: usize,

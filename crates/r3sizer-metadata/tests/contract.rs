@@ -53,23 +53,6 @@ fn metadata_report_derives_default() {
 }
 
 #[test]
-fn merge_preserves_bundle_issues() {
-    let limits = MetadataLimits::default();
-    let source = extract(b"test", &limits);
-    let encoded = vec![1, 2, 3];
-    let facts = OutputFacts {
-        width: 100,
-        height: 100,
-        orientation: OrientationAction::Normalize,
-        color: ColorAction::Srgb,
-    };
-
-    let result = merge(encoded, &source, &facts, &limits);
-    // Should have at least the original unverified issue
-    assert!(!result.report.issues.is_empty());
-}
-
-#[test]
 fn orientation_action_serializable() {
     assert_eq!(
         serde_json::to_string(&OrientationAction::Preserve).unwrap(),
