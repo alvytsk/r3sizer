@@ -27,11 +27,20 @@ the embedded-metadata scope.
 
 ## Architecture and alternatives
 
-Use a dedicated, filesystem-independent Rust metadata component shared by native
-I/O and WASM bindings. Keep metadata outside `r3sizer-core` and outside numerical
-processing buffers. This makes preservation policy and warning behavior reusable
-across both clients. Extend existing library APIs additively so pixel-only callers
-continue to work.
+Add `crates/r3sizer-metadata` as a new workspace member with its own `Cargo.toml`.
+It is a filesystem-independent Rust library, with no dependency on `r3sizer-core`,
+`r3sizer-io`, or platform APIs. Both `r3sizer-io` and `r3sizer-wasm` depend directly
+on it; WASM does not acquire a dependency on native I/O. Keep metadata outside
+numerical processing buffers. Extend existing library APIs additively so pixel-only
+callers continue to work.
+
+The new crate inherits workspace package metadata, including version (currently
+`0.9.0`), edition, Rust version, and license. Register its path/version dependencies
+and lockfile changes through the existing workspace conventions. Existing workspace
+test, lint, and documentation CI jobs include it automatically. Add a type-generation
+freshness check to CI and ensure the existing WASM build covers its browser target.
+Update the architecture and generation guidance in `CLAUDE.md`, `CONTRIBUTING.md`,
+and the README to reflect the fifth crate.
 
 Separate browser and native implementations would integrate locally with less
 initial binding work but duplicate preservation policy and tests. An external
@@ -45,6 +54,28 @@ bytes. Return structured issues alongside the final bytes. Issues identify the
 metadata category or field when known and distinguish unsupported data, malformed
 data, intentional removal of stale data, and inability to verify preservation.
 Unknown metadata must never be silently classified as successfully preserved.
+
+## Shared types and TypeScript generation
+
+Define metadata issue, category, reason, and serializable export-report types in
+`crates/r3sizer-metadata/src/types.rs`, using serde and the established optional
+`typegen` feature with `ts-rs` and `serde-compat`. Rust is the source of truth for
+these cross-boundary types; do not handwrite equivalent TypeScript definitions.
+
+Extend `crates/r3sizer-core/tests/typegen.rs` to emit the metadata declarations into
+the existing `web/src/shared/lib/types/generated.ts`. Its access to the metadata
+crate is a development dependency with `typegen` enabled, not a production core
+dependency. The metadata crate's independence from core avoids a dependency cycle.
+Keep the existing regeneration command working:
+
+```sh
+cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
+```
+
+Commit regenerated declarations and consume them through the existing
+`wasm-types.ts` re-export. Keep `ts-rs` out of production builds. CI regenerates
+the file and checks for a diff; update the Docker build inputs to include the new
+crate so its existing generation step continues to work.
 
 ## Data correctness
 
@@ -89,6 +120,14 @@ stderr with the affected output path. Sweep outputs inherit the same source
 metadata with their own output facts. Metadata warnings do not change the success
 exit code or corrupt machine-readable stdout and diagnostics.
 
+Metadata issues are stderr-only in the CLI: do not add fields to `diag.json`, JSON
+stdout, or sweep `summary.json`. The shared library and WASM still return structured
+issues for callers; the CLI renders these as text. In a sweep, print issues for
+each affected exported file, without a batch count or aggregated issue list in
+either the summary JSON or final console summary. Metadata warnings do not mark
+files as failed or enter the summary's processing-error collection. When a sweep
+has no output directory and writes no images, emit no preservation warnings.
+
 ## Verification
 
 Use small fixtures containing known EXIF, GPS, copyright, XMP, text, and profiles.
@@ -102,3 +141,10 @@ Cover CLI process and sweep warning behavior, web export warnings and source/out
 association, and both browser ingestion paths. Run relevant Rust and web tests,
 type checks and builds, plus the repository-required checks before a PR. No
 implementation or test results are claimed by this design document.
+
+Assert structured issue categories and reasons in library tests. CLI integration
+tests capture stderr and verify the affected output path and warning category,
+successful exit status, unchanged JSON schemas, and unchanged sweep success/error
+counts. Include a sweep without image outputs and assert no preservation warnings.
+Verify generated TypeScript matches Rust and that the new crate builds as part of
+both the native workspace and WASM target.
