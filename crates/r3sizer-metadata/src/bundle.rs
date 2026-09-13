@@ -17,7 +17,6 @@ pub enum SourceColor {
 
 /// Source image format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub(crate) enum SourceFormat {
     /// JPEG format
     Jpeg,
@@ -30,6 +29,12 @@ pub(crate) enum SourceFormat {
 }
 
 /// Extracted metadata payload.
+///
+/// Several variant fields (e.g. `PngText::kind`, `JfifDensity`'s and
+/// `PngDensity`'s fields) are written by the scanners but only read back by
+/// module-local tests; `#[derive(Debug, Clone)]` doesn't count toward
+/// dead-code analysis, so this is allowed at the enum level rather than
+/// scattering `cfg_attr` across individual fields.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) enum Payload {
@@ -54,9 +59,9 @@ pub(crate) enum Payload {
 /// Bundle of extracted metadata and source information.
 #[derive(Debug, Clone)]
 pub struct MetadataBundle {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) format: SourceFormat,
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) payloads: Vec<Payload>,
     pub(crate) source_color: SourceColor,
     pub(crate) report: MetadataReport,
@@ -76,6 +81,22 @@ impl MetadataBundle {
                     field: None,
                 }],
             },
+        }
+    }
+
+    /// Construct a bundle from real container-scan results. Crate-internal only:
+    /// public callers cannot fabricate unchecked payloads.
+    pub(crate) fn new(
+        format: SourceFormat,
+        payloads: Vec<Payload>,
+        source_color: SourceColor,
+        report: MetadataReport,
+    ) -> Self {
+        Self {
+            format,
+            payloads,
+            source_color,
+            report,
         }
     }
 

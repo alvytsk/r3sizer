@@ -50,7 +50,6 @@ impl Default for MetadataLimits {
 /// let range = checked_range(0, 10, 4, 100)?;  // 0..40
 /// let range = checked_range(100, 1, 1, 100)?; // None (out of bounds)
 /// ```
-#[allow(dead_code)]
 pub(crate) fn checked_range(
     offset: usize,
     count: usize,

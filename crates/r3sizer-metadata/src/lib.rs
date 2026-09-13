@@ -5,6 +5,8 @@
 //! and merging are implemented by adapter tasks.
 
 mod bundle;
+mod containers;
+mod iptc;
 mod limits;
 mod types;
 
@@ -15,17 +17,18 @@ pub use types::{
     MetadataReport, OrientationAction, OutputFacts,
 };
 
-/// Extract metadata from source bytes using conservative fallback.
+/// Extract metadata from source bytes.
 ///
-/// Returns a `MetadataBundle` reporting the source format as unknown and metadata as unverified.
-/// Later adapter tasks will replace this with format-specific extraction logic.
+/// Sniffs the container format (JPEG/PNG/WebP) from its magic bytes and
+/// scans it for metadata without decoding pixels. Sources exceeding
+/// `max_source_bytes`, or containers this crate doesn't recognize, fall
+/// back to a conservative unavailable bundle.
 pub fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle {
-    // Conservative fallback: check bounds, report as unverified
     if source.len() > limits.max_source_bytes {
         return MetadataBundle::unavailable(MetadataIssueReason::LimitExceeded);
     }
 
-    MetadataBundle::unavailable(MetadataIssueReason::Unverified)
+    containers::extract_payloads(source, limits)
 }
 
 /// Merge metadata into encoded output using conservative fallback.

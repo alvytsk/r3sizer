@@ -1200,6 +1200,8 @@ dependencies = [
 name = "r3sizer-metadata"
 version = "0.9.0"
 dependencies = [
+ "crc32fast",
+ "flate2",
  "serde",
  "serde_json",
  "ts-rs",
