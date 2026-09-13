@@ -1197,6 +1197,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "r3sizer-metadata"
+version = "0.9.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "ts-rs",
+]
+
+[[package]]
 name = "r3sizer-wasm"
 version = "0.9.0"
 dependencies = [

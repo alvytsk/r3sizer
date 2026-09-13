@@ -1,0 +1,24 @@
+[package]
+name                   = "r3sizer-metadata"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description            = "Metadata extraction, reporting, and merging for image formats"
+readme                 = "README.md"
+keywords               = ["metadata", "exif", "xmp", "image"]
+categories             = ["multimedia::images"]
+
+[dependencies]
+serde       = { workspace = true }
+ts-rs       = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+default  = []
+typegen  = ["dep:ts-rs"]
