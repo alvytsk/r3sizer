@@ -11,7 +11,7 @@ mod patch;
 mod reader;
 
 use crate::limits::MetadataLimits;
-use crate::types::{MetadataIssue, OutputFacts};
+use crate::types::{MetadataCategory, MetadataIssue, MetadataIssueReason, OutputFacts};
 
 /// Correct dimension, orientation, and color-space EXIF fields in `raw`
 /// (TIFF bytes starting at the byte-order marker, as produced by the
@@ -31,6 +31,16 @@ pub fn correct(
         Err(issue) => return (None, vec![issue]),
     };
     match patch::apply(raw, &parsed, facts) {
+        // Defense in depth: never hand back bytes the same bounded reader
+        // can no longer parse (a zeroed range the overlap check missed).
+        Ok((bytes, _)) if reader::parse(&bytes, limits).is_err() => (
+            None,
+            vec![MetadataIssue {
+                category: MetadataCategory::Exif,
+                reason: MetadataIssueReason::Malformed,
+                field: Some("aliasing".to_string()),
+            }],
+        ),
         Ok((bytes, issues)) => (Some(bytes), issues),
         Err(issue) => (None, vec![issue]),
     }
@@ -39,7 +49,7 @@ pub fn correct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ColorAction, MetadataCategory, MetadataIssueReason, OrientationAction};
+    use crate::types::{ColorAction, OrientationAction};
 
     /// TIFF-6.0-style IFD builder for tests: `entries` are
     /// `(tag, type, count, value)` where `value` is the raw 4-byte
@@ -541,6 +551,39 @@ mod tests {
             .iter()
             .any(|i| i.reason == MetadataIssueReason::Malformed
                 && i.field.as_deref() == Some("aliasing")));
+    }
+
+    fn assert_omitted_as_malformed(bytes: Option<Vec<u8>>, issues: &[MetadataIssue]) {
+        assert!(
+            bytes.is_none(),
+            "must not return EXIF whose TIFF header was zeroed: {:?}",
+            bytes.map(|b| b[..8].to_vec())
+        );
+        assert!(
+            issues.iter().any(|i| {
+                i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed
+            }),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    fn dropped_value_aliasing_tiff_header_omits_exif() {
+        // Reviewer probe: an opaque UNDEFINED tag (dropped) whose 8-byte
+        // out-of-line value sits at offset 0 -- zeroing it would destroy
+        // the TIFF header itself.
+        let ifd = build_ifd(true, &[(0xc000, 7, 8, 0)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert_omitted_as_malformed(bytes, &issues);
+    }
+
+    #[test]
+    fn preview_range_aliasing_tiff_header_omits_exif() {
+        let ifd = build_ifd(true, &[(0x0201, 4, 1, 0), (0x0202, 4, 1, 8)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert_omitted_as_malformed(bytes, &issues);
     }
 
     #[test]

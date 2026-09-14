@@ -507,7 +507,9 @@ pub(super) fn apply(
 ) -> Result<(Vec<u8>, Vec<MetadataIssue>), MetadataIssue> {
     let endian = parsed.endian;
     let mut all_issues = Vec::new();
-    let mut bucket_a: Vec<(Range<usize>, bool)> = Vec::new();
+    // The 8-byte TIFF header (byte order, magic, IFD0 offset) is always
+    // kept: any discarded range reaching into it must abort as aliasing.
+    let mut bucket_a: Vec<(Range<usize>, bool)> = vec![(0..8, true)];
     let mut bucket_b: Vec<(Range<usize>, bool)> = Vec::new();
 
     let mut kept_ifds: Vec<KeptIfd> = Vec::new();
