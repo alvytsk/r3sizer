@@ -24,7 +24,7 @@ export function ProcessingOverlay({
             animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
             exit={{ opacity: 0, filter: "blur(4px)", y: -4 }}
             transition={{ duration: 0.15, ease: "easeOut" }}
-            className="text-sm font-mono text-primary/80 tracking-wide"
+            className="text-sm text-primary/90"
           >
             {stage ? t(`processing.stages.${stage}`) : t("processing.starting")}
           </motion.span>
@@ -38,7 +38,7 @@ export function ProcessingOverlay({
         <button
           type="button"
           onClick={onCancel}
-          className="mt-1 text-[11px] font-mono uppercase tracking-widest text-muted-foreground/60 transition-colors hover:text-foreground"
+          className="mt-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
         >
           {t("processing.cancel")}
         </button>

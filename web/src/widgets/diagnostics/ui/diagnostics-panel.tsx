@@ -16,19 +16,19 @@ export function DiagnosticsPanel() {
     <div className="p-3">
       <Tabs defaultValue="advice" className="w-full">
         <TabsList variant="line" className="grid grid-cols-5 w-full h-8">
-          <TabsTrigger value="advice" className="text-[13px] font-mono">
+          <TabsTrigger value="advice" className="text-[13px]">
             {t("diagnostics.advice")}
           </TabsTrigger>
-          <TabsTrigger value="summary" className="text-[13px] font-mono">
+          <TabsTrigger value="summary" className="text-[13px]">
             {t("diagnostics.summary")}
           </TabsTrigger>
-          <TabsTrigger value="fit" className="text-[13px] font-mono">
+          <TabsTrigger value="fit" className="text-[13px]">
             {t("diagnostics.fit")}
           </TabsTrigger>
-          <TabsTrigger value="timing" className="text-[13px] font-mono">
+          <TabsTrigger value="timing" className="text-[13px]">
             {t("diagnostics.timing")}
           </TabsTrigger>
-          <TabsTrigger value="json" className="text-[13px] font-mono">
+          <TabsTrigger value="json" className="text-[13px]">
             {t("diagnostics.json")}
           </TabsTrigger>
         </TabsList>

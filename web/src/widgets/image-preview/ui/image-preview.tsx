@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useImageStore } from "@/entities/images";
 import { useOutputStore } from "@/entities/outputs";
 
@@ -71,15 +72,7 @@ function FittedCanvas({
         className="relative"
         style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}
       >
-        <div className="absolute -top-[6px] -left-[6px] w-[14px] h-[14px] border-t-[1.5px] border-l-[1.5px] border-primary/25 rounded-tl-[1px] pointer-events-none z-10" />
-        <div className="absolute -top-[6px] -right-[6px] w-[14px] h-[14px] border-t-[1.5px] border-r-[1.5px] border-primary/25 rounded-tr-[1px] pointer-events-none z-10" />
-        <div className="absolute -bottom-[6px] -left-[6px] w-[14px] h-[14px] border-b-[1.5px] border-l-[1.5px] border-primary/25 rounded-bl-[1px] pointer-events-none z-10" />
-        <div className="absolute -bottom-[6px] -right-[6px] w-[14px] h-[14px] border-b-[1.5px] border-r-[1.5px] border-primary/25 rounded-br-[1px] pointer-events-none z-10" />
-        <canvas
-          ref={canvasRef}
-          className="rounded-sm viewport-inset"
-          style={{ width: "100%", height: "100%" }}
-        />
+        <canvas ref={canvasRef} className="rounded-sm" style={{ width: "100%", height: "100%" }} />
       </div>
     </div>
   );
@@ -100,6 +93,7 @@ function ComparisonSlider({
   outputW: number;
   outputH: number;
 }) {
+  const { t } = useTranslation();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -152,15 +146,9 @@ function ComparisonSlider({
         className="relative"
         style={{ width: dims.w, height: dims.h, visibility: dims.w > 0 ? "visible" : "hidden" }}
       >
-        {/* Corner crop marks */}
-        <div className="absolute -top-[6px] -left-[6px] w-[14px] h-[14px] border-t-[1.5px] border-l-[1.5px] border-primary/35 rounded-tl-[1px] pointer-events-none z-20" />
-        <div className="absolute -top-[6px] -right-[6px] w-[14px] h-[14px] border-t-[1.5px] border-r-[1.5px] border-primary/35 rounded-tr-[1px] pointer-events-none z-20" />
-        <div className="absolute -bottom-[6px] -left-[6px] w-[14px] h-[14px] border-b-[1.5px] border-l-[1.5px] border-primary/35 rounded-bl-[1px] pointer-events-none z-20" />
-        <div className="absolute -bottom-[6px] -right-[6px] w-[14px] h-[14px] border-b-[1.5px] border-r-[1.5px] border-primary/35 rounded-br-[1px] pointer-events-none z-20" />
-
         <div
           ref={containerRef}
-          className="relative select-none cursor-ew-resize overflow-hidden rounded-sm viewport-inset touch-none"
+          className="relative select-none cursor-ew-resize overflow-hidden rounded-sm touch-none"
           style={{ width: "100%", height: "100%" }}
           onPointerDown={handlePointerDown}
         >
@@ -203,13 +191,13 @@ function ComparisonSlider({
 
           {/* Labels overlaid at bottom */}
           <span className="absolute bottom-2 left-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-            <span className="uppercase tracking-widest">Input</span>{" "}
+            <span>{t("diagnostics.input")}</span>{" "}
             <span className="text-white/60">
               {inputW}&times;{inputH}
             </span>
           </span>
           <span className="absolute bottom-2 right-2 z-10 pointer-events-none text-[10px] font-mono text-white/90 bg-black/60 px-1.5 py-0.5 rounded-sm backdrop-blur-sm">
-            <span className="uppercase tracking-widest">Output</span>{" "}
+            <span>{t("diagnostics.output")}</span>{" "}
             <span className="text-white/60">
               {outputW}&times;{outputH}
             </span>
@@ -221,6 +209,7 @@ function ComparisonSlider({
 }
 
 export function ImagePreview() {
+  const { t } = useTranslation();
   const previewRgbaData = useImageStore((s) => s.previewRgbaData);
   const previewWidth = useImageStore((s) => s.previewWidth);
   const previewHeight = useImageStore((s) => s.previewHeight);
@@ -236,10 +225,8 @@ export function ImagePreview() {
     return (
       <div className="flex-1 flex flex-col min-h-0">
         <div className="flex items-baseline justify-between mb-1 flex-shrink-0">
-          <span className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground/50">
-            Compare
-          </span>
-          <span className="text-[11px] font-mono text-muted-foreground/40">
+          <span className="text-xs font-medium text-muted-foreground">{t("preview.compare")}</span>
+          <span className="text-[11px] font-mono text-muted-foreground">
             {sourceWidth}&times;{sourceHeight} {"\u2192"} {outputWidth}&times;{outputHeight}
           </span>
         </div>
@@ -258,10 +245,8 @@ export function ImagePreview() {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex items-baseline justify-between mb-1 flex-shrink-0">
-        <span className="text-[11px] font-mono uppercase tracking-widest text-muted-foreground/50">
-          Input
-        </span>
-        <span className="text-[11px] font-mono text-muted-foreground/40">
+        <span className="text-xs font-medium text-muted-foreground">{t("diagnostics.input")}</span>
+        <span className="text-[11px] font-mono text-muted-foreground">
           {sourceWidth}&times;{sourceHeight}
         </span>
       </div>

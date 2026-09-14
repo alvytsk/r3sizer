@@ -397,9 +397,9 @@ export default function AlgorithmPage() {
   const activeSection = useActiveSection(TOC_IDS);
 
   return (
-    <div className="min-h-screen bg-background grain relative">
+    <div className="min-h-screen bg-background relative">
       {/* Navigation bar */}
-      <nav className="sticky top-0 z-20 backdrop-blur-sm bg-background/80">
+      <nav className="sticky top-0 z-20 backdrop-blur-sm bg-background/80 border-b border-border/40">
         <div className="max-w-6xl mx-auto px-6 py-2.5 flex items-center gap-3">
           <Link
             to="/"
@@ -411,7 +411,6 @@ export default function AlgorithmPage() {
           <div className="h-4 w-px bg-border/40" />
           <span className="text-xs font-mono text-muted-foreground/50">algorithm</span>
         </div>
-        <div className="h-px accent-line" />
       </nav>
 
       {/* Hero with curve background */}
@@ -466,7 +465,7 @@ export default function AlgorithmPage() {
         {/* Sticky TOC — desktop only */}
         <aside className="hidden xl:block w-44 flex-shrink-0 pt-10 pl-6">
           <nav className="sticky top-16">
-            <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground/40 mb-3">
+            <p className="text-xs font-medium text-muted-foreground mb-3">
               On this page
             </p>
             <ul className="space-y-0.5 border-l border-border/30">

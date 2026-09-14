@@ -188,9 +188,7 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
   return (
     <div className="rounded-sm border border-border/30 bg-background p-2 pt-3">
       <div className="flex items-baseline justify-between px-2 mb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary/70">
-          P(s) Probe Curve
-        </span>
+        <span className="text-xs font-semibold text-foreground/80">Probe curve P(s)</span>
         {xZoom ? (
           <button
             onClick={() => {

@@ -39,11 +39,11 @@ export function ImageUpload() {
   return (
     <div
       className={`
-        relative cursor-pointer rounded-lg border border-dashed transition-all duration-200
+        relative cursor-pointer rounded-lg border border-dashed transition-colors duration-200
         ${
           isDragging
             ? "border-primary bg-primary/5 glow-amber"
-            : "upload-idle hover:border-primary/60 hover:bg-surface/50"
+            : "border-border hover:border-primary/60 hover:bg-surface/50"
         }
       `}
       onDragOver={(e) => {

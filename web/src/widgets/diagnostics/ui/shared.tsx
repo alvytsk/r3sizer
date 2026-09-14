@@ -28,10 +28,8 @@ export function StatusChip({
   const s = CHIP_STYLES[variant];
   return (
     <div className={`flex-1 rounded-sm border px-2.5 py-2 ${s.border} ${s.bg}`}>
-      <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/50 mb-1">
-        {heading}
-      </div>
-      <div className={`text-[12px] font-mono font-medium leading-none ${s.text}`}>
+      <div className="text-[11px] text-muted-foreground mb-1">{heading}</div>
+      <div className={`text-[13px] font-medium leading-none ${s.text}`}>
         {value.replace(/_/g, " ")}
       </div>
     </div>

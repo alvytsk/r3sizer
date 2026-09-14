@@ -28,14 +28,15 @@ export function Toolbar({
     <div className="px-4 py-2 border-b border-border/30 flex items-center gap-2 flex-shrink-0">
       {paramsChanged && (
         <div
-          className="w-2 h-2 rounded-full bg-primary animate-pulse"
+          className="w-2 h-2 rounded-full bg-orange animate-pulse"
           title={t("toolbar.paramsChanged")}
         />
       )}
       <Button
         onClick={onProcess}
         disabled={isProcessing}
-        className={paramsChanged ? "glow-amber border border-primary/40" : "glow-amber"}
+        variant={hasOutput && !paramsChanged ? "outline" : "default"}
+        className={paramsChanged ? "bg-orange text-primary-foreground hover:bg-orange/90" : ""}
         size="sm"
       >
         {isProcessing ? (
@@ -51,15 +52,13 @@ export function Toolbar({
             ? t("toolbar.reprocess")
             : t("toolbar.process")}
       </Button>
-      <span
-        className={`text-[11px] font-mono hidden sm:inline ${paramsChanged ? "text-primary/80" : "text-muted-foreground"}`}
-      >
-        {isProcessing
-          ? processingStage || t("toolbar.starting")
-          : paramsChanged
-            ? t("toolbar.paramsChanged")
-            : t("toolbar.autoSharpness")}
-      </span>
+      {(isProcessing || paramsChanged) && (
+        <span
+          className={`text-xs hidden sm:inline ${paramsChanged ? "text-orange" : "text-muted-foreground"}`}
+        >
+          {isProcessing ? processingStage || t("toolbar.starting") : t("toolbar.paramsChanged")}
+        </span>
+      )}
       <div className="flex items-center gap-1 ml-auto">
         {hasOutput && <DownloadButton />}
         <Button

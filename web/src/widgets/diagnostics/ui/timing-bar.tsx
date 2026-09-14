@@ -86,9 +86,7 @@ export function TimingBar({ timing }: { timing: StageTiming }) {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary/70">
-          Pipeline Timing
-        </span>
+        <span className="text-xs font-semibold text-foreground/80">Pipeline timing</span>
         <span className="font-mono text-sm text-foreground/90">{formatUs(timing.total_us)}</span>
       </div>
 

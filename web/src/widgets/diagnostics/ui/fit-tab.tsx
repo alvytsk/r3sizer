@@ -12,7 +12,7 @@ function PolyCoeffTable({ a, b, c, d }: { a: number; b: number; c: number; d: nu
   ];
   return (
     <div className="rounded-sm border border-border/25 bg-background px-3 py-2.5">
-      <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45 mb-2">
+      <div className="text-[11px] font-mono text-muted-foreground mb-2">
         P(s) = as³ + bs² + cs + d
       </div>
       <div className="space-y-1">
@@ -269,7 +269,7 @@ export function FitTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
 
       {diagnostics.fit_quality && (
         <div className="border-t border-border/30 pt-3 space-y-2">
-          <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
+          <div className="text-[11px] font-medium text-muted-foreground">
             {t("diagnostics.fitTab.quality")}
           </div>
           <R2Gauge value={diagnostics.fit_quality.r_squared} />
@@ -301,7 +301,7 @@ export function FitTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
 
       {diagnostics.robustness && (
         <div className="border-t border-border/30 pt-3 space-y-2">
-          <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-muted-foreground/45">
+          <div className="text-[11px] font-medium text-muted-foreground">
             {t("diagnostics.robustness.title")}
           </div>
           <RobustnessGrid robustness={diagnostics.robustness} />

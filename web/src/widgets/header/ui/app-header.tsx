@@ -14,7 +14,7 @@ export function AppHeader({
 
   return (
     <header className="flex flex-col sticky top-0 z-20">
-      <div className="px-4 py-2.5 flex items-center gap-3 backdrop-blur-sm bg-background/80">
+      <div className="px-4 py-2.5 flex items-center gap-3 backdrop-blur-sm bg-background/80 border-b border-border/40">
         <button
           onClick={showLogoAction ? onLogoClick : undefined}
           className={`flex items-center gap-2 flex-shrink-0 ${showLogoAction ? "cursor-pointer group" : "cursor-default"}`}
@@ -28,7 +28,7 @@ export function AppHeader({
 
         <Link
           to="/algorithm"
-          className="inline-flex items-center gap-1.5 text-xs font-mono text-muted-foreground/60 hover:text-primary transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
         >
           <BookOpen className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">{t("app.algorithm")}</span>
@@ -57,8 +57,6 @@ export function AppHeader({
           </a>
         </div>
       </div>
-      {/* Accent line — amber gradient spatial anchor */}
-      <div className="h-px accent-line" />
     </header>
   );
 }

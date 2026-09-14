@@ -48,7 +48,7 @@ export function AdaptiveSettings({
 
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground hover:text-primary transition-colors">
+      <CollapsibleTrigger className="group flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-primary transition-colors">
         <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[panel-open]:rotate-180" />
         {t("params.adaptiveSettings")}
       </CollapsibleTrigger>

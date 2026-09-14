@@ -116,7 +116,7 @@ export function ParameterPanel() {
                   {matchingPreset ? (
                     `${matchingPreset.label} — ${matchingPreset.detail}`
                   ) : (
-                    <span className="text-muted-foreground">{t("params.selectPreset")}</span>
+                    <span className="text-muted-foreground">{t("params.custom")}</span>
                   )}
                 </span>
               </SelectTrigger>
@@ -195,7 +195,11 @@ export function ParameterPanel() {
                   checked={lockDimensions}
                   onCheckedChange={setLockDimensions}
                 />
-                <Label htmlFor="pin-dims" className="text-[13px] text-foreground/70">
+                <Label
+                  htmlFor="pin-dims"
+                  className="text-[13px] text-muted-foreground"
+                  title={t("params.pinExactTip")}
+                >
                   {t("params.pinExact")}
                 </Label>
               </div>
@@ -219,7 +223,7 @@ export function ParameterPanel() {
                   type="button"
                   className={[
                     "relative rounded-md px-2.5 py-2 text-left transition-all duration-150",
-                    "border font-mono",
+                    "border",
                     active
                       ? "border-primary/40 bg-primary/[0.08] ring-1 ring-primary/20"
                       : "border-border/30 bg-card/30 hover:border-border/50 hover:bg-card/60",
@@ -268,7 +272,7 @@ export function ParameterPanel() {
                   type="button"
                   className={[
                     "rounded-md px-2 py-1.5 text-center transition-all duration-150",
-                    "border font-mono",
+                    "border",
                     active
                       ? "border-primary/40 bg-primary/[0.08] ring-1 ring-primary/20"
                       : "border-border/30 bg-card/30 hover:border-border/50 hover:bg-card/60",
@@ -292,36 +296,6 @@ export function ParameterPanel() {
                 </button>
               );
             })}
-          </div>
-          {/* Active config summary */}
-          <div className="rounded-md border border-border/20 bg-surface/50 px-2.5 py-2">
-            <div className="flex items-baseline gap-2 mb-1.5">
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60">
-                P₀
-              </span>
-              <span className="text-base font-mono font-bold text-primary tabular-nums">
-                {params.target_artifact_ratio.toExponential(0)}
-              </span>
-              <span className="text-[10px] text-muted-foreground/60">
-                ({(params.target_artifact_ratio * 100).toFixed(1)}% {t("params.budget")})
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70 font-mono">
-              <span>
-                {"TwoPass" in params.probe_strengths
-                  ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} ${t("params.probes")}`
-                  : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} ${t("params.probes")}`}
-              </span>
-              <span className="text-border/60">|</span>
-              <span>
-                {params.sharpen_strategy.strategy === "content_adaptive"
-                  ? t("params.adaptive")
-                  : t("params.uniform")}
-                {params.experimental_sharpen_mode ? ` + ${t("params.guard")}` : ""}
-              </span>
-              <span className="text-border/60">|</span>
-              <span>{params.sharpen_mode}</span>
-            </div>
           </div>
         </div>
 
@@ -403,12 +377,39 @@ export function ParameterPanel() {
         {/* Advanced — everything else collapsed */}
         <div className="space-y-2">
           <Collapsible>
-            <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs font-mono font-semibold uppercase tracking-[0.15em] text-muted-foreground/60 hover:text-primary transition-colors border-b border-border/20 pb-1 w-full">
-              <div className="w-0.5 h-3 rounded-full bg-muted-foreground/20 group-hover:bg-primary/50 transition-colors" />
+            <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-primary transition-colors border-b border-border/30 pb-1 w-full">
               {t("params.advanced")}
               <ChevronDown className="h-3 w-3 ml-auto transition-transform duration-200 group-data-[panel-open]:rotate-180" />
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-3 pt-3">
+              {/* Active config summary */}
+              <div className="rounded-md border border-border/20 bg-surface/50 px-2.5 py-2">
+                <div className="flex items-baseline gap-2 mb-1.5">
+                  <span className="text-[11px] text-muted-foreground">P₀</span>
+                  <span className="text-base font-mono font-bold text-primary tabular-nums">
+                    {params.target_artifact_ratio.toExponential(0)}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/60">
+                    ({(params.target_artifact_ratio * 100).toFixed(1)}% {t("params.budget")})
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground/70 font-mono">
+                  <span>
+                    {"TwoPass" in params.probe_strengths
+                      ? `${params.probe_strengths.TwoPass.coarse_count}+${params.probe_strengths.TwoPass.dense_count} ${t("params.probes")}`
+                      : `${(params.probe_strengths as { Explicit: number[] }).Explicit.length} ${t("params.probes")}`}
+                  </span>
+                  <span className="text-border/60">|</span>
+                  <span>
+                    {params.sharpen_strategy.strategy === "content_adaptive"
+                      ? t("params.adaptive")
+                      : t("params.uniform")}
+                    {params.experimental_sharpen_mode ? ` + ${t("params.guard")}` : ""}
+                  </span>
+                  <span className="text-border/60">|</span>
+                  <span>{params.sharpen_mode}</span>
+                </div>
+              </div>
               {/* Target artifact ratio */}
               <div>
                 <div className="flex items-baseline justify-between">

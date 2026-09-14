@@ -22,12 +22,20 @@ const COMPONENT_LABELS_KEYS: Record<string, string> = {
   texture_flattening: "diagnostics.components.textureFlattening",
 };
 
+function Tag({ children }: { children: string }) {
+  return (
+    <span className="ml-auto font-mono text-[10px] text-muted-foreground bg-background/60 border border-border/40 rounded-sm px-1 py-px whitespace-nowrap">
+      {children.replace(/_/g, " ")}
+    </span>
+  );
+}
+
 function RegionCoverageBar({ coverage }: { coverage: RegionCoverage }) {
   const { t } = useTranslation();
 
   return (
     <div className="space-y-1.5">
-      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50">
+      <div className="text-[11px] font-medium text-muted-foreground">
         {t("diagnostics.regionCoverage")}
       </div>
       <div className="flex h-2 rounded-[2px] overflow-hidden bg-background border border-border/20">
@@ -86,8 +94,9 @@ function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcom
       value: outcome.measured_metric.toExponential(3),
     });
   } else {
-    headline = t("diagnostics.adaptiveBudgetExceeded", { count: outcome.iterations });
+    headline = t("diagnostics.adaptiveBudgetExceeded");
     detail = t("diagnostics.bestScale", {
+      count: outcome.iterations,
       scale: outcome.best_scale.toFixed(3),
       value: outcome.best_metric.toExponential(3),
     });
@@ -97,11 +106,8 @@ function AdaptiveValidationCard({ outcome }: { outcome: AdaptiveValidationOutcom
     <div className={`rounded-sm border ${borderColor} ${bgColor} px-3 py-2`}>
       <div className="flex items-center gap-1.5 mb-0.5">
         <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-        <span
-          className={`text-[10px] font-mono font-medium uppercase tracking-[0.12em] ${headlineColor}`}
-        >
-          {headline}
-        </span>
+        <span className={`text-[13px] font-medium ${headlineColor}`}>{headline}</span>
+        <Tag>{outcome.outcome}</Tag>
       </div>
       <p className="text-[12px] text-muted-foreground leading-relaxed pl-3">{detail}</p>
     </div>
@@ -121,11 +127,8 @@ function DiagnosisCard({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
           <div key={i} className={`rounded-sm border ${s.border} ${s.bg} px-3 py-2`}>
             <div className="flex items-center gap-1.5 mb-0.5">
               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
-              <span
-                className={`text-[10px] font-mono font-medium uppercase tracking-[0.12em] ${s.headline}`}
-              >
-                {entry.headline}
-              </span>
+              <span className={`text-[13px] font-medium ${s.headline}`}>{entry.headline}</span>
+              {entry.tag && <Tag>{entry.tag}</Tag>}
             </div>
             <p className="text-[12px] text-muted-foreground leading-relaxed pl-3">{entry.detail}</p>
           </div>
@@ -166,7 +169,7 @@ export function SummaryTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
 
         {diagnostics.metric_components && (
           <div className="mt-2 pt-2 border-t border-border/20 space-y-0.5">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/50 mb-1">
+            <div className="text-[11px] font-medium text-muted-foreground mb-1">
               {t("diagnostics.metricBreakdown")}
             </div>
             {Object.entries(diagnostics.metric_components.components).map(([name, value]) => (
