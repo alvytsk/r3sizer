@@ -69,6 +69,16 @@ export type {
   SharpenMode,
   SharpenStrategy,
   StageTiming,
+  // Metadata boundary types (r3sizer-metadata)
+  ColorAction,
+  MetadataCategory,
+  MetadataExportRequest,
+  MetadataExportResponse,
+  MetadataIssue,
+  MetadataIssueReason,
+  MetadataReport,
+  OrientationAction,
+  OutputFacts,
 } from "./generated";
 
 export {

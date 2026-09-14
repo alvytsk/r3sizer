@@ -1,4 +1,7 @@
 mod convert;
+mod metadata;
+
+pub use metadata::preserve_metadata;
 
 use r3sizer_core::{
     process_auto_sharp_downscale_with_progress, AutoSharpParams, DiagnosticsLevel, ImageSize,

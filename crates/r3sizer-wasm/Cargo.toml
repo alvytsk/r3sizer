@@ -27,3 +27,7 @@ serde              = { workspace = true }
 serde_json         = { workspace = true }
 serde-wasm-bindgen = "0.6"
 r3sizer-core       = { path = "../r3sizer-core", version = "0.9", default-features = false }
+r3sizer-metadata   = { path = "../r3sizer-metadata", version = "0.9" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

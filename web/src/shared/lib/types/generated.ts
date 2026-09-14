@@ -1,4 +1,4 @@
-// Auto-generated from r3sizer-core Rust types. DO NOT EDIT.
+// Auto-generated from r3sizer-core and r3sizer-metadata Rust types. DO NOT EDIT.
 //
 // Regenerate with:
 //   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
@@ -624,6 +624,76 @@ reason: string,
  * Self-contained param patch.  Apply via `updateParams(patch)`.
  */
 patch: ParamPatch, };
+
+export type MetadataCategory = "exif" | "xmp" | "iptc" | "icc" | "text" | "thumbnail" | "maker_note" | "density" | "unknown";
+
+export type MetadataIssueReason = "unsupported" | "malformed" | "removed_stale" | "unverified" | "limit_exceeded" | "merge_failed";
+
+export type MetadataIssue = { 
+/**
+ * Category of metadata affected
+ */
+category: MetadataCategory, 
+/**
+ * Reason the issue occurred
+ */
+reason: MetadataIssueReason, 
+/**
+ * Optional tag name, text keyword, or container identifier (not the value)
+ */
+field: string | null, };
+
+export type MetadataReport = { 
+/**
+ * Issues encountered during processing
+ */
+issues: Array<MetadataIssue>, };
+
+export type OrientationAction = "preserve" | "normalize";
+
+export type ColorAction = "unchanged" | "srgb" | "unverified";
+
+export type OutputFacts = { 
+/**
+ * Output image width in pixels
+ */
+width: number, 
+/**
+ * Output image height in pixels
+ */
+height: number, 
+/**
+ * Orientation handling strategy
+ */
+orientation: OrientationAction, 
+/**
+ * Color space handling strategy
+ */
+color: ColorAction, };
+
+export type MetadataExportRequest = { 
+/**
+ * Original source image bytes (metadata is extracted from these)
+ */
+source: Uint8Array, 
+/**
+ * Already-encoded output image bytes (metadata is merged into these)
+ */
+encoded: Uint8Array, 
+/**
+ * Facts about the output image needed to decide what metadata is valid
+ */
+facts: OutputFacts, };
+
+export type MetadataExportResponse = { 
+/**
+ * Output image bytes with metadata merged in
+ */
+bytes: Uint8Array, 
+/**
+ * Diagnostic report of any issues encountered during extraction/merge
+ */
+report: MetadataReport, };
 
 // ── Default constants (generated from Rust Default impls) ──
 

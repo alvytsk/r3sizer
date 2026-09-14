@@ -18,8 +18,8 @@ pub use exif::correct;
 pub use limits::MetadataLimits;
 pub use policy::prepare;
 pub use types::{
-    ColorAction, MetadataCategory, MetadataExport, MetadataIssue, MetadataIssueReason,
-    MetadataReport, OrientationAction, OutputFacts,
+    ColorAction, MetadataCategory, MetadataExport, MetadataExportRequest, MetadataExportResponse,
+    MetadataIssue, MetadataIssueReason, MetadataReport, OrientationAction, OutputFacts,
 };
 
 use bundle::Payload;

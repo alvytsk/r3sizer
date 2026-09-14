@@ -122,3 +122,32 @@ pub struct MetadataExport {
     /// Diagnostic report of any issues
     pub report: MetadataReport,
 }
+
+/// Request to extract metadata from a source image and merge it into an
+/// already-encoded output image, at the WASM boundary.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct MetadataExportRequest {
+    /// Original source image bytes (metadata is extracted from these)
+    #[serde(with = "serde_bytes")]
+    #[cfg_attr(feature = "typegen", ts(type = "Uint8Array"))]
+    pub source: Vec<u8>,
+    /// Already-encoded output image bytes (metadata is merged into these)
+    #[serde(with = "serde_bytes")]
+    #[cfg_attr(feature = "typegen", ts(type = "Uint8Array"))]
+    pub encoded: Vec<u8>,
+    /// Facts about the output image needed to decide what metadata is valid
+    pub facts: OutputFacts,
+}
+
+/// Response containing the merged output image bytes and diagnostic report.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
+pub struct MetadataExportResponse {
+    /// Output image bytes with metadata merged in
+    #[serde(with = "serde_bytes")]
+    #[cfg_attr(feature = "typegen", ts(type = "Uint8Array"))]
+    pub bytes: Vec<u8>,
+    /// Diagnostic report of any issues encountered during extraction/merge
+    pub report: MetadataReport,
+}
