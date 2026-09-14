@@ -104,6 +104,22 @@ fn metadata_issue_reason_snake_case() {
     );
 }
 
+/// Pins `MetadataLimits::default()` to the plan's named budgets: 256 MiB
+/// source bytes, 8 MiB per payload, 16 MiB total retained metadata, 4,096
+/// records, 4,096 EXIF entries, 32 visited IFDs, XML depth 64. Guards
+/// against silent drift back to looser ad hoc values.
+#[test]
+fn default_limits_match_specified_budgets() {
+    let limits = MetadataLimits::default();
+    assert_eq!(limits.max_source_bytes, 256 * 1024 * 1024);
+    assert_eq!(limits.max_payload_bytes, 8 * 1024 * 1024);
+    assert_eq!(limits.max_total_metadata_bytes, 16 * 1024 * 1024);
+    assert_eq!(limits.max_records, 4_096);
+    assert_eq!(limits.max_exif_entries, 4_096);
+    assert_eq!(limits.max_ifds, 32);
+    assert_eq!(limits.max_xml_depth, 64);
+}
+
 #[test]
 fn output_facts_roundtrip() {
     let facts = OutputFacts {

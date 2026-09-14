@@ -24,16 +24,31 @@ pub struct MetadataLimits {
     pub max_xml_depth: usize,
 }
 
+/// Default maximum source file size: 256 MiB.
+pub const DEFAULT_MAX_SOURCE_BYTES: usize = 256 * 1024 * 1024;
+/// Default maximum single payload size: 8 MiB.
+pub const DEFAULT_MAX_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
+/// Default maximum total retained/decompressed metadata: 16 MiB.
+pub const DEFAULT_MAX_TOTAL_METADATA_BYTES: usize = 16 * 1024 * 1024;
+/// Default maximum number of container metadata records.
+pub const DEFAULT_MAX_RECORDS: usize = 4_096;
+/// Default maximum number of EXIF entries.
+pub const DEFAULT_MAX_EXIF_ENTRIES: usize = 4_096;
+/// Default maximum number of visited EXIF IFDs.
+pub const DEFAULT_MAX_IFDS: usize = 32;
+/// Default maximum XML nesting depth for XMP.
+pub const DEFAULT_MAX_XML_DEPTH: usize = 64;
+
 impl Default for MetadataLimits {
     fn default() -> Self {
         Self {
-            max_source_bytes: 100 * 1024 * 1024,              // 100 MB
-            max_payload_bytes: 10 * 1024 * 1024,              // 10 MB per payload
-            max_total_metadata_bytes: 50 * 1024 * 1024,       // 50 MB total
-            max_records: 1_000_000,
-            max_exif_entries: 50_000,
-            max_ifds: 32,
-            max_xml_depth: 64,
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            max_payload_bytes: DEFAULT_MAX_PAYLOAD_BYTES,
+            max_total_metadata_bytes: DEFAULT_MAX_TOTAL_METADATA_BYTES,
+            max_records: DEFAULT_MAX_RECORDS,
+            max_exif_entries: DEFAULT_MAX_EXIF_ENTRIES,
+            max_ifds: DEFAULT_MAX_IFDS,
+            max_xml_depth: DEFAULT_MAX_XML_DEPTH,
         }
     }
 }
