@@ -7,9 +7,10 @@
 //! matching `exif::correct`'s "whole block or nothing" contract for
 //! anything that would make guessing unsafe.
 //!
-//! Only six well-known scalar properties are ever rewritten -- TIFF
+//! Only six well-known scalar properties are ever corrected -- TIFF
 //! `ImageWidth`/`ImageLength`/`Orientation` and EXIF
-//! `PixelXDimension`/`PixelYDimension`/`ColorSpace` -- matched by
+//! `PixelXDimension`/`PixelYDimension`/`ColorSpace` (the last is only ever
+//! kept or removed, never relabeled to a new value) -- matched by
 //! (namespace URI, local name), never by prefix, so an aliased prefix is
 //! corrected exactly like the conventional one. A handful of other
 //! well-known properties (the embedded thumbnail array, the ExtendedXMP
@@ -527,8 +528,10 @@ fn decide(
             },
             ManagedTag::ColorSpace => match facts.color {
                 ColorAction::Unchanged => Some(first),
-                ColorAction::Srgb => Some("1".to_string()),
-                ColorAction::Unverified => {
+                // Keep an existing sRGB (1) declaration; never relabel a
+                // conflicting one (e.g. 65535 Uncalibrated) as sRGB.
+                ColorAction::Srgb if first.trim() == "1" => Some(first),
+                ColorAction::Srgb | ColorAction::Unverified => {
                     issues.push(issue(
                         MetadataCategory::Xmp,
                         MetadataIssueReason::Unverified,
@@ -889,9 +892,9 @@ mod tests {
     }
 
     #[test]
-    fn color_space_srgb_sets_known_value() {
+    fn color_space_srgb_keeps_existing_srgb_value_silently() {
         let raw = br#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-          xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:ColorSpace="65535">
+          xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:ColorSpace="1">
           <rdf:Description/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Srgb);
@@ -899,6 +902,30 @@ mod tests {
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("exif:ColorSpace=\"1\""));
+    }
+
+    #[test]
+    fn color_space_srgb_removes_non_srgb_values_with_issue() {
+        for raw in [
+            &br#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+              xmlns:exif="http://ns.adobe.com/exif/1.0/" exif:ColorSpace="65535">
+              <rdf:Description/>
+            </rdf:RDF>"#[..],
+            &br#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+              xmlns:exif="http://ns.adobe.com/exif/1.0/">
+              <rdf:Description><exif:ColorSpace>2</exif:ColorSpace></rdf:Description>
+            </rdf:RDF>"#[..],
+        ] {
+            let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Srgb);
+            let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+            let text = String::from_utf8(bytes.unwrap()).unwrap();
+            assert!(!text.contains("ColorSpace"), "{text}");
+            assert!(issues.iter().any(|i| {
+                i.category == MetadataCategory::Xmp
+                    && i.reason == Reason::Unverified
+                    && i.field.as_deref() == Some("ColorSpace")
+            }));
+        }
     }
 
     #[test]

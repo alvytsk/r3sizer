@@ -279,14 +279,18 @@ fn colorspace_decision(e: &Entry, endian: Endian, color: ColorAction) -> Decisio
                     "color_space",
                 )));
             }
-            let mut value_field = [0u8; 4];
-            value_field[0..2].copy_from_slice(&endian.write_u16(1)); // 1 = sRGB
-            Decision::Keep(FinalEntry {
-                tag: e.tag,
-                kind: e.kind,
-                count: e.count,
-                value_field,
-            })
+            // Keep only an existing sRGB (1) declaration; anything else
+            // (e.g. 0xFFFF Uncalibrated = Adobe RGB without ICC) is a
+            // conflicting declaration, never relabeled as sRGB.
+            if endian.u16([e.value_field[0], e.value_field[1]]) == 1 {
+                Decision::Keep(verbatim(e))
+            } else {
+                Decision::Drop(Some(issue(
+                    MetadataCategory::Exif,
+                    MetadataIssueReason::Unverified,
+                    "color_space",
+                )))
+            }
         }
         ColorAction::Unverified => Decision::Drop(Some(issue(
             MetadataCategory::Exif,
@@ -309,12 +313,15 @@ fn interop_index_decision(e: &Entry, color: ColorAction) -> Decision {
                     "interop_index",
                 )));
             }
-            Decision::Keep(FinalEntry {
-                tag: e.tag,
-                kind: e.kind,
-                count: e.count,
-                value_field: *b"R98\0",
-            })
+            if e.value_field == *b"R98\0" {
+                Decision::Keep(verbatim(e))
+            } else {
+                Decision::Drop(Some(issue(
+                    MetadataCategory::Exif,
+                    MetadataIssueReason::Unverified,
+                    "interop_index",
+                )))
+            }
         }
         ColorAction::Unverified => Decision::Drop(Some(issue(
             MetadataCategory::Exif,

@@ -15,7 +15,7 @@ let export = r3sizer_metadata::merge(encoded_output_bytes, &bundle, &output_fact
 
 ## What's preserved
 
-When present in the source and verifiable against the actual output, and for JPEG/PNG/WebP destinations: EXIF (orientation, GPS, camera settings, dates, copyright), XMP, IPTC, ICC color profiles, text comments, and pixel density. EXIF/XMP dimension, orientation, and color-space tags are corrected (bounded TIFF patching, not blind copy) to match the real output `OutputFacts` rather than left describing the pre-processed image.
+When present in the source and verifiable against the actual output, and for JPEG/PNG/WebP destinations: EXIF (orientation, GPS, camera settings, dates, copyright), XMP, IPTC, ICC color profiles, text comments, and pixel density. EXIF/XMP dimension and orientation tags are corrected (bounded TIFF patching, not blind copy) to match the real output `OutputFacts` rather than left describing the pre-processed image. EXIF ColorSpace/InteropIndex and XMP `exif:ColorSpace` are kept only when they already declare sRGB (or the caller guarantees unchanged pixels); a conflicting or unverified declaration (e.g. Uncalibrated + `R03`, as used for Adobe RGB without ICC) is removed and reported, never relabeled as sRGB.
 
 ## What's never preserved
 

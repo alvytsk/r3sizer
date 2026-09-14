@@ -706,34 +706,58 @@ mod tests {
         assert_eq!(format!("{}", field.display_value()), "10 deg 20 min 30 sec");
     }
 
-    #[test]
-    fn color_space_srgb_sets_known_value() {
+    /// IFD0 -> ExifIFD holding ColorSpace (SHORT) and, optionally, an
+    /// InteropIFD pointer to an InteropIndex (4-byte inline ASCII).
+    fn exif_with_color(color_space: u16, interop_index: Option<&[u8; 4]>) -> Vec<u8> {
         let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
         push_u16(&mut b, 1, true);
         push_u16(&mut b, 0x8769, true);
         push_u16(&mut b, 4, true);
         push_u32(&mut b, 1, true);
-        let exif_ifd_offset_pos = b.len();
-        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 26, true); // ExifIFD right after IFD0 (8 + 18)
         push_u32(&mut b, 0, true);
 
-        let exif_ifd_offset = b.len() as u32;
-        b[exif_ifd_offset_pos..exif_ifd_offset_pos + 4]
-            .copy_from_slice(&exif_ifd_offset.to_le_bytes());
-        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 1 + interop_index.is_some() as u16, true);
         push_u16(&mut b, 0xa001, true); // ColorSpace
         push_u16(&mut b, 3, true); // SHORT
         push_u32(&mut b, 1, true);
-        push_u32(&mut b, 0xFFFF, true); // Uncalibrated
+        push_u32(&mut b, color_space as u32, true);
+        if interop_index.is_some() {
+            let interop_offset = (b.len() + 12 + 4) as u32;
+            push_u16(&mut b, 0xa005, true); // InteropIFD pointer
+            push_u16(&mut b, 4, true);
+            push_u32(&mut b, 1, true);
+            push_u32(&mut b, interop_offset, true);
+        }
         push_u32(&mut b, 0, true);
 
-        let facts = OutputFacts {
-            width: 10,
-            height: 10,
-            orientation: OrientationAction::Preserve,
-            color: ColorAction::Srgb,
-        };
-        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        if let Some(index) = interop_index {
+            push_u16(&mut b, 1, true);
+            push_u16(&mut b, 0x0001, true); // InteropIndex
+            push_u16(&mut b, 2, true); // ASCII
+            push_u32(&mut b, 4, true);
+            b.extend(index);
+            push_u32(&mut b, 0, true);
+        }
+        b
+    }
+
+    fn has_issue(issues: &[MetadataIssue], field: &str) -> bool {
+        issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Unverified
+                && i.field.as_deref() == Some(field)
+        })
+    }
+
+    #[test]
+    fn color_space_srgb_keeps_existing_srgb_declarations_silently() {
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(1, Some(b"R98\0")),
+            &facts,
+            &MetadataLimits::default(),
+        );
         assert!(issues.is_empty(), "{issues:?}");
         let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
         assert_eq!(
@@ -743,6 +767,45 @@ mod tests {
                 .get_uint(0),
             Some(1)
         );
+        assert!(exif
+            .get_field(::exif::Tag::InteroperabilityIndex, ::exif::In::PRIMARY)
+            .is_some());
+    }
+
+    #[test]
+    fn color_space_srgb_drops_uncalibrated_r03_declaration_with_issues() {
+        // How cameras declare Adobe RGB without an ICC profile: must not be
+        // silently relabeled as sRGB.
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(0xFFFF, Some(b"R03\0")),
+            &facts,
+            &MetadataLimits::default(),
+        );
+        assert!(has_issue(&issues, "color_space"), "{issues:?}");
+        assert!(has_issue(&issues, "interop_index"), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+            .is_none());
+        assert!(exif
+            .get_field(::exif::Tag::InteroperabilityIndex, ::exif::In::PRIMARY)
+            .is_none());
+    }
+
+    #[test]
+    fn color_space_srgb_drops_non_srgb_value_with_issue() {
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(2, None),
+            &facts,
+            &MetadataLimits::default(),
+        );
+        assert!(has_issue(&issues, "color_space"), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+            .is_none());
     }
 
     #[test]
