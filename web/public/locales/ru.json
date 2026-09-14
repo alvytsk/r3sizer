@@ -149,7 +149,31 @@
     "max": "Макс",
     "high": "Выс",
     "std": "Станд",
-    "low": "Низк"
+    "low": "Низк",
+    "preparing": "Подготовка загрузки…",
+    "metadataPartial": "Загрузка подготовлена. Часть исходных метаданных не удалось сохранить.",
+    "metadataIssue": "{{category}}: {{reason}}",
+    "metadataIssueField": "{{category}} ({{field}}): {{reason}}",
+    "exportFailed": "Не удалось подготовить загрузку изображения.",
+    "metadataCategory": {
+      "exif": "EXIF",
+      "xmp": "XMP",
+      "iptc": "IPTC",
+      "icc": "Цветовой профиль",
+      "text": "Текст",
+      "thumbnail": "Миниатюра",
+      "maker_note": "Заметки производителя камеры",
+      "density": "Плотность пикселей",
+      "unknown": "Прочие метаданные"
+    },
+    "metadataReason": {
+      "unsupported": "Не поддерживается",
+      "malformed": "Повреждённые метаданные",
+      "removed_stale": "Удалено, так как не соответствует изображению",
+      "unverified": "Сохранение не удалось подтвердить",
+      "limit_exceeded": "Превышен лимит размера метаданных",
+      "merge_failed": "Не удалось добавить метаданные"
+    }
   },
   "status": {
     "ready": "готово"

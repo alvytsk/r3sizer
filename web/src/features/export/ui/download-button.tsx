@@ -1,61 +1,87 @@
 import { Download } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type ExportFormat, useExportPrefsStore } from "@/entities/export-preferences";
-import { useImageStore } from "@/entities/images";
+import { useExportPrefsStore } from "@/entities/export-preferences";
 import { useOutputStore } from "@/entities/outputs";
 import { Button } from "@/shared/ui/button";
-
-const FORMAT_EXT: Record<ExportFormat, string> = {
-  jpeg: "jpg",
-  png: "png",
-  webp: "webp",
-};
-
-const FORMAT_MIME: Record<ExportFormat, string> = {
-  jpeg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
+import { type ExportSnapshot, exportImage } from "../model/export-image";
+import { type ExportMessageState, MetadataMessage } from "./metadata-message";
 
 export function DownloadButton() {
   const { t } = useTranslation();
   const outputRgbaData = useOutputStore((s) => s.outputRgbaData);
   const outputWidth = useOutputStore((s) => s.outputWidth);
   const outputHeight = useOutputStore((s) => s.outputHeight);
-  const inputFile = useImageStore((s) => s.inputFile);
+  const outputSourceFile = useOutputStore((s) => s.outputSourceFile);
   const format = useExportPrefsStore((s) => s.exportFormat);
   const quality = useExportPrefsStore((s) => s.exportQuality);
   const setFormat = useExportPrefsStore((s) => s.setExportFormat);
   const setQuality = useExportPrefsStore((s) => s.setExportQuality);
 
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<ExportMessageState | null>(null);
+  // Synchronous duplicate-click guard (state updates are not synchronous enough).
+  const pendingRef = useRef(false);
+  // Bumped whenever the output this button would export changes, so a
+  // still-running export from before the change can detect it's stale.
+  const generationRef = useRef(0);
+  const outputRef = useRef({ outputSourceFile, outputRgbaData, outputWidth, outputHeight });
+
+  useEffect(() => {
+    const prev = outputRef.current;
+    if (
+      prev.outputSourceFile !== outputSourceFile ||
+      prev.outputRgbaData !== outputRgbaData ||
+      prev.outputWidth !== outputWidth ||
+      prev.outputHeight !== outputHeight
+    ) {
+      outputRef.current = { outputSourceFile, outputRgbaData, outputWidth, outputHeight };
+      generationRef.current += 1;
+      pendingRef.current = false;
+      setPending(false);
+      setMessage(null);
+    }
+  }, [outputSourceFile, outputRgbaData, outputWidth, outputHeight]);
+
   const handleDownload = useCallback(() => {
-    if (!outputRgbaData) return;
+    if (!outputRgbaData || !outputSourceFile || pendingRef.current) return;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = outputWidth;
-    canvas.height = outputHeight;
-    const ctx = canvas.getContext("2d")!;
-    const clamped = new Uint8ClampedArray(outputRgbaData.length);
-    clamped.set(outputRgbaData);
-    ctx.putImageData(new ImageData(clamped, outputWidth, outputHeight), 0, 0);
+    pendingRef.current = true;
+    setPending(true);
+    setMessage({ kind: "pending" });
+    const generation = generationRef.current;
 
-    const q = format === "png" ? undefined : quality / 100;
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) return;
+    const snapshot: ExportSnapshot = {
+      sourceFile: outputSourceFile,
+      rgba: outputRgbaData,
+      width: outputWidth,
+      height: outputHeight,
+      format,
+      quality,
+    };
+
+    exportImage(snapshot)
+      .then(({ blob, report, filename }) => {
+        if (generationRef.current !== generation) return; // output changed mid-export; discard
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        const stem = inputFile?.name.replace(/\.[^.]+$/, "") ?? "r3sizer";
-        a.download = `${stem}-${outputWidth}x${outputHeight}.${FORMAT_EXT[format]}`;
+        a.download = filename;
         a.click();
-        URL.revokeObjectURL(url);
-      },
-      FORMAT_MIME[format],
-      q,
-    );
-  }, [outputRgbaData, outputWidth, outputHeight, format, quality, inputFile]);
+        // Deferred so the browser has dispatched the download before the URL dies.
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+        setMessage(report.issues.length > 0 ? { kind: "report", report } : null);
+      })
+      .catch(() => {
+        if (generationRef.current !== generation) return;
+        setMessage({ kind: "error" });
+      })
+      .finally(() => {
+        if (generationRef.current !== generation) return;
+        pendingRef.current = false;
+        setPending(false);
+      });
+  }, [outputRgbaData, outputSourceFile, outputWidth, outputHeight, format, quality]);
 
   if (!outputRgbaData) return null;
 
@@ -68,63 +94,67 @@ export function DownloadButton() {
   ] as const;
 
   return (
-    <div className="flex items-center gap-2">
-      {/* Format selector — hidden below lg */}
-      <div className="hidden lg:flex rounded-md border border-border/40 overflow-hidden">
-        {(["jpeg", "png", "webp"] as const).map((fmt) => (
-          <button
-            key={fmt}
-            onClick={() => setFormat(fmt)}
-            className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
-              format === fmt
-                ? "bg-primary text-primary-foreground"
-                : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
-            }`}
-          >
-            {fmt.toUpperCase()}
-          </button>
-        ))}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        {/* Format selector — hidden below lg */}
+        <div className="hidden lg:flex rounded-md border border-border/40 overflow-hidden">
+          {(["jpeg", "png", "webp"] as const).map((fmt) => (
+            <button
+              key={fmt}
+              onClick={() => setFormat(fmt)}
+              className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
+                format === fmt
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
+              }`}
+            >
+              {fmt.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        {/* Quality presets (lossy) / Lossless badge (PNG) — stable layout */}
+        <div className="hidden xl:flex items-center">
+          {isLossy ? (
+            <div className="flex rounded-md border border-border/40 overflow-hidden">
+              {qualityPresets.map((preset) => (
+                <button
+                  key={preset.value}
+                  onClick={() => setQuality(preset.value)}
+                  className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
+                    quality === preset.value
+                      ? "bg-primary/20 text-primary"
+                      : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span className="px-2 py-1 text-[11px] font-mono text-muted-foreground border border-border/40 rounded-md bg-card">
+              {t("download.lossless")}
+            </span>
+          )}
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleDownload}
+          disabled={pending}
+          className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
+          title={
+            isLossy
+              ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })
+              : t("download.saveAsLossless", { format: format.toUpperCase() })
+          }
+        >
+          <Download className="h-3.5 w-3.5 mr-1" />
+          {/* Below lg: show format in button since selector is hidden */}
+          <span className="lg:hidden">{format.toUpperCase()}</span>
+          <span className="hidden lg:inline">{t("download.save")}</span>
+        </Button>
       </div>
-      {/* Quality presets (lossy) / Lossless badge (PNG) — stable layout */}
-      <div className="hidden xl:flex items-center">
-        {isLossy ? (
-          <div className="flex rounded-md border border-border/40 overflow-hidden">
-            {qualityPresets.map((preset) => (
-              <button
-                key={preset.value}
-                onClick={() => setQuality(preset.value)}
-                className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
-                  quality === preset.value
-                    ? "bg-primary/20 text-primary"
-                    : "bg-card text-foreground/60 hover:text-foreground hover:bg-accent"
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="px-2 py-1 text-[11px] font-mono text-muted-foreground border border-border/40 rounded-md bg-card">
-            {t("download.lossless")}
-          </span>
-        )}
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleDownload}
-        className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
-        title={
-          isLossy
-            ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })
-            : t("download.saveAsLossless", { format: format.toUpperCase() })
-        }
-      >
-        <Download className="h-3.5 w-3.5 mr-1" />
-        {/* Below lg: show format in button since selector is hidden */}
-        <span className="lg:hidden">{format.toUpperCase()}</span>
-        <span className="hidden lg:inline">{t("download.save")}</span>
-      </Button>
+      <MetadataMessage state={message} />
     </div>
   );
 }
