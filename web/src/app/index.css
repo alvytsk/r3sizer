@@ -99,46 +99,44 @@
   }
 
   .dark {
-    /* Refined darkroom: lighter charcoal with faint blue undertone */
-    --background: oklch(0.17 0.006 270);
-    --foreground: oklch(0.88 0.01 80);
-    --card: oklch(0.2 0.006 270);
-    --card-foreground: oklch(0.88 0.01 80);
-    --popover: oklch(0.22 0.006 270);
-    --popover-foreground: oklch(0.88 0.01 80);
+    /* Gruvbox dark (medium contrast). Warm, flat, no glow. */
+    --background: #282828;        /* bg0   */
+    --foreground: #ebdbb2;        /* fg1   */
+    --card: #32302f;              /* bg0_s */
+    --card-foreground: #ebdbb2;
+    --popover: #3c3836;           /* bg1   */
+    --popover-foreground: #ebdbb2;
 
-    /* Amber accent as primary */
-    --primary: oklch(0.78 0.16 75);
-    --primary-foreground: oklch(0.17 0.006 270);
-    --secondary: oklch(0.28 0.01 270);
-    --secondary-foreground: oklch(0.78 0.01 80);
-    --muted: oklch(0.28 0.01 270);
-    --muted-foreground: oklch(0.64 0.015 80);
-    --accent: oklch(0.3 0.01 270);
-    --accent-foreground: oklch(0.78 0.16 75);
+    --primary: #fabd2f;           /* yellow (bright) */
+    --primary-foreground: #282828;
+    --secondary: #3c3836;
+    --secondary-foreground: #d5c4a1;  /* fg2 */
+    --muted: #3c3836;
+    --muted-foreground: #a89984;      /* fg4 */
+    --accent: #504945;                /* bg2 */
+    --accent-foreground: #fabd2f;
 
-    --destructive: oklch(0.55 0.22 25);
-    --destructive-foreground: oklch(0.65 0.22 25);
+    --destructive: #fb4934;           /* red (bright) */
+    --destructive-foreground: #fb4934;
 
-    --border: oklch(0.32 0.012 270);
-    --input: oklch(0.3 0.01 270);
-    --ring: oklch(0.78 0.16 75);
+    --border: #504945;
+    --input: #3c3836;
+    --ring: #fabd2f;
 
-    /* Instrument-grade chart palette */
-    --chart-1: oklch(0.78 0.16 75);
-    --chart-2: oklch(0.65 0.14 230);
-    --chart-3: oklch(0.68 0.17 150);
-    --chart-4: oklch(0.6 0.15 310);
-    --chart-5: oklch(0.6 0.2 25);
+    --chart-1: #fabd2f;  /* yellow */
+    --chart-2: #83a598;  /* blue   */
+    --chart-3: #b8bb26;  /* green  */
+    --chart-4: #d3869b;  /* purple */
+    --chart-5: #fb4934;  /* red    */
 
-    --sidebar-background: oklch(0.2 0.006 270);
-    --sidebar-foreground: oklch(0.64 0.015 80);
-    --sidebar-primary: oklch(0.78 0.16 75);
-    --sidebar-primary-foreground: oklch(0.17 0.006 270);
-    --sidebar-accent: oklch(0.3 0.01 270);
-    --sidebar-accent-foreground: oklch(0.64 0.015 80);
-    --sidebar-border: oklch(0.32 0.012 270);
-    --sidebar-ring: oklch(0.78 0.16 75);
+    --sidebar-background: #32302f;
+    --sidebar-foreground: #a89984;
+    --sidebar-primary: #fabd2f;
+    --sidebar-primary-foreground: #282828;
+    --sidebar-accent: #504945;
+    --sidebar-accent-foreground: #a89984;
+    --sidebar-border: #504945;
+    --sidebar-ring: #fabd2f;
   }
 
   * {
@@ -194,12 +192,14 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  --color-amber: oklch(0.78 0.16 75);
-  --color-amber-dim: oklch(0.55 0.12 75);
-  --color-amber-bright: oklch(0.88 0.14 80);
-  --color-surface: oklch(0.24 0.008 270);
-  --color-surface-raised: oklch(0.3 0.01 270);
-  --color-panel-inset: oklch(0.13 0.004 270);
+  --color-amber: #fabd2f;
+  --color-amber-dim: #d79921;
+  --color-amber-bright: #fabd2f;
+  --color-orange: #fe8019;
+  --color-aqua: #8ec07c;
+  --color-surface: #3c3836;
+  --color-surface-raised: #504945;
+  --color-panel-inset: #1d2021;
 }
 
 /* Grain overlay for darkroom texture */
@@ -216,15 +216,11 @@
   }
 
   .glow-amber {
-    box-shadow:
-      0 0 20px oklch(0.78 0.16 75 / 0.15),
-      0 0 60px oklch(0.78 0.16 75 / 0.05);
+    box-shadow: none;
   }
 
   .glow-amber-text {
-    text-shadow:
-      0 0 30px oklch(0.78 0.16 75 / 0.3),
-      0 0 80px oklch(0.78 0.16 75 / 0.1);
+    text-shadow: none;
   }
 
   /* Hero entrance animation */
@@ -260,10 +256,10 @@
   @keyframes border-pulse {
     0%,
     100% {
-      border-color: oklch(0.78 0.16 75 / 0.15);
+      border-color: rgb(250 189 47 / 0.25);
     }
     50% {
-      border-color: oklch(0.78 0.16 75 / 0.4);
+      border-color: rgb(250 189 47 / 0.6);
     }
   }
 
@@ -273,7 +269,7 @@
 
   /* Footer top-edge gradient — frames the telemetry strip */
   .footer-separator {
-    background: linear-gradient(to bottom, oklch(0.78 0.16 75 / 0.08) 0px, transparent 3px);
+    background: linear-gradient(to bottom, rgb(250 189 47 / 0.08) 0px, transparent 3px);
   }
 
   /* Amber accent line — spatial anchor between header and content */
@@ -281,9 +277,9 @@
     background: linear-gradient(
       to right,
       transparent,
-      oklch(0.78 0.16 75 / 0.2) 15%,
-      oklch(0.78 0.16 75 / 0.35) 50%,
-      oklch(0.78 0.16 75 / 0.2) 85%,
+      rgb(250 189 47 / 0.2) 15%,
+      rgb(250 189 47 / 0.35) 50%,
+      rgb(250 189 47 / 0.2) 85%,
       transparent
     );
   }
@@ -299,7 +295,7 @@
   .crop-marks {
     --cm-size: 14px;
     --cm-weight: 1.5px;
-    --cm-color: oklch(0.78 0.16 75 / 0.35);
+    --cm-color: rgb(250 189 47 / 0.35);
     --cm-offset: -6px;
   }
 
@@ -311,15 +307,15 @@
     flex-shrink: 0;
   }
   .led-amber {
-    background: oklch(0.78 0.16 75);
-    box-shadow: 0 0 4px oklch(0.78 0.16 75 / 0.5);
+    background: #fabd2f;
+    box-shadow: 0 0 4px rgb(250 189 47 / 0.5);
   }
   .led-green {
-    background: oklch(0.68 0.17 150);
-    box-shadow: 0 0 4px oklch(0.68 0.17 150 / 0.5);
+    background: #b8bb26;
+    box-shadow: 0 0 4px rgb(184 187 38 / 0.5);
   }
   .led-dim {
-    background: oklch(0.35 0.01 270);
+    background: #504945;
     box-shadow: none;
   }
 }
@@ -350,7 +346,7 @@
 /* Styled scrollbar for dark theme */
 .dark {
   scrollbar-width: thin;
-  scrollbar-color: oklch(0.3 0.01 270) transparent;
+  scrollbar-color: #504945 transparent;
   scrollbar-gutter: stable;
 }
 .dark ::-webkit-scrollbar {
@@ -361,9 +357,9 @@
   background: transparent;
 }
 .dark ::-webkit-scrollbar-thumb {
-  background-color: oklch(0.3 0.01 270 / 0.6);
+  background-color: rgb(80 73 69 / 0.8);
   border-radius: 1.5px;
 }
 .dark ::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.45 0.02 75 / 0.8);
+  background-color: #665c54;
 }

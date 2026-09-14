@@ -34,14 +34,14 @@ export function WelcomeHero() {
               ]}
               easing={[0.16, 1, 0.3, 1]}
             />
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-green-500/25 bg-green-500/[0.06] text-xs font-mono tracking-wide">
-              <Lock className="h-3 w-3 text-green-400/80" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-chart-3/30 bg-chart-3/[0.08] text-xs font-mono tracking-wide">
+              <Lock className="h-3 w-3 text-chart-3" />
               <ShinyText
                 text={t("app.badge")}
                 speed={3.5}
                 delay={1}
-                color="oklch(0.72 0.15 145)"
-                shineColor="oklch(0.90 0.20 145)"
+                color="#b8bb26"
+                shineColor="#fbf1c7"
                 className="text-xs font-mono tracking-wide"
               />
             </span>

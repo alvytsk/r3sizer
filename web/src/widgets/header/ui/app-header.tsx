@@ -20,7 +20,7 @@ export function AppHeader({
           className={`flex items-center gap-2 flex-shrink-0 ${showLogoAction ? "cursor-pointer group" : "cursor-default"}`}
           title={showLogoAction ? t("app.returnHome") : undefined}
         >
-          <LogoMark className="h-[22px] w-[22px] text-primary transition-[filter] duration-150 group-hover:drop-shadow-[0_0_6px_oklch(0.78_0.16_75_/_0.5)]" />
+          <LogoMark className="h-[22px] w-[22px] text-primary transition-[filter] duration-150 group-hover:opacity-80" />
           <span className="font-mono text-sm font-bold tracking-tight text-primary">r3sizer</span>
         </button>
 

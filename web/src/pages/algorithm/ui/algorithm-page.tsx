@@ -242,7 +242,7 @@ function HeroCurve() {
         y1="215"
         x2="1200"
         y2="215"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1"
         strokeDasharray="8 5"
         opacity="0.15"
@@ -252,7 +252,7 @@ function HeroCurve() {
         y="219"
         fontSize="10"
         fontFamily="monospace"
-        fill="oklch(0.78 0.16 75)"
+        fill="#fabd2f"
         opacity="0.2"
       >
         P₀
@@ -261,14 +261,14 @@ function HeroCurve() {
       {/* Fill under curve — very subtle */}
       <path
         d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20 L 1150 340 Z"
-        fill="oklch(0.78 0.16 75)"
+        fill="#fabd2f"
         opacity="0.015"
       />
 
       {/* The cubic curve */}
       <path
         d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1.5"
         opacity="0.2"
         fill="none"
@@ -280,7 +280,7 @@ function HeroCurve() {
         y1="215"
         x2="700"
         y2="340"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1"
         strokeDasharray="3 3"
         opacity="0.12"
@@ -290,15 +290,15 @@ function HeroCurve() {
         y="356"
         fontSize="10"
         fontFamily="monospace"
-        fill="oklch(0.78 0.16 75)"
+        fill="#fabd2f"
         opacity="0.2"
       >
         s*
       </text>
 
       {/* Intersection dot with glow */}
-      <circle cx="700" cy="215" r="14" fill="oklch(0.78 0.16 75)" opacity="0.04" />
-      <circle cx="700" cy="215" r="4" fill="oklch(0.78 0.16 75)" opacity="0.4" />
+      <circle cx="700" cy="215" r="14" fill="#fabd2f" opacity="0.04" />
+      <circle cx="700" cy="215" r="4" fill="#fabd2f" opacity="0.4" />
 
       {/* Probe sample dots */}
       {probePoints.map((p, i) => (
@@ -839,28 +839,28 @@ export default function AlgorithmPage() {
               <p className="mt-2">Four selection outcomes are possible:</p>
               <ul className="mt-2 space-y-1.5 list-none">
                 <li className="flex gap-2">
-                  <span className="text-emerald-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-chart-3/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Polynomial root</strong> — ideal: <InlineMath tex="s^*" /> from cubic
                     solution
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-amber-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-primary/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Best sample within budget</strong> — largest probe within{" "}
                     <InlineMath tex="P_0" />
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-orange-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-orange/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Least bad sample</strong> — all probes exceed budget; pick minimum
                     metric
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-red-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-destructive/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Budget unreachable</strong> — no valid solution exists
                   </span>
@@ -1019,7 +1019,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="&#10003;"
-            markerClass="text-emerald-400/60"
+            markerClass="text-chart-3/60"
             items={[
               "All processing in linear RGB space",
               ["P", " = fraction of color values outside valid gamut"],
@@ -1035,7 +1035,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="&#9679;"
-            markerClass="text-amber-400/60"
+            markerClass="text-primary/60"
             items={[
               "Lanczos3 downscale kernel (exact kernel not confirmed)",
               "Unsharp mask sharpening operator (exact operator unknown)",
@@ -1052,7 +1052,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="?"
-            markerClass="text-blue-400/60"
+            markerClass="text-chart-2/60"
             items={[
               "Is the sharpening operator spatial USM, frequency-domain, or something else?",
               "Does P count per-channel, per-pixel, or a custom colour-space measure?",
