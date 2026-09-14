@@ -14,7 +14,10 @@ use std::io::Read;
 
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::limits::MetadataLimits;
-use crate::types::{MetadataCategory, MetadataIssue, MetadataIssueReason, MetadataReport};
+use crate::types::{
+    MetadataCategory, MetadataExport, MetadataIssue, MetadataIssueReason, MetadataReport,
+    OutputFacts,
+};
 
 /// Entry point used by `crate::extract`. Sniffs the container format from a
 /// magic-byte prefix and dispatches to the matching scanner. Source bytes
@@ -32,6 +35,30 @@ pub(crate) fn extract_payloads(source: &[u8], limits: &MetadataLimits) -> Metada
     }
 }
 
+/// Entry point used by `crate::merge`. Sniffs the *destination* container
+/// format and dispatches to the matching adapter, which inserts `prepared`'s
+/// payloads into `encoded` using `img-parts`, then re-validates the result
+/// with this module's own bounded scanners before returning it. A
+/// destination format this crate doesn't recognize at all can't be merged
+/// into, so every attempted category is reported `MergeFailed` and the
+/// original bytes are returned unchanged.
+pub(crate) fn embed(
+    encoded: Vec<u8>,
+    prepared: &MetadataBundle,
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> MetadataExport {
+    if is_jpeg(&encoded) {
+        jpeg::embed(encoded, prepared, facts, limits)
+    } else if is_png(&encoded) {
+        png::embed(encoded, prepared, facts, limits)
+    } else if is_webp(&encoded) {
+        webp::embed(encoded, prepared, facts, limits)
+    } else {
+        rollback(encoded, prepared)
+    }
+}
+
 fn is_jpeg(source: &[u8]) -> bool {
     source.len() >= 2 && source[0] == 0xFF && source[1] == 0xD8
 }
@@ -42,6 +69,76 @@ fn is_png(source: &[u8]) -> bool {
 
 fn is_webp(source: &[u8]) -> bool {
     source.len() >= 12 && &source[0..4] == b"RIFF" && &source[8..12] == b"WEBP"
+}
+
+/// The category a payload belongs to, used both for "this payload's
+/// category isn't supported by this destination" issues and for the
+/// `MergeFailed` rollback sweep.
+pub(crate) fn category_of(payload: &Payload) -> MetadataCategory {
+    match payload {
+        Payload::Exif(_) => MetadataCategory::Exif,
+        Payload::Xmp(_) => MetadataCategory::Xmp,
+        Payload::Iptc(_) => MetadataCategory::Iptc,
+        Payload::Icc(_) => MetadataCategory::Icc,
+        Payload::JpegComment(_) | Payload::PngText { .. } => MetadataCategory::Text,
+        Payload::JfifDensity { .. } | Payload::PngDensity { .. } => MetadataCategory::Density,
+    }
+}
+
+/// A short, fixed field name identifying a payload's kind in an issue --
+/// never the payload's own content.
+pub(crate) fn field_of(payload: &Payload) -> &'static str {
+    match payload {
+        Payload::Exif(_) => "exif",
+        Payload::Xmp(_) => "xmp",
+        Payload::Iptc(_) => "iptc",
+        Payload::Icc(_) => "icc",
+        Payload::JpegComment(_) => "com",
+        Payload::PngText { .. } => "text",
+        Payload::JfifDensity { .. } => "jfif",
+        Payload::PngDensity { .. } => "phys",
+    }
+}
+
+pub(crate) fn merge_issue(payload: &Payload, reason: MetadataIssueReason) -> MetadataIssue {
+    MetadataIssue {
+        category: category_of(payload),
+        reason,
+        field: Some(field_of(payload).to_string()),
+    }
+}
+
+/// A payload category this adapter never handles for this destination
+/// format at all (e.g. IPTC into PNG/WebP, PNG text into JPEG/WebP).
+pub(crate) fn unsupported(payload: &Payload) -> MetadataIssue {
+    merge_issue(payload, MetadataIssueReason::Unsupported)
+}
+
+/// A payload that would exceed a hard size limit for this destination
+/// format (e.g. a JPEG APP segment's 65,533-byte payload cap). Never
+/// truncated or split -- omitted outright.
+pub(crate) fn too_large(payload: &Payload) -> MetadataIssue {
+    merge_issue(payload, MetadataIssueReason::LimitExceeded)
+}
+
+/// Roll back a merge attempt: return the original destination bytes
+/// unchanged, with every payload category `prepared` tried to embed
+/// recorded as `MergeFailed` -- on top of (not replacing) `prepared`'s own
+/// extraction/correction/policy issues, since those already happened and
+/// are true regardless of whether the merge itself succeeded. No partial
+/// "this one made it in" claim survives a rollback: whatever issues an
+/// adapter accumulated while attempting individual payloads (`Unsupported`,
+/// `LimitExceeded`) are discarded in favor of a blanket `MergeFailed` for
+/// every category that was attempted.
+pub(crate) fn rollback(original: Vec<u8>, prepared: &MetadataBundle) -> MetadataExport {
+    let mut issues = prepared.report().issues.clone();
+    for payload in &prepared.payloads {
+        issues.push(merge_issue(payload, MetadataIssueReason::MergeFailed));
+    }
+    MetadataExport {
+        bytes: original,
+        report: MetadataReport { issues },
+    }
 }
 
 /// Typed decompression outcome, so callers never classify failures by

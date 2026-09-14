@@ -22,6 +22,8 @@ pub use types::{
     MetadataReport, OrientationAction, OutputFacts,
 };
 
+use bundle::Payload;
+
 /// Extract metadata from source bytes.
 ///
 /// Sniffs the container format (JPEG/PNG/WebP) from its magic bytes and
@@ -36,19 +38,30 @@ pub fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle {
     containers::extract_payloads(source, limits)
 }
 
-/// Merge metadata into encoded output using conservative fallback.
+/// Merge metadata from a source bundle into already-encoded destination
+/// bytes.
 ///
-/// Returns the original `encoded` bytes unchanged on unsupported destinations.
-/// The report is preserved from the source bundle.
+/// Runs `policy::prepare` (color/density policy plus EXIF/XMP correction)
+/// using the destination's *own* current ICC profile -- read from `encoded`
+/// itself via the same conservative extraction `extract()` uses, so a
+/// source ICC profile is only ever retained when it can be proven to match
+/// what the destination encoder already declares -- then hands the
+/// corrected bundle to the destination-format adapter in `containers`.
+///
+/// Returns the original `encoded` bytes unchanged, with every attempted
+/// category reported as `MergeFailed`, if the destination format isn't
+/// recognized or the container can't be safely mutated.
 pub fn merge(
     encoded: Vec<u8>,
     source: &MetadataBundle,
-    _facts: &OutputFacts,
-    _limits: &MetadataLimits,
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
 ) -> MetadataExport {
-    // Conservative fallback: return original bytes, preserve source report
-    MetadataExport {
-        bytes: encoded,
-        report: source.report().clone(),
-    }
+    let destination_bundle = containers::extract_payloads(&encoded, limits);
+    let destination_icc = destination_bundle.payloads.iter().find_map(|p| match p {
+        Payload::Icc(bytes) => Some(bytes.clone()),
+        _ => None,
+    });
+    let prepared = policy::prepare(source, facts, destination_icc.as_deref(), limits);
+    containers::embed(encoded, &prepared, facts, limits)
 }

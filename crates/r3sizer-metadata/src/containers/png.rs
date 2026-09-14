@@ -7,10 +7,13 @@
 //! copied as payloads, since color handling is a resize-pipeline policy
 //! decision, not metadata to carry through verbatim.
 
+use img_parts::png::{Png, PngChunk};
+use img_parts::{Bytes, ImageICC};
+
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::containers::{inflate_bounded, Collector, InflateError};
 use crate::limits::{checked_range, MetadataLimits};
-use crate::types::{MetadataCategory, MetadataIssueReason};
+use crate::types::{MetadataCategory, MetadataExport, MetadataIssueReason, MetadataReport, OutputFacts};
 
 const XMP_KEYWORD: &[u8] = b"XML:com.adobe.xmp";
 
@@ -442,6 +445,209 @@ fn store_itxt_plain(is_xmp: bool, data: &[u8], text_bytes: &[u8], collector: &mu
             "text",
         );
     }
+}
+
+// --- Merge / embed ---------------------------------------------------------
+
+const CHUNK_IDAT: [u8; 4] = *b"IDAT";
+const CHUNK_EXIF: [u8; 4] = *b"eXIf";
+const CHUNK_PHYS: [u8; 4] = *b"pHYs";
+
+/// Insert `prepared`'s payloads into an already-encoded destination PNG.
+///
+/// `img-parts`'s own `Png::set_exif` inserts right before `IEND` -- after
+/// any `IDAT`, which the PNG spec forbids for `eXIf` (it must precede the
+/// first `IDAT`) -- so EXIF and `pHYs` (also "before IDAT") are placed by
+/// hand here rather than via that method. `set_icc_profile` is reused as-is
+/// since it inserts right after `IHDR`, which is always legal.
+pub(crate) fn embed(
+    encoded: Vec<u8>,
+    prepared: &MetadataBundle,
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> MetadataExport {
+    let mut png = match Png::from_bytes(Bytes::from(encoded.clone())) {
+        Ok(p) => p,
+        Err(_) => return super::rollback(encoded, prepared),
+    };
+
+    let mut attempt_issues = Vec::new();
+    let mut attempted: Vec<&Payload> = Vec::new();
+    let mut stripped_text = false;
+
+    for payload in &prepared.payloads {
+        match payload {
+            Payload::Exif(bytes) => {
+                if bytes.len() > limits.max_payload_bytes {
+                    attempt_issues.push(super::too_large(payload));
+                } else {
+                    set_exif_before_idat(&mut png, bytes);
+                    attempted.push(payload);
+                }
+            }
+            Payload::Xmp(bytes) => {
+                set_xmp(&mut png, bytes);
+                attempted.push(payload);
+            }
+            Payload::Icc(bytes) => {
+                png.set_icc_profile(Some(Bytes::from(bytes.clone())));
+                attempted.push(payload);
+            }
+            Payload::PngText { kind, data } => {
+                if !stripped_text {
+                    strip_non_xmp_text(&mut png);
+                    stripped_text = true;
+                }
+                insert_before_iend(&mut png, PngChunk::new(*kind, Bytes::from(data.clone())));
+                attempted.push(payload);
+            }
+            Payload::PngDensity { x, y, unit } => {
+                set_phys(&mut png, *x, *y, *unit);
+                attempted.push(payload);
+            }
+            // No PNG container concept for JPEG-only IPTC/comment/density.
+            Payload::Iptc(_) | Payload::JpegComment(_) | Payload::JfifDensity { .. } => {
+                attempt_issues.push(super::unsupported(payload));
+            }
+        }
+    }
+
+    let mut merged = Vec::with_capacity(png.len());
+    if png.encoder().write_to(&mut merged).is_err() {
+        return super::rollback(encoded, prepared);
+    }
+
+    if !validate(&merged, &attempted, facts, limits) {
+        return super::rollback(encoded, prepared);
+    }
+
+    let mut issues = prepared.report().issues.clone();
+    issues.extend(attempt_issues);
+    MetadataExport {
+        bytes: merged,
+        report: MetadataReport { issues },
+    }
+}
+
+fn first_idat_index(png: &Png) -> Option<usize> {
+    png.chunks().iter().position(|c| c.kind() == CHUNK_IDAT)
+}
+
+/// Insertion point that satisfies "before IDAT": the first `IDAT` chunk's
+/// index, or (a destination with no `IDAT` at all is already broken) right
+/// before `IEND` as a last resort.
+fn before_idat_pos(png: &Png) -> usize {
+    first_idat_index(png).unwrap_or_else(|| png.chunks().len().saturating_sub(1))
+}
+
+fn insert_before_iend(png: &mut Png, chunk: PngChunk) {
+    let pos = png.chunks().len().saturating_sub(1);
+    png.chunks_mut().insert(pos, chunk);
+}
+
+fn set_exif_before_idat(png: &mut Png, exif: &[u8]) {
+    png.remove_chunks_by_type(CHUNK_EXIF);
+    let pos = before_idat_pos(png);
+    png.chunks_mut().insert(pos, PngChunk::new(CHUNK_EXIF, Bytes::from(exif.to_vec())));
+}
+
+fn is_xmp_itxt(contents: &[u8]) -> bool {
+    contents.starts_with(XMP_KEYWORD) && contents.get(XMP_KEYWORD.len()) == Some(&0)
+}
+
+/// No `ImageXMP`-style trait exists in `img-parts`, so this builds the iTXt
+/// payload by hand: keyword, empty compression flag/method, empty
+/// language/translated-keyword fields, then the raw XMP text -- matching
+/// what `handle_itxt` in this file's extractor reads back as XMP.
+fn set_xmp(png: &mut Png, xmp: &[u8]) {
+    png.chunks_mut().retain(|c| !(c.kind() == *b"iTXt" && is_xmp_itxt(c.contents())));
+    let mut contents = XMP_KEYWORD.to_vec();
+    contents.push(0); // end keyword
+    contents.push(0); // compression flag
+    contents.push(0); // compression method
+    contents.push(0); // empty language tag
+    contents.push(0); // empty translated keyword
+    contents.extend_from_slice(xmp);
+    insert_before_iend(png, PngChunk::new(*b"iTXt", Bytes::from(contents)));
+}
+
+/// Strip destination `tEXt`/`zTXt`/plain `iTXt` chunks (but never the XMP
+/// `iTXt`, which `set_xmp` owns) before replacing the Text category with
+/// the source's own text chunks.
+fn strip_non_xmp_text(png: &mut Png) {
+    png.chunks_mut().retain(|c| {
+        !matches!(c.kind(), [b't', b'E', b'X', b't'] | [b'z', b'T', b'X', b't'])
+            && !(c.kind() == *b"iTXt" && !is_xmp_itxt(c.contents()))
+    });
+}
+
+/// Set the destination's `pHYs` chunk: patched in place if one already
+/// exists, or inserted fresh (before the first `IDAT`, per the "before
+/// IDAT" ordering constraint) otherwise.
+fn set_phys(png: &mut Png, x: u32, y: u32, unit: u8) {
+    let mut contents = Vec::with_capacity(9);
+    contents.extend_from_slice(&x.to_be_bytes());
+    contents.extend_from_slice(&y.to_be_bytes());
+    contents.push(unit);
+    let chunk = PngChunk::new(CHUNK_PHYS, Bytes::from(contents));
+    if let Some(idx) = png.chunks().iter().position(|c| c.kind() == CHUNK_PHYS) {
+        png.chunks_mut()[idx] = chunk;
+    } else {
+        let pos = before_idat_pos(png);
+        png.chunks_mut().insert(pos, chunk);
+    }
+}
+
+/// Re-scan the just-written bytes with this module's own bounded extractor
+/// and confirm every payload we attempted round-trips byte-identically,
+/// with no new structural damage and dimensions matching `facts`. Never
+/// inflates IDAT.
+fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: &MetadataLimits) -> bool {
+    let bundle = extract(merged, limits);
+    if bundle
+        .report()
+        .issues
+        .iter()
+        .any(|i| i.reason == MetadataIssueReason::Malformed)
+    {
+        return false;
+    }
+    for payload in attempted {
+        let present = match payload {
+            Payload::Exif(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Exif(pb) if pb == b)),
+            Payload::Xmp(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Xmp(pb) if pb == b)),
+            Payload::Icc(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Icc(pb) if pb == b)),
+            Payload::PngText { kind, data } => bundle.payloads.iter().any(|p| {
+                matches!(p, Payload::PngText { kind: pk, data: pd } if pk == kind && pd == data)
+            }),
+            Payload::PngDensity { x, y, unit } => bundle.payloads.iter().any(|p| {
+                matches!(p, Payload::PngDensity { x: px, y: py, unit: pu }
+                    if px == x && py == y && pu == unit)
+            }),
+            Payload::Iptc(_) | Payload::JpegComment(_) | Payload::JfifDensity { .. } => true,
+        };
+        if !present {
+            return false;
+        }
+    }
+    matches!(dimensions(merged), Some((w, h)) if w == facts.width && h == facts.height)
+}
+
+/// Read width/height directly from IHDR's first 8 bytes, without
+/// interpreting any other chunk. Requires IHDR to actually be the first
+/// chunk with its spec-mandated 13-byte body (already true of anything
+/// `extract`/`validate` above accepted).
+fn dimensions(source: &[u8]) -> Option<(u32, u32)> {
+    if !source.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return None;
+    }
+    let range = checked_range(8, 25, 1, source.len())?; // len(4)+"IHDR"(4)+data(13)+crc(4)
+    if &source[range.start + 4..range.start + 8] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes(source[range.start + 8..range.start + 12].try_into().unwrap());
+    let height = u32::from_be_bytes(source[range.start + 12..range.start + 16].try_into().unwrap());
+    Some((width, height))
 }
 
 #[cfg(test)]

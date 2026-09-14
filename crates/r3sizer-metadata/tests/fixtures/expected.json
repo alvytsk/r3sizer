@@ -1,0 +1,16 @@
+{
+  "artist": "Fixture Author",
+  "copyright": "Fixture Copyright",
+  "date_time_original": "2024:01:02 03:04:05",
+  "gps_latitude": "1 deg 2 min 3 sec",
+  "gps_latitude_ref": "N",
+  "gps_longitude": "4 deg 5 min 6 sec",
+  "gps_longitude_ref": "E",
+  "height": 16,
+  "image_description": "Metadata fixture",
+  "tiff_value_offsets": {
+    "ifd0_offset": 8,
+    "note": "offsets are relative to the start of the TIFF block (the Exif payload after 'Exif\\0\\0'); see build_tiff() in this file for the exact layout"
+  },
+  "width": 32
+}

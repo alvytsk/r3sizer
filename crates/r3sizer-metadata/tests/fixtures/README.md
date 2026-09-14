@@ -25,3 +25,55 @@ Rationale:
 
 No fixture in this crate was downloaded, copied, or derived from an
 external image file.
+
+## Binary fixtures (Task 5: merge/roundtrip)
+
+`plain.{jpg,png,webp}` and `metadata.{jpg,png,webp}` (plus `expected.json`)
+are the only *binary* fixtures in this crate, used by `tests/roundtrip.rs`
+to exercise `merge()` against real encoder output (byte-splicing metadata
+into a container is one thing; making sure a real third-party encoder's
+output survives it is another). They are committed, generated once, and
+never rewritten by the normal test run.
+
+Regenerate them with:
+
+```sh
+cargo test -p r3sizer-metadata --test gen_fixtures -- --ignored --nocapture
+```
+
+That command (`tests/gen_fixtures.rs`) is the authoritative recipe:
+
+1. A 32x16 `image::RgbImage` (a plain two-tone color block, no photograph)
+   is encoded to JPEG/PNG/WebP bytes using the `image` crate's own
+   encoders directly -- this is `plain.{jpg,png,webp}`.
+2. A little-endian classic TIFF block is hand-built byte-by-byte (own code,
+   not `src/exif`) carrying: `Artist` = "Fixture Author", `Copyright` =
+   "Fixture Copyright", `ImageDescription` = "Metadata fixture", an
+   `ExifIFD` with `DateTimeOriginal` = "2024:01:02 03:04:05", and a
+   `GPSIFD` for 1 deg 2 min 3 sec N, 4 deg 5 min 6 sec E.
+3. That TIFF block is spliced into each `plain.*` file's bytes by hand to
+   produce `metadata.*`:
+   - JPEG: an APP1 segment (`FF E1`, big-endian length `2 + 6 + tiff.len()`,
+     payload `Exif\0\0` + TIFF) inserted right after SOI (after the
+     APP0/JFIF segment, if the encoder wrote one, since JFIF must stay the
+     first marker).
+   - PNG: an `eXIf` chunk (length + type + data + CRC32) inserted
+     immediately before the first `IDAT` chunk, since PNG requires `eXIf`
+     to precede image data.
+   - WebP: the plain VP8L "simple" file is upgraded to the "extended"
+     (VP8X) form: a `VP8X` chunk (flags byte `0x08` for EXIF only -- this
+     image has no alpha and isn't animated) becomes the first chunk, the
+     original VP8L chunk follows unchanged, and an `EXIF` chunk is
+     appended; the outer RIFF size field is recomputed.
+4. Every `metadata.*` file is independently read back with `kamadak-exif`
+   (a real, independent EXIF reader, not this crate's own) to confirm
+   `Artist` is actually present and correct before anything is written to
+   disk.
+5. `expected.json` records the fixture dimensions and every injected
+   EXIF/GPS value as plain strings, so `tests/roundtrip.rs` can assert
+   against one source of truth instead of repeating literals.
+
+If ExifTool (`exiftool`) is installed, running it against `metadata.jpg`
+independently (`exiftool tests/fixtures/metadata.jpg`) is a useful sanity
+check during fixture preparation, but it is not a runtime dependency of
+this crate and no test depends on its presence.
