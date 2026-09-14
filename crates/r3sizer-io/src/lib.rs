@@ -7,10 +7,18 @@
 
 pub mod convert;
 pub mod load;
+pub mod metadata;
 pub mod save;
 
 pub use load::{load_as_linear, load_as_linear_with_limits, DecodeLimits};
+pub use metadata::{load_with_metadata, save_with_metadata, LoadedImage};
 pub use save::save_from_linear;
+
+// Re-exported so downstream crates (e.g. the CLI) can consume metadata
+// reports/limits without adding `r3sizer-metadata` as their own dependency.
+pub use r3sizer_metadata::{
+    MetadataCategory, MetadataIssue, MetadataIssueReason, MetadataLimits, MetadataReport,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
