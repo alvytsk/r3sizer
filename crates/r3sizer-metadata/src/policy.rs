@@ -169,11 +169,20 @@ fn is_structurally_valid_icc(bytes: &[u8], limits: &MetadataLimits) -> bool {
 /// Deduplicate by `(category, reason, field)`, keeping first-seen order.
 /// Linear `contains` scan rather than a `HashSet`: `MetadataCategory`/
 /// `MetadataIssueReason` don't derive `Hash` (out of this task's scope to
-/// add), and issue lists are bounded by `MetadataLimits::max_records`, so
-/// this never runs against more than a few dozen entries in practice.
+/// add). That's fine here for two independent reasons -- not
+/// `MetadataLimits::max_records`, which bounds extracted *payload* records
+/// per container (see `containers/mod.rs`), not how many issues a single
+/// XMP packet's repeated removed elements can generate. First, the
+/// deduplicated key space is small and fixed: a handful of
+/// `MetadataCategory`/`MetadataIssueReason` variants crossed with `field`
+/// values that are always short literal strings (never user data), so
+/// `seen` stops growing almost immediately regardless of how many raw
+/// issues come in. Second, the raw issue count itself is still bounded --
+/// by `MetadataLimits::max_payload_bytes`, which caps how many removable
+/// elements a single EXIF/XMP payload can even contain.
 ///
-/// ponytail: O(n^2); switch to a `HashSet` key if these enums ever grow
-/// `Hash` derives for other reasons, or if issue lists get large.
+/// ponytail: O(n^2) in the deduplicated-key count, which stays tiny;
+/// revisit only if these enums ever grow `Hash` derives for other reasons.
 fn dedup_issues(issues: Vec<MetadataIssue>) -> Vec<MetadataIssue> {
     let mut seen: Vec<(MetadataCategory, MetadataIssueReason, Option<String>)> = Vec::new();
     let mut out = Vec::with_capacity(issues.len());

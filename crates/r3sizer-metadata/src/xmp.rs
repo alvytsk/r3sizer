@@ -76,6 +76,33 @@ enum TagKind {
 /// one this module ever touches (which is nearly everything -- arrays,
 /// rights, GPS, `dc:*`, custom namespaces, and so on all fall through here
 /// and are copied verbatim by `rewrite`).
+///
+/// ## `photoshop:LegacyIPTCDigest` is deliberately absent from this list
+///
+/// The brief calls for omitting stale digest/signature properties after a
+/// packet edit, and `photoshop:LegacyIPTCDigest`
+/// (`http://ns.adobe.com/photoshop/1.0/`) is the well-known real-world case
+/// that fits that description: an MD5 digest camera- and
+/// Photoshop-produced XMP carries over the *legacy IPTC IIM block*, used by
+/// editors to detect whether that IIM block has since been changed by a
+/// tool that doesn't understand XMP.
+///
+/// It is not classified here because reasoning through what it actually
+/// hashes shows it doesn't go stale from anything this crate does: it
+/// digests the raw IPTC IIM bytes, not any XMP property, and not the
+/// image's pixels or dimensions. `xmp::correct` never touches IPTC content
+/// at all, and `policy::prepare` (see `policy.rs`) passes `Payload::Iptc`
+/// through byte-for-byte unchanged -- the IIM block this digest describes
+/// is bit-identical in the output to what it was in the source. Dropping
+/// the digest anyway would only discard metadata a downstream editor could
+/// still use correctly, for no reason tied to what this task changes.
+///
+/// This holds only as long as nothing in this crate rewrites IPTC IIM
+/// bytes. If a future task starts editing `Payload::Iptc`, this reasoning
+/// no longer holds and `photoshop:LegacyIPTCDigest` should be added to the
+/// remove list below at that point (see
+/// `legacy_iptc_digest_is_preserved_since_iptc_bytes_are_never_edited` for
+/// the regression test guarding this).
 fn classify(ns: &[u8], local: &[u8]) -> Option<TagKind> {
     match (ns, local) {
         (TIFF_NS, b"ImageWidth") => Some(TagKind::Managed(ManagedTag::Width)),
@@ -931,6 +958,26 @@ mod tests {
                 && i.reason == Reason::RemovedStale
                 && i.field.as_deref() == Some("modify_date")
         }));
+    }
+
+    #[test]
+    fn legacy_iptc_digest_is_preserved_since_iptc_bytes_are_never_edited() {
+        // See the doc comment on `classify` for the full reasoning: this
+        // digest hashes the legacy IPTC IIM block, not any XMP property or
+        // the image's pixels/dimensions, and `policy::prepare` never
+        // rewrites `Payload::Iptc` either -- so, unlike `xmp:ModifyDate`,
+        // it never goes stale from anything this crate does and must
+        // survive byte-for-byte, with no issue raised about it.
+        let raw = br#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+          xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+          photoshop:LegacyIPTCDigest="D41D8CD98F00B204E9800998ECF8427E">
+          <rdf:Description/>
+        </rdf:RDF>"#;
+        let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let text = String::from_utf8(bytes.unwrap()).unwrap();
+        assert!(text.contains("photoshop:LegacyIPTCDigest=\"D41D8CD98F00B204E9800998ECF8427E\""));
     }
 
     #[test]
