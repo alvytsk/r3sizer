@@ -22,6 +22,7 @@ use crate::exif::reader::{
     TAG_MAKER_NOTE, TAG_ORIENTATION, TAG_PIXEL_X_DIM, TAG_PIXEL_Y_DIM, TAG_SUB_IFDS, TYPE_ASCII,
     TYPE_LONG, TYPE_SHORT, TYPE_UNDEFINED,
 };
+use crate::limits::checked_range;
 use crate::types::{
     ColorAction, MetadataCategory, MetadataIssue, MetadataIssueReason, OrientationAction,
     OutputFacts,
@@ -41,6 +42,74 @@ const SAFE_UNDEFINED_TAGS: &[u16] = &[
     0xa301, // SceneType
 ];
 
+/// Curated "known good" standard tags per IFD, retained silently. This is
+/// deliberately not an exhaustive registry of every TIFF/EXIF/GPS tag --
+/// just the common descriptive/measurement fields the brief calls out by
+/// name (capture date, copyright, GPS, capture settings). Anything with a
+/// resolvable, non-opaque value that ISN'T in this list is still retained
+/// (a standard scalar/array/string type carries no pointer semantics of
+/// its own), but with an `Unverified` issue: the brief mandates this
+/// ("standard scalar unknown values may be retained only with an
+/// unverified issue"), so an unrecognized standard-typed tag is never
+/// silently treated as equivalent to a vetted one.
+const KNOWN_IFD0_TAGS: &[u16] = &[
+    0x010e, // ImageDescription
+    0x010f, // Make
+    0x0110, // Model
+    0x011a, // XResolution
+    0x011b, // YResolution
+    0x0128, // ResolutionUnit
+    0x0131, // Software
+    0x0132, // DateTime
+    0x013b, // Artist
+    0x0213, // YCbCrPositioning
+    0x8298, // Copyright
+];
+
+const KNOWN_EXIF_TAGS: &[u16] = &[
+    0x8822, // ExposureProgram
+    0x8827, // ISOSpeedRatings
+    0x829a, // ExposureTime
+    0x829d, // FNumber
+    0x9003, // DateTimeOriginal
+    0x9004, // DateTimeDigitized
+    0x9201, // ShutterSpeedValue
+    0x9202, // ApertureValue
+    0x9204, // ExposureBiasValue
+    0x9205, // MaxApertureValue
+    0x9207, // MeteringMode
+    0x9208, // LightSource
+    0x9209, // Flash
+    0x920a, // FocalLength
+    0xa402, // ExposureMode
+    0xa403, // WhiteBalance
+    0xa406, // SceneCaptureType
+];
+
+const KNOWN_GPS_TAGS: &[u16] = &[
+    0x0000, // GPSVersionID
+    0x0001, // GPSLatitudeRef
+    0x0002, // GPSLatitude
+    0x0003, // GPSLongitudeRef
+    0x0004, // GPSLongitude
+    0x0005, // GPSAltitudeRef
+    0x0006, // GPSAltitude
+    0x0007, // GPSTimeStamp
+    0x001d, // GPSDateStamp
+];
+
+fn is_known_standard_tag(kind: IfdKind, tag: u16) -> bool {
+    match kind {
+        IfdKind::Ifd0 => KNOWN_IFD0_TAGS.contains(&tag),
+        IfdKind::ExifIfd => KNOWN_EXIF_TAGS.contains(&tag),
+        IfdKind::GpsIfd => KNOWN_GPS_TAGS.contains(&tag),
+        // InteropIndex is the only standard InteropIFD tag and it's already
+        // handled specially; Thumbnail IFDs never reach generic_decision at
+        // all (the whole IFD is discarded wholesale).
+        IfdKind::InteropIfd | IfdKind::Thumbnail => false,
+    }
+}
+
 /// The selector mapping a dimension tag to the output dimension it holds.
 pub(super) fn output_dimension(tag: u16, width: u32, height: u32) -> Option<u32> {
     match tag {
@@ -59,6 +128,9 @@ struct FinalEntry {
 
 enum Decision {
     Keep(FinalEntry),
+    /// Retained, but not a curated "known good" tag for this IFD: carries
+    /// an `Unverified` issue alongside the kept entry.
+    KeepWithIssue(FinalEntry, MetadataIssue),
     Drop(Option<MetadataIssue>),
 }
 
@@ -83,13 +155,22 @@ fn verbatim(e: &Entry) -> FinalEntry {
     }
 }
 
-/// Any entry not given specific tag-based handling below. A value typed
-/// UNDEFINED is treated as an opaque, potentially offset-bearing blob unless
-/// its tag is a known-safe standard field; anything else with a resolvable
-/// value is retained as-is (a standard scalar/array/string type carries no
-/// pointer semantics of its own, so its offset, if any, is safe to keep
-/// unchanged).
-fn generic_decision(e: &Entry) -> Decision {
+/// Any entry not given specific tag-based handling below.
+///
+/// - `EntryValue::Invalid`: dropped, `Malformed` -- its extent can't be
+///   trusted at all.
+/// - Typed UNDEFINED and not in `SAFE_UNDEFINED_TAGS`: dropped,
+///   `Unverified` -- opaque application-defined data that may itself embed
+///   offsets (this is how MakerNote-shaped garbage and other proprietary
+///   blobs get caught even if they arrive under an unexpected tag number).
+/// - A curated "known good" tag for this IFD (`is_known_standard_tag`) or
+///   a safe-listed UNDEFINED tag: retained silently.
+/// - Anything else with a resolvable value: retained, but with an
+///   `Unverified` issue. A standard scalar/array/string type carries no
+///   pointer semantics of its own, so it's still safe to keep unchanged --
+///   but it hasn't been vetted as one of the fields this crate specifically
+///   understands, so it isn't blessed as equivalent to a curated one.
+fn generic_decision(kind: IfdKind, e: &Entry) -> Decision {
     match e.value {
         EntryValue::Invalid => Decision::Drop(Some(issue(
             MetadataCategory::Exif,
@@ -97,14 +178,24 @@ fn generic_decision(e: &Entry) -> Decision {
             &tag_field(e.tag),
         ))),
         _ => {
-            if e.kind == TYPE_UNDEFINED && !SAFE_UNDEFINED_TAGS.contains(&e.tag) {
+            let safe_undefined = e.kind == TYPE_UNDEFINED && SAFE_UNDEFINED_TAGS.contains(&e.tag);
+            if e.kind == TYPE_UNDEFINED && !safe_undefined {
                 Decision::Drop(Some(issue(
                     MetadataCategory::Unknown,
                     MetadataIssueReason::Unverified,
                     &tag_field(e.tag),
                 )))
-            } else {
+            } else if safe_undefined || is_known_standard_tag(kind, e.tag) {
                 Decision::Keep(verbatim(e))
+            } else {
+                Decision::KeepWithIssue(
+                    verbatim(e),
+                    issue(
+                        MetadataCategory::Exif,
+                        MetadataIssueReason::Unverified,
+                        &tag_field(e.tag),
+                    ),
+                )
             }
         }
     }
@@ -267,7 +358,7 @@ fn decide(kind: IfdKind, e: &Entry, endian: Endian, facts: &OutputFacts) -> Deci
             MetadataIssueReason::RemovedStale,
             "preview",
         ))),
-        _ => generic_decision(e),
+        _ => generic_decision(kind, e),
     }
 }
 
@@ -282,7 +373,7 @@ struct Plan {
     issues: Vec<MetadataIssue>,
 }
 
-fn plan_ifd(ifd: &Ifd, endian: Endian, facts: &OutputFacts) -> Plan {
+fn plan_ifd(ifd: &Ifd, endian: Endian, facts: &OutputFacts, raw_len: usize) -> Plan {
     let mut kept = Vec::new();
     let mut retained_ranges = Vec::new();
     let mut zero_ranges = Vec::new();
@@ -296,6 +387,13 @@ fn plan_ifd(ifd: &Ifd, endian: Endian, facts: &OutputFacts) -> Plan {
                 }
                 kept.push(final_entry);
             }
+            Decision::KeepWithIssue(final_entry, iss) => {
+                if let EntryValue::OutOfLine(r) = &e.value {
+                    retained_ranges.push(r.clone());
+                }
+                kept.push(final_entry);
+                issues.push(iss);
+            }
             Decision::Drop(issue) => {
                 if let EntryValue::OutOfLine(r) = &e.value {
                     zero_ranges.push(r.clone());
@@ -307,12 +405,44 @@ fn plan_ifd(ifd: &Ifd, endian: Endian, facts: &OutputFacts) -> Plan {
         }
     }
 
+    // JPEGInterchangeFormat/Length (0x0201/0x0202) are always inline scalars
+    // (count-one LONGs), so the reader has no way to know their *numeric
+    // values* are themselves an offset+length pointing at real preview
+    // bytes elsewhere in the file. `decide()` above only drops the two
+    // directory entries; this resolves what they pointed at so the actual
+    // preview bytes get zeroed too, not just the pointer.
+    if let Some(r) = resolve_preview_range(&ifd.entries, endian, raw_len) {
+        zero_ranges.push(r);
+    }
+
     Plan {
         kept,
         retained_ranges,
         zero_ranges,
         issues,
     }
+}
+
+/// Resolve a JPEGInterchangeFormat (`0x0201`) / JPEGInterchangeFormatLength
+/// (`0x0202`) pair, if both are present with a valid count-one LONG shape,
+/// into the byte range of the preview JPEG they point at. Returns `None`
+/// if either tag is missing/malformed or the resolved range doesn't fit in
+/// the buffer -- callers already treat "nothing to zero" as safe.
+fn resolve_preview_range(
+    entries: &[Entry],
+    endian: Endian,
+    raw_len: usize,
+) -> Option<Range<usize>> {
+    let offset_entry = entries.iter().find(|e| e.tag == TAG_JPEG_IF_OFFSET)?;
+    let length_entry = entries.iter().find(|e| e.tag == TAG_JPEG_IF_LENGTH)?;
+    let valid =
+        |e: &Entry| e.kind == TYPE_LONG && e.count == 1 && matches!(e.value, EntryValue::Inline);
+    if !valid(offset_entry) || !valid(length_entry) {
+        return None;
+    }
+    let offset = endian.u32(offset_entry.value_field) as usize;
+    let length = endian.u32(length_entry.value_field) as usize;
+    checked_range(offset, length, 1, raw_len)
 }
 
 fn rebuild_table(
@@ -382,7 +512,7 @@ pub(super) fn apply(
 
     let mut kept_ifds: Vec<KeptIfd> = Vec::new();
 
-    let ifd0_plan = plan_ifd(&parsed.ifd0, endian, facts);
+    let ifd0_plan = plan_ifd(&parsed.ifd0, endian, facts, raw.len());
     push_plan(&mut bucket_a, &mut bucket_b, &parsed.ifd0, &ifd0_plan);
     all_issues.extend(ifd0_plan.issues.iter().cloned());
     kept_ifds.push(KeptIfd {
@@ -395,7 +525,7 @@ pub(super) fn apply(
         .into_iter()
         .flatten()
     {
-        let plan = plan_ifd(ifd, endian, facts);
+        let plan = plan_ifd(ifd, endian, facts, raw.len());
         push_plan(&mut bucket_a, &mut bucket_b, ifd, &plan);
         all_issues.extend(plan.issues.iter().cloned());
         let mut next_ifd_value = [0u8; 4];
@@ -414,6 +544,13 @@ pub(super) fn apply(
                 if let EntryValue::OutOfLine(r) = &e.value {
                     bucket_b.push((r.clone(), false));
                 }
+            }
+            // The thumbnail IFD's own JPEGInterchangeFormat/Length pair (if
+            // present) points at the actual thumbnail JPEG bytes elsewhere
+            // in the file -- resolve and zero those too, not just the IFD's
+            // table and its `OutOfLine` entries.
+            if let Some(r) = resolve_preview_range(&ifd.entries, endian, raw.len()) {
+                bucket_b.push((r, false));
             }
         }
         all_issues.push(issue(
@@ -445,6 +582,9 @@ pub(super) fn apply(
             if let EntryValue::OutOfLine(r) = &e.value {
                 out[r.clone()].fill(0);
             }
+        }
+        if let Some(r) = resolve_preview_range(&ifd.entries, endian, raw.len()) {
+            out[r].fill(0);
         }
     }
     for kept in &kept_ifds {

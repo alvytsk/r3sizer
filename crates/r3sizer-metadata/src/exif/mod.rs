@@ -377,6 +377,145 @@ mod tests {
     }
 
     #[test]
+    fn thumbnail_preview_bytes_are_zeroed() {
+        // IFD0 (no entries) -> next points at a thumbnail IFD1 carrying a
+        // real JPEGInterchangeFormat(0x0201)/Length(0x0202) pair that
+        // points at real out-of-band "JPEG" bytes appended after the
+        // table. Dropping the two directory entries isn't enough -- the
+        // actual preview bytes they point at must be zeroed too.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 0, true); // 0 entries in IFD0
+        let next_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder next-IFD offset
+
+        let thumb_offset = b.len() as u32;
+        b[next_pos..next_pos + 4].copy_from_slice(&thumb_offset.to_le_bytes());
+        push_u16(&mut b, 2, true); // 2 entries in the thumbnail IFD
+        push_u16(&mut b, 0x0201, true); // JPEGInterchangeFormat
+        push_u16(&mut b, 4, true); // LONG
+        push_u32(&mut b, 1, true);
+        let preview_offset_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder offset, patched below
+        push_u16(&mut b, 0x0202, true); // JPEGInterchangeFormatLength
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_data = vec![0xFFu8, 0xD8, 0xAA, 0xBB, 0xFF, 0xD9];
+        push_u32(&mut b, preview_data.len() as u32, true); // real length, known up front
+        push_u32(&mut b, 0, true); // thumbnail IFD's own next = 0
+
+        let preview_offset = b.len() as u32;
+        b[preview_offset_pos..preview_offset_pos + 4]
+            .copy_from_slice(&preview_offset.to_le_bytes());
+        b.extend(&preview_data);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Thumbnail
+                && i.reason == MetadataIssueReason::RemovedStale
+                && i.field.as_deref() == Some("thumbnail_chain")
+        }));
+        let start = preview_offset as usize;
+        assert!(
+            bytes[start..start + preview_data.len()]
+                .iter()
+                .all(|&b| b == 0),
+            "preview JPEG bytes were not zeroed"
+        );
+    }
+
+    #[test]
+    fn embedded_preview_bytes_in_kept_ifd_are_also_zeroed() {
+        // The same JPEGInterchangeFormat/Length pair, but living directly
+        // in IFD0 (a "kept" IFD, not a wholesale-discarded thumbnail
+        // chain) alongside a real, in-bounds preview payload.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 2, true); // 2 entries
+        push_u16(&mut b, 0x0201, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u16(&mut b, 0x0202, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_data = vec![0xFFu8, 0xD8, 0x11, 0x22, 0xFF, 0xD9];
+        push_u32(&mut b, preview_data.len() as u32, true);
+        push_u32(&mut b, 0, true); // next = 0
+
+        let preview_offset = b.len() as u32;
+        b[preview_offset_pos..preview_offset_pos + 4]
+            .copy_from_slice(&preview_offset.to_le_bytes());
+        b.extend(&preview_data);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid");
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.category == MetadataCategory::Thumbnail
+                    && i.reason == MetadataIssueReason::RemovedStale
+                    && i.field.as_deref() == Some("preview"))
+                .count(),
+            2
+        );
+        let start = preview_offset as usize;
+        assert!(bytes[start..start + preview_data.len()]
+            .iter()
+            .all(|&b| b == 0));
+    }
+
+    #[test]
+    fn unrecognized_standard_tag_is_retained_with_unverified_issue() {
+        // BitsPerSample (0x0102) is a standard baseline TIFF SHORT tag but
+        // isn't in the curated "known good" allowlist: it must still be
+        // retained (it's a plain scalar, no pointer semantics of its own)
+        // but flagged Unverified rather than silently blessed.
+        let ifd = build_ifd(true, &[(0x0102, 3, 1, 8)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("standard scalar tags are retained, not rejected");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Unverified
+                && i.field.as_deref() == Some("0x0102")
+        }));
+        let exif = ::exif::Reader::new().read_raw(bytes).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::BitsPerSample, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn curated_known_tag_is_retained_without_issue() {
+        // Software (0x0131) IS in the curated allowlist: retained silently.
+        // count=6 ("abcde\0") keeps this genuinely out-of-line (6*1 > 4).
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x0131, true); // Software
+        push_u16(&mut b, 2, true); // ASCII
+        push_u32(&mut b, 6, true);
+        let value_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let value_offset = b.len() as u32;
+        b[value_offset_pos..value_offset_pos + 4].copy_from_slice(&value_offset.to_le_bytes());
+        b.extend(b"abcde\0");
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        assert!(bytes.is_some());
+    }
+
+    #[test]
     fn cycle_is_rejected() {
         // IFD0's next-IFD pointer points back at IFD0's own offset (8).
         let ifd = build_ifd(true, &[], 8);
@@ -418,7 +557,11 @@ mod tests {
 
     #[test]
     fn malformed_count_does_not_panic_and_is_rejected() {
-        // count = u32::MAX with an 8-byte-wide type overflows count*width.
+        // Tag 0x9286 (UserComment) is kind 7 (UNDEFINED, 1-byte-wide), so
+        // count * width = u32::MAX doesn't overflow `checked_mul` on a
+        // 64-bit target -- it's `checked_range`'s bounds check (offset +
+        // count > raw.len()) that rejects this entry as `Invalid`. Either
+        // way, no panic and no out-of-bounds read.
         let ifd = build_ifd(true, &[(0x9286, 7, u32::MAX, 0)], 0);
         let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
         let (bytes, _issues) = correct(&ifd, &facts, &MetadataLimits::default());
