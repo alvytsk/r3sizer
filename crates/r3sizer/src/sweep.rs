@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use r3sizer_core::SelectionMode;
 use r3sizer_io::{
-    load_as_linear_with_limits, load_with_metadata, save_from_linear, save_with_metadata,
-    DecodeLimits, MetadataLimits,
+    load_as_linear_with_limits, load_with_metadata, save_with_metadata, DecodeLimits,
+    MetadataLimits,
 };
 
 use crate::args::SweepArgs;
@@ -290,25 +290,32 @@ fn process_one(
     let output = r3sizer_core::process_auto_sharp_downscale(loaded.image(), &params)
         .context("pipeline failed")?;
 
-    // Save output image if out_dir is set.
+    // Save output image if out_dir is set. Matched jointly on
+    // `(args.out_dir, &loaded)` rather than two independent `if`s on the
+    // same condition: `out_dir`'s presence and `loaded`'s variant are
+    // decided from the exact same `args.out_dir.is_some()` check above, so
+    // the two "impossible" combinations are guarded with `unreachable!()`
+    // instead of silently falling back to a pixel-only save that would
+    // skip the metadata merge and its warnings. If a future edit ever
+    // decouples the two checks, this fails loudly instead of quietly
+    // dropping metadata.
     let mut metadata_report = None;
-    let output_path = if let Some(ref out_dir) = args.out_dir {
-        let stem = input_path.file_stem().unwrap_or_default();
-        let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
-        match &loaded {
-            LoadedInput::WithMetadata(source) => {
-                let report = save_with_metadata(&output.image, &out_file, source, &metadata_limits)
-                    .with_context(|| format!("failed to save: {}", out_file.display()))?;
-                metadata_report = Some(report);
-            }
-            LoadedInput::PixelOnly(_) => {
-                save_from_linear(&output.image, &out_file)
-                    .with_context(|| format!("failed to save: {}", out_file.display()))?;
-            }
+    let output_path = match (args.out_dir.as_ref(), &loaded) {
+        (Some(out_dir), LoadedInput::WithMetadata(source)) => {
+            let stem = input_path.file_stem().unwrap_or_default();
+            let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
+            let report = save_with_metadata(&output.image, &out_file, source, &metadata_limits)
+                .with_context(|| format!("failed to save: {}", out_file.display()))?;
+            metadata_report = Some(report);
+            Some(out_file.display().to_string())
         }
-        Some(out_file.display().to_string())
-    } else {
-        None
+        (None, LoadedInput::PixelOnly(_)) => None,
+        (Some(_), LoadedInput::PixelOnly(_)) => {
+            unreachable!("out_dir.is_some() implies metadata-aware loading was chosen above")
+        }
+        (None, LoadedInput::WithMetadata(_)) => {
+            unreachable!("out_dir.is_none() implies pixel-only loading was chosen above")
+        }
     };
 
     let diag = &output.diagnostics;
