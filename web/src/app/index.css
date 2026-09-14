@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/manrope";
 @import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
@@ -151,8 +151,8 @@
 }
 
 @theme inline {
-  --font-heading: "Space Grotesk Variable", sans-serif;
-  --font-sans: "Space Grotesk Variable", sans-serif;
+  --font-heading: "Manrope Variable", "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Manrope Variable", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono Variable", monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

@@ -247,14 +247,7 @@ function HeroCurve() {
         strokeDasharray="8 5"
         opacity="0.15"
       />
-      <text
-        x="1208"
-        y="219"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="#fabd2f"
-        opacity="0.2"
-      >
+      <text x="1208" y="219" fontSize="10" fontFamily="monospace" fill="#fabd2f" opacity="0.2">
         P₀
       </text>
 
@@ -285,14 +278,7 @@ function HeroCurve() {
         strokeDasharray="3 3"
         opacity="0.12"
       />
-      <text
-        x="692"
-        y="356"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="#fabd2f"
-        opacity="0.2"
-      >
+      <text x="692" y="356" fontSize="10" fontFamily="monospace" fill="#fabd2f" opacity="0.2">
         s*
       </text>
 
@@ -309,14 +295,6 @@ function HeroCurve() {
 }
 
 /* ---------- reusable pieces ---------- */
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-block px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-mono tracking-wide">
-      {children}
-    </span>
-  );
-}
 
 type ChecklistEntry = string | [tex: string, suffix: string];
 
@@ -428,10 +406,6 @@ export default function AlgorithmPage() {
           </div>
 
           <div className="relative z-10 py-16 sm:py-20 max-w-xl">
-            <div className="flex items-center gap-3 mb-5 animate-fade-up">
-              <Tag>v0.8</Tag>
-              <Tag>auto-sharpness</Tag>
-            </div>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold text-foreground tracking-tight mb-5 animate-fade-up delay-100">
               The Algorithm
             </h1>
@@ -465,9 +439,7 @@ export default function AlgorithmPage() {
         {/* Sticky TOC — desktop only */}
         <aside className="hidden xl:block w-44 flex-shrink-0 pt-10 pl-6">
           <nav className="sticky top-16">
-            <p className="text-xs font-medium text-muted-foreground mb-3">
-              On this page
-            </p>
+            <p className="text-xs font-medium text-muted-foreground mb-3">On this page</p>
             <ul className="space-y-0.5 border-l border-border/30">
               {TOC_SECTIONS.map(({ id, label }) => {
                 const isActive = activeSection === id;
@@ -493,7 +465,7 @@ export default function AlgorithmPage() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 min-w-0 px-6 pt-4 pb-24 max-w-3xl">
+        <main className="flex-1 min-w-0 px-6 pt-4 pb-24 max-w-2xl">
           {/* Pipeline overview */}
           <SectionHeading id="pipeline">Pipeline Overview</SectionHeading>
           <p className="text-sm text-muted-foreground mb-6">
