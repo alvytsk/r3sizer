@@ -20,6 +20,7 @@ flate2      = { version = "1", default-features = false, features = ["rust_backe
 
 [dev-dependencies]
 serde_json = { workspace = true }
+exif        = { package = "kamadak-exif", version = "0.6" }
 
 [features]
 default  = []
