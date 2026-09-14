@@ -77,7 +77,11 @@ fn xmp_dimensions_are_corrected_through_prepare() {
         None,
         &MetadataLimits::default(),
     );
-    assert!(prepared.report().issues.is_empty(), "{:?}", prepared.report());
+    assert!(
+        prepared.report().issues.is_empty(),
+        "{:?}",
+        prepared.report()
+    );
 }
 
 #[test]
@@ -91,7 +95,11 @@ fn srgb_keeps_icc_equal_to_destination() {
         Some(&dest),
         &MetadataLimits::default(),
     );
-    assert!(prepared.report().issues.is_empty(), "{:?}", prepared.report());
+    assert!(
+        prepared.report().issues.is_empty(),
+        "{:?}",
+        prepared.report()
+    );
 }
 
 #[test]
@@ -160,7 +168,11 @@ fn density_is_unchanged_by_a_large_downscale() {
         None,
         &MetadataLimits::default(),
     );
-    assert!(prepared.report().issues.is_empty(), "{:?}", prepared.report());
+    assert!(
+        prepared.report().issues.is_empty(),
+        "{:?}",
+        prepared.report()
+    );
 }
 
 #[test]

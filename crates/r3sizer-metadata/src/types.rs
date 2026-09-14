@@ -3,9 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Categories of metadata found in images.
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetadataCategory {
@@ -30,9 +28,7 @@ pub enum MetadataCategory {
 }
 
 /// Reasons metadata could not be processed.
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetadataIssueReason {
@@ -63,9 +59,7 @@ pub struct MetadataIssue {
 }
 
 /// Report of metadata issues encountered.
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq,
-)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct MetadataReport {
     /// Issues encountered during processing
@@ -73,9 +67,7 @@ pub struct MetadataReport {
 }
 
 /// Orientation handling for output.
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum OrientationAction {
@@ -86,9 +78,7 @@ pub enum OrientationAction {
 }
 
 /// Color space handling for output.
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ColorAction {

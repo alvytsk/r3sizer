@@ -218,7 +218,8 @@ fn validate_iptc_iim(data: &[u8]) -> bool {
                 Some(r) => r,
                 None => return false,
             };
-            let len = u16::from_be_bytes([data[len_range.start], data[len_range.start + 1]]) as usize;
+            let len =
+                u16::from_be_bytes([data[len_range.start], data[len_range.start + 1]]) as usize;
             p = len_range.end;
             len
         };

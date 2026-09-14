@@ -178,7 +178,11 @@ fn read_u16(data: &[u8], pos: usize) -> Option<u16> {
 
 /// A marker segment's length field counts itself: total span is
 /// `pos..pos+len`, and `len` must be at least 2 (the field itself).
-fn valid_segment_range(pos: usize, len: usize, source_len: usize) -> Option<std::ops::Range<usize>> {
+fn valid_segment_range(
+    pos: usize,
+    len: usize,
+    source_len: usize,
+) -> Option<std::ops::Range<usize>> {
     if len < 2 {
         return None;
     }
@@ -198,10 +202,10 @@ fn skip_entropy_scan(data: &[u8], mut pos: usize) -> usize {
             }
             let next = data[pos + 1];
             match next {
-                0x00 => pos += 2,                    // stuffed literal 0xFF
-                0xFF => pos += 1,                     // fill byte, re-check
-                0xD0..=0xD7 => pos += 2,              // restart marker, scan continues
-                _ => return pos,                      // real marker boundary
+                0x00 => pos += 2,        // stuffed literal 0xFF
+                0xFF => pos += 1,        // fill byte, re-check
+                0xD0..=0xD7 => pos += 2, // restart marker, scan continues
+                _ => return pos,         // real marker boundary
             }
         } else {
             pos += 1;
@@ -505,8 +509,10 @@ fn set_exif(jpeg: &mut Jpeg, exif: &[u8]) {
     let mut contents = EXIF_PREFIX.to_vec();
     contents.extend_from_slice(exif);
     let pos = jpeg.segments().len().min(3);
-    jpeg.segments_mut()
-        .insert(pos, JpegSegment::new_with_contents(markers::APP1, Bytes::from(contents)));
+    jpeg.segments_mut().insert(
+        pos,
+        JpegSegment::new_with_contents(markers::APP1, Bytes::from(contents)),
+    );
 }
 
 /// Hand-rolled equivalent of `img_parts::jpeg::Jpeg::set_icc_profile` --
@@ -525,8 +531,10 @@ fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) {
         contents.push(segments_n);
         contents.extend_from_slice(&profile[start..end]);
         let pos = jpeg.segments().len().min(3);
-        jpeg.segments_mut()
-            .insert(pos, JpegSegment::new_with_contents(markers::APP2, Bytes::from(contents)));
+        jpeg.segments_mut().insert(
+            pos,
+            JpegSegment::new_with_contents(markers::APP2, Bytes::from(contents)),
+        );
     }
 }
 
@@ -535,13 +543,16 @@ fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) {
 /// then insert a fresh one. `.min(len)` keeps the insertion position
 /// in-bounds regardless of how few segments the destination has.
 fn set_xmp(jpeg: &mut Jpeg, xmp: &[u8]) {
-    jpeg.segments_mut()
-        .retain(|s| !(s.marker() == markers::APP1 && s.contents().starts_with(XMP_STANDARD_PREFIX)));
+    jpeg.segments_mut().retain(|s| {
+        !(s.marker() == markers::APP1 && s.contents().starts_with(XMP_STANDARD_PREFIX))
+    });
     let mut contents = XMP_STANDARD_PREFIX.to_vec();
     contents.extend_from_slice(xmp);
     let pos = jpeg.segments().len().min(3);
-    jpeg.segments_mut()
-        .insert(pos, JpegSegment::new_with_contents(markers::APP1, Bytes::from(contents)));
+    jpeg.segments_mut().insert(
+        pos,
+        JpegSegment::new_with_contents(markers::APP1, Bytes::from(contents)),
+    );
 }
 
 /// Build an APP13 "Photoshop 3.0" payload wrapping a single `8BIM` IRB for
@@ -564,15 +575,19 @@ fn build_app13(iptc: &[u8]) -> Vec<u8> {
 fn set_app13(jpeg: &mut Jpeg, contents: Vec<u8>) {
     jpeg.segments_mut().retain(|s| s.marker() != markers::APP13);
     let pos = jpeg.segments().len().min(3);
-    jpeg.segments_mut()
-        .insert(pos, JpegSegment::new_with_contents(markers::APP13, Bytes::from(contents)));
+    jpeg.segments_mut().insert(
+        pos,
+        JpegSegment::new_with_contents(markers::APP13, Bytes::from(contents)),
+    );
 }
 
 fn set_comment(jpeg: &mut Jpeg, data: &[u8]) {
     jpeg.segments_mut().retain(|s| s.marker() != markers::COM);
     let pos = jpeg.segments().len().min(3);
-    jpeg.segments_mut()
-        .insert(pos, JpegSegment::new_with_contents(markers::COM, Bytes::from(data.to_vec())));
+    jpeg.segments_mut().insert(
+        pos,
+        JpegSegment::new_with_contents(markers::COM, Bytes::from(data.to_vec())),
+    );
 }
 
 /// Set the density fields of the destination's JFIF/APP0 segment: patched
@@ -601,15 +616,22 @@ fn set_jfif_density(jpeg: &mut Jpeg, units: u8, x: u16, y: u16) {
     contents.extend_from_slice(&x.to_be_bytes());
     contents.extend_from_slice(&y.to_be_bytes());
     contents.extend_from_slice(&[0, 0]); // no thumbnail
-    jpeg.segments_mut()
-        .insert(0, JpegSegment::new_with_contents(markers::APP0, Bytes::from(contents)));
+    jpeg.segments_mut().insert(
+        0,
+        JpegSegment::new_with_contents(markers::APP0, Bytes::from(contents)),
+    );
 }
 
 /// Re-scan the just-written bytes with this module's own bounded extractor
 /// and confirm every payload we attempted round-trips byte-identically,
 /// with no new structural damage and dimensions matching `facts`. Never
 /// decodes entropy-coded pixel data.
-fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: &MetadataLimits) -> bool {
+fn validate(
+    merged: &[u8],
+    attempted: &[&Payload],
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> bool {
     let bundle = extract(merged, limits);
     if bundle
         .report()
@@ -621,10 +643,22 @@ fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: 
     }
     for payload in attempted {
         let present = match payload {
-            Payload::Exif(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Exif(pb) if pb == b)),
-            Payload::Xmp(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Xmp(pb) if pb == b)),
-            Payload::Icc(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Icc(pb) if pb == b)),
-            Payload::Iptc(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Iptc(pb) if pb == b)),
+            Payload::Exif(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Exif(pb) if pb == b)),
+            Payload::Xmp(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Xmp(pb) if pb == b)),
+            Payload::Icc(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Icc(pb) if pb == b)),
+            Payload::Iptc(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Iptc(pb) if pb == b)),
             Payload::JpegComment(b) => bundle
                 .payloads
                 .iter()
@@ -714,9 +748,10 @@ mod tests {
         let bundle = extract(&data, &MetadataLimits::default());
         assert!(bundle.report().issues.is_empty());
         assert_eq!(bundle.format, SourceFormat::Jpeg);
-        assert!(bundle.payloads.iter().any(
-            |p| matches!(p, Payload::Exif(b) if b.starts_with(b"MM\0*"))
-        ));
+        assert!(bundle
+            .payloads
+            .iter()
+            .any(|p| matches!(p, Payload::Exif(b) if b.starts_with(b"MM\0*"))));
     }
 
     #[test]
@@ -740,7 +775,10 @@ mod tests {
         app1.extend_from_slice(b"chunk");
         let data = jpeg(&[segment(0xE1, &app1)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Xmp(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Xmp(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Xmp
                 && i.reason == MetadataIssueReason::Unsupported
@@ -780,7 +818,10 @@ mod tests {
         seg3.extend_from_slice(b"THIRD");
         let data = jpeg(&[segment(0xE2, &seg1), segment(0xE2, &seg3)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Icc(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Icc(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Malformed
         }));
@@ -797,7 +838,10 @@ mod tests {
         seg1b.extend_from_slice(b"BBBBB");
         let data = jpeg(&[segment(0xE2, &seg1a), segment(0xE2, &seg1b)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Icc(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Icc(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Malformed
         }));
@@ -811,7 +855,10 @@ mod tests {
         app1b.extend_from_slice(b"MM\0*two");
         let data = jpeg(&[segment(0xE1, &app1), segment(0xE1, &app1b)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Exif(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Exif(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed
         }));
@@ -839,7 +886,11 @@ mod tests {
         let bundle = extract(&data, &MetadataLimits::default());
         assert!(bundle.payloads.iter().any(|p| matches!(
             p,
-            Payload::JfifDensity { units: 1, x: 72, y: 96 }
+            Payload::JfifDensity {
+                units: 1,
+                x: 72,
+                y: 96
+            }
         )));
     }
 
@@ -875,9 +926,10 @@ mod tests {
 
         let bundle = extract(&data, &MetadataLimits::default());
         assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
-        assert!(bundle.payloads.iter().any(
-            |p| matches!(p, Payload::Exif(b) if b.starts_with(b"MM\0*late"))
-        ));
+        assert!(bundle
+            .payloads
+            .iter()
+            .any(|p| matches!(p, Payload::Exif(b) if b.starts_with(b"MM\0*late"))));
     }
 
     #[test]
@@ -885,9 +937,11 @@ mod tests {
         let mut data = vec![0xFF, 0xD8, 0xFF, 0xE1, 0xFF, 0xFF]; // length claims 65535 bytes, buffer is empty
         data.truncate(6);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.report().issues.iter().any(|i| {
-            i.reason == MetadataIssueReason::Malformed
-        }));
+        assert!(bundle
+            .report()
+            .issues
+            .iter()
+            .any(|i| { i.reason == MetadataIssueReason::Malformed }));
         assert_eq!(bundle.source_color(), SourceColor::Unknown);
     }
 

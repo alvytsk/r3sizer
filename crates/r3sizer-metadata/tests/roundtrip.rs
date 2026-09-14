@@ -30,7 +30,10 @@ fn expected() -> serde_json::Value {
 }
 
 fn expected_str(field: &str) -> String {
-    expected()[field].as_str().unwrap_or_else(|| panic!("expected.json missing string field {field}")).to_string()
+    expected()[field]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected.json missing string field {field}"))
+        .to_string()
 }
 
 fn expected_offset(field: &str) -> usize {
@@ -182,7 +185,9 @@ fn preserves_artist_across_all_supported_destinations() {
         let bundle = extract(source, &limits);
         for dest in destinations {
             let output = merge(dest.to_vec(), &bundle, &facts(), &limits);
-            assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
+            assert!(read_artist(&output.bytes)
+                .unwrap()
+                .contains(&expected_str("artist")));
             assert_eq!(
                 image::load_from_memory(&output.bytes).unwrap().to_rgba8(),
                 image::load_from_memory(dest).unwrap().to_rgba8()
@@ -246,7 +251,10 @@ fn no_metadata_source_leaves_same_format_destination_byte_identical() {
         let bundle = extract(source, &limits);
         assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
         let output = merge(dest.to_vec(), &bundle, &facts(), &limits);
-        assert_eq!(output.bytes, dest, "untouched container must round-trip byte-for-byte");
+        assert_eq!(
+            output.bytes, dest,
+            "untouched container must round-trip byte-for-byte"
+        );
     }
 }
 
@@ -264,13 +272,21 @@ fn same_format_iptc_survives_jpeg_to_jpeg() {
 
     let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts(), &limits);
     assert!(
-        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "{:?}",
         output.report
     );
     // Re-extract the merged bytes and confirm the IPTC dataset round-tripped.
     let merged_bundle = extract(&output.bytes, &limits);
-    assert!(!merged_bundle.report().issues.iter().any(|i| i.category == MetadataCategory::Iptc));
+    assert!(!merged_bundle
+        .report()
+        .issues
+        .iter()
+        .any(|i| i.category == MetadataCategory::Iptc));
     image::load_from_memory(&output.bytes).expect("still a valid JPEG");
 }
 
@@ -311,7 +327,11 @@ fn same_format_density_survives_jpeg_to_jpeg() {
 
     let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts(), &limits);
     let merged_bundle = extract(&output.bytes, &limits);
-    assert!(merged_bundle.report().issues.is_empty(), "{:?}", merged_bundle.report());
+    assert!(
+        merged_bundle.report().issues.is_empty(),
+        "{:?}",
+        merged_bundle.report()
+    );
     assert!(bytes_contain(&output.bytes, &300u16.to_be_bytes()));
 }
 
@@ -324,7 +344,11 @@ fn same_format_density_survives_png_to_png_even_when_destination_has_no_phys() {
 
     let output = merge(PLAIN_PNG.to_vec(), &bundle, &facts(), &limits);
     assert!(
-        !output.report.issues.iter().any(|i| i.category == MetadataCategory::Density),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.category == MetadataCategory::Density),
         "{:?}",
         output.report
     );
@@ -356,7 +380,8 @@ fn iptc_and_comment_into_png_and_webp_are_unsupported_not_silently_dropped() {
                 .report
                 .issues
                 .iter()
-                .any(|i| i.category == MetadataCategory::Iptc && i.reason == MetadataIssueReason::Unsupported),
+                .any(|i| i.category == MetadataCategory::Iptc
+                    && i.reason == MetadataIssueReason::Unsupported),
             "{:?}",
             output.report
         );
@@ -365,12 +390,17 @@ fn iptc_and_comment_into_png_and_webp_are_unsupported_not_silently_dropped() {
                 .report
                 .issues
                 .iter()
-                .any(|i| i.category == MetadataCategory::Text && i.reason == MetadataIssueReason::Unsupported),
+                .any(|i| i.category == MetadataCategory::Text
+                    && i.reason == MetadataIssueReason::Unsupported),
             "{:?}",
             output.report
         );
         assert!(
-            !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+            !output
+                .report
+                .issues
+                .iter()
+                .any(|i| i.reason == MetadataIssueReason::MergeFailed),
             "an unsupported category must not fail the whole merge: {:?}",
             output.report
         );
@@ -390,7 +420,8 @@ fn png_text_into_jpeg_and_webp_is_unsupported() {
             .report
             .issues
             .iter()
-            .any(|i| i.category == MetadataCategory::Text && i.reason == MetadataIssueReason::Unsupported));
+            .any(|i| i.category == MetadataCategory::Text
+                && i.reason == MetadataIssueReason::Unsupported));
     }
 }
 
@@ -409,7 +440,12 @@ fn unchanged_color_policy_retains_any_structurally_valid_source_icc() {
     let bundle = extract(&source, &limits);
     assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
 
-    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Unchanged), &limits);
+    let output = merge(
+        PLAIN_JPG.to_vec(),
+        &bundle,
+        &facts_with(ColorAction::Unchanged),
+        &limits,
+    );
     let merged_bundle = extract(&output.bytes, &limits);
     assert_eq!(merged_bundle.source_color(), SourceColor::Other);
 }
@@ -426,12 +462,15 @@ fn srgb_policy_drops_icc_when_destination_has_no_matching_profile() {
     })]);
     let bundle = extract(&source, &limits);
 
-    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Srgb), &limits);
-    assert!(output
-        .report
-        .issues
-        .iter()
-        .any(|i| i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified));
+    let output = merge(
+        PLAIN_JPG.to_vec(),
+        &bundle,
+        &facts_with(ColorAction::Srgb),
+        &limits,
+    );
+    assert!(output.report.issues.iter().any(
+        |i| i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified
+    ));
     let merged_bundle = extract(&output.bytes, &limits);
     assert_ne!(merged_bundle.source_color(), SourceColor::Other);
 }
@@ -483,9 +522,18 @@ fn icc_profile_exactly_at_the_segment_boundary_splits_without_panicking() {
     let bundle = extract(&source, &limits);
     assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
 
-    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    let output = merge(
+        PLAIN_JPG.to_vec(),
+        &bundle,
+        &facts_with(ColorAction::Unchanged),
+        &limits,
+    ); // must not panic
     assert!(
-        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "{:?}",
         output.report
     );
@@ -503,19 +551,32 @@ fn icc_profile_one_byte_past_the_segment_boundary_forces_a_second_segment() {
     let bundle = extract(&source, &limits);
     assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
 
-    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    let output = merge(
+        PLAIN_JPG.to_vec(),
+        &bundle,
+        &facts_with(ColorAction::Unchanged),
+        &limits,
+    ); // must not panic
     assert!(
-        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "{:?}",
         output.report
     );
-    let jpeg = img_parts::jpeg::Jpeg::from_bytes(img_parts::Bytes::from(output.bytes.clone())).unwrap();
+    let jpeg =
+        img_parts::jpeg::Jpeg::from_bytes(img_parts::Bytes::from(output.bytes.clone())).unwrap();
     let icc_segments = jpeg
         .segments()
         .iter()
         .filter(|s| s.marker() == 0xE2 && s.contents().starts_with(b"ICC_PROFILE\0"))
         .count();
-    assert!(icc_segments >= 2, "a profile past the boundary must span at least two segments, got {icc_segments}");
+    assert!(
+        icc_segments >= 2,
+        "a profile past the boundary must span at least two segments, got {icc_segments}"
+    );
     assert_eq!(reassemble_icc_via_img_parts(&output.bytes), icc);
 }
 
@@ -563,7 +624,8 @@ fn oversized_exif_via_real_source_is_limit_exceeded_and_never_embedded() {
             .report
             .issues
             .iter()
-            .any(|i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::LimitExceeded),
+            .any(|i| i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::LimitExceeded),
         "{:?}",
         output.report
     );
@@ -586,7 +648,9 @@ fn merge_never_strips_an_unrelated_destination_segment() {
     let bundle = extract(METADATA_JPG, &limits);
     let output = merge(dest.clone(), &bundle, &facts(), &limits);
     assert!(bytes_contain(&output.bytes, marker_bytes));
-    assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
+    assert!(read_artist(&output.bytes)
+        .unwrap()
+        .contains(&expected_str("artist")));
 }
 
 // --- Corrupt metadata --------------------------------------------------------
@@ -602,19 +666,15 @@ fn corrupt_source_metadata_yields_no_embedded_exif_but_a_valid_destination() {
     b.extend_from_slice(b"MM\0*two");
     let source = jpeg(&[jpeg_segment(0xE1, &a), jpeg_segment(0xE1, &b)]);
     let bundle = extract(&source, &limits);
-    assert!(bundle
-        .report()
-        .issues
-        .iter()
-        .any(|i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed));
+    assert!(bundle.report().issues.iter().any(
+        |i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed
+    ));
 
     let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts(), &limits);
     assert!(read_artist(&output.bytes).is_none());
-    assert!(output
-        .report
-        .issues
-        .iter()
-        .any(|i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed));
+    assert!(output.report.issues.iter().any(
+        |i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed
+    ));
     image::load_from_memory(&output.bytes).expect("still a valid JPEG");
 }
 
@@ -634,13 +694,17 @@ fn dimension_mismatch_rolls_back_to_byte_identical_original_with_merge_failed() 
         color: ColorAction::Srgb,
     };
     let output = merge(PLAIN_JPG.to_vec(), &bundle, &wrong_facts, &limits);
-    assert_eq!(output.bytes, PLAIN_JPG, "rollback must return the ORIGINAL bytes unchanged");
+    assert_eq!(
+        output.bytes, PLAIN_JPG,
+        "rollback must return the ORIGINAL bytes unchanged"
+    );
     assert!(
         output
             .report
             .issues
             .iter()
-            .any(|i| i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::MergeFailed),
+            .any(|i| i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::MergeFailed),
         "every attempted category must be reported MergeFailed: {:?}",
         output.report
     );
@@ -703,7 +767,11 @@ fn xmp_only_insertion_into_plain_webp_produces_a_valid_extended_header() {
     let dest = synthetic_webp(32, 16, false);
     let output = merge(dest, &bundle, &facts(), &limits);
     assert!(
-        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "{:?}",
         output.report
     );
@@ -721,15 +789,27 @@ fn adding_exif_to_an_existing_alpha_vp8l_file_keeps_the_alpha_flag() {
 
     let output = merge(dest, &bundle, &facts(), &limits);
     assert!(
-        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        !output
+            .report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "{:?}",
         output.report
     );
     assert_eq!(first_chunk_id(&output.bytes), *b"VP8X");
     let flags = output.bytes[12 + 8];
-    assert_eq!(flags, 0b0001_1000, "EXIF bit (0x08) and alpha bit (0x10) must both be set");
-    assert!(bytes_contain(&output.bytes, b"VP8L"), "the original VP8L chunk must survive untouched");
-    assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
+    assert_eq!(
+        flags, 0b0001_1000,
+        "EXIF bit (0x08) and alpha bit (0x10) must both be set"
+    );
+    assert!(
+        bytes_contain(&output.bytes, b"VP8L"),
+        "the original VP8L chunk must survive untouched"
+    );
+    assert!(read_artist(&output.bytes)
+        .unwrap()
+        .contains(&expected_str("artist")));
 }
 
 #[test]
@@ -743,7 +823,10 @@ fn merge_never_writes_a_second_vp8x() {
         p.extend_from_slice(&15u32.to_le_bytes()[..3]); // height-1
         p
     };
-    let dest = webp(&[webp_chunk(b"VP8X", &vp8x_payload), synthetic_vp8l(32, 16, true)]);
+    let dest = webp(&[
+        webp_chunk(b"VP8X", &vp8x_payload),
+        synthetic_vp8l(32, 16, true),
+    ]);
 
     let output = merge(dest, &bundle, &facts(), &limits);
     let vp8x_count = count_chunks(&output.bytes, b"VP8X");
@@ -755,7 +838,8 @@ fn count_chunks(webp: &[u8], fourcc: &[u8; 4]) -> usize {
     let mut pos = 12usize;
     while pos + 8 <= webp.len() {
         let id = &webp[pos..pos + 4];
-        let size = u32::from_le_bytes([webp[pos + 4], webp[pos + 5], webp[pos + 6], webp[pos + 7]]) as usize;
+        let size = u32::from_le_bytes([webp[pos + 4], webp[pos + 5], webp[pos + 6], webp[pos + 7]])
+            as usize;
         if id == fourcc {
             count += 1;
         }
@@ -786,10 +870,13 @@ fn minimal_jpeg_destination_with_no_segments_never_panics_on_exif_or_icc() {
     let bare = vec![0xFFu8, 0xD8, 0xFF, 0xD9];
     let bundle = extract(METADATA_JPG, &limits); // carries both EXIF and (via ICC test path) nothing else here
     let output = merge(bare.clone(), &bundle, &facts(), &limits); // must not panic
-    // No SOF marker exists to prove the claimed 32x16 facts, so this
-    // adapter's own dimension validation correctly refuses to return the
-    // mutated bytes -- a graceful `MergeFailed` rollback, not a crash.
-    assert_eq!(output.bytes, bare, "rollback must return the original bytes unchanged");
+                                                                  // No SOF marker exists to prove the claimed 32x16 facts, so this
+                                                                  // adapter's own dimension validation correctly refuses to return the
+                                                                  // mutated bytes -- a graceful `MergeFailed` rollback, not a crash.
+    assert_eq!(
+        output.bytes, bare,
+        "rollback must return the original bytes unchanged"
+    );
     assert!(output
         .report
         .issues
@@ -805,7 +892,12 @@ fn minimal_jpeg_destination_with_no_segments_never_panics_on_exif_or_icc() {
         seg
     })]);
     let icc_bundle = extract(&icc_source, &limits);
-    let icc_output = merge(bare.clone(), &icc_bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    let icc_output = merge(
+        bare.clone(),
+        &icc_bundle,
+        &facts_with(ColorAction::Unchanged),
+        &limits,
+    ); // must not panic
     assert_eq!(icc_output.bytes, bare);
 }
 
@@ -823,8 +915,16 @@ fn signature_only_png_destination_never_panics_on_icc() {
     let bundle = extract(&source, &limits);
     assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
 
-    let output = merge(bare.clone(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
-    assert_eq!(output.bytes, bare, "rollback must return the original bytes unchanged");
+    let output = merge(
+        bare.clone(),
+        &bundle,
+        &facts_with(ColorAction::Unchanged),
+        &limits,
+    ); // must not panic
+    assert_eq!(
+        output.bytes, bare,
+        "rollback must return the original bytes unchanged"
+    );
     assert!(output
         .report
         .issues

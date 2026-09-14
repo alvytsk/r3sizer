@@ -212,7 +212,11 @@ fn jpeg_irb_retains_iptc_and_removes_thumbnail() {
         i.category == MetadataCategory::Thumbnail && i.reason == MetadataIssueReason::RemovedStale
     }));
     // IPTC itself validated cleanly, only the thumbnail issue should exist.
-    assert!(!bundle.report().issues.iter().any(|i| i.category == MetadataCategory::Iptc));
+    assert!(!bundle
+        .report()
+        .issues
+        .iter()
+        .any(|i| i.category == MetadataCategory::Iptc));
 }
 
 #[test]
@@ -263,9 +267,11 @@ fn png_compressed_text_exceeding_budget_is_limit_exceeded() {
         ..MetadataLimits::default()
     };
     let bundle = extract(&data, &limits);
-    assert!(bundle.report().issues.iter().any(|i| {
-        i.reason == MetadataIssueReason::LimitExceeded
-    }));
+    assert!(bundle
+        .report()
+        .issues
+        .iter()
+        .any(|i| { i.reason == MetadataIssueReason::LimitExceeded }));
 }
 
 /// Regression test for a budget-accounting gap: earlier, only bytes that
@@ -337,7 +343,7 @@ fn png_truncated_container_is_malformed() {
 fn webp_odd_size_xmp_and_exif_are_detected() {
     let data = webp(&[
         webp_chunk(b"XMP ", b"<x:xmpmeta/>"), // 12 bytes, even
-        webp_chunk(b"EXIF", b"MM\0*odd"),      // 7 bytes, odd: needs padding
+        webp_chunk(b"EXIF", b"MM\0*odd"),     // 7 bytes, odd: needs padding
     ]);
     let bundle = extract(&data, &MetadataLimits::default());
     assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
@@ -354,10 +360,7 @@ fn webp_extended_xmp_prefix_via_jpeg_is_recognized() {
     extended.extend_from_slice(&10u32.to_be_bytes());
     extended.extend_from_slice(&0u32.to_be_bytes());
     extended.extend_from_slice(b"more xmp");
-    let data = jpeg(&[
-        jpeg_segment(0xE1, &standard),
-        jpeg_segment(0xE1, &extended),
-    ]);
+    let data = jpeg(&[jpeg_segment(0xE1, &standard), jpeg_segment(0xE1, &extended)]);
     let bundle = extract(&data, &MetadataLimits::default());
     // Standard XMP survives; extended is recognized (Unsupported, not an
     // error) rather than causing a duplicate-XMP conflict.

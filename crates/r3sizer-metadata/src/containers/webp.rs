@@ -8,15 +8,17 @@
 
 use img_parts::riff::{RiffChunk, RiffContent};
 use img_parts::webp::{
-    CHUNK_EXIF as WEBP_EXIF, CHUNK_ICCP as WEBP_ICCP, CHUNK_VP8X as WEBP_VP8X,
-    CHUNK_XMP as WEBP_XMP, WebP as ImgPartsWebP,
+    WebP as ImgPartsWebP, CHUNK_EXIF as WEBP_EXIF, CHUNK_ICCP as WEBP_ICCP,
+    CHUNK_VP8X as WEBP_VP8X, CHUNK_XMP as WEBP_XMP,
 };
 use img_parts::Bytes;
 
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::containers::Collector;
 use crate::limits::{checked_range, MetadataLimits};
-use crate::types::{MetadataCategory, MetadataExport, MetadataIssueReason, MetadataReport, OutputFacts};
+use crate::types::{
+    MetadataCategory, MetadataExport, MetadataIssueReason, MetadataReport, OutputFacts,
+};
 
 const EXIF_PREFIX: &[u8] = b"Exif\0\0";
 
@@ -31,8 +33,7 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
     // The RIFF size field covers everything after itself (i.e. "WEBP" +
     // chunks). Bound chunk parsing to it so bytes beyond what the header
     // declares are treated as trailing, not as more chunks.
-    let declared_size =
-        u32::from_le_bytes([source[4], source[5], source[6], source[7]]) as usize;
+    let declared_size = u32::from_le_bytes([source[4], source[5], source[6], source[7]]) as usize;
     let end_bound = match 8usize.checked_add(declared_size) {
         Some(end) if end <= source.len() => end,
         _ => {
@@ -58,7 +59,12 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
             fatal = true;
             break;
         }
-        let fourcc: [u8; 4] = [source[pos], source[pos + 1], source[pos + 2], source[pos + 3]];
+        let fourcc: [u8; 4] = [
+            source[pos],
+            source[pos + 1],
+            source[pos + 2],
+            source[pos + 3],
+        ];
         let size = u32::from_le_bytes([
             source[pos + 4],
             source[pos + 5],
@@ -242,9 +248,18 @@ fn scan(source: &[u8]) -> Option<Scan> {
         if pos + 8 > end {
             return None;
         }
-        let fourcc: [u8; 4] = [source[pos], source[pos + 1], source[pos + 2], source[pos + 3]];
-        let size = u32::from_le_bytes([source[pos + 4], source[pos + 5], source[pos + 6], source[pos + 7]])
-            as usize;
+        let fourcc: [u8; 4] = [
+            source[pos],
+            source[pos + 1],
+            source[pos + 2],
+            source[pos + 3],
+        ];
+        let size = u32::from_le_bytes([
+            source[pos + 4],
+            source[pos + 5],
+            source[pos + 6],
+            source[pos + 7],
+        ]) as usize;
         let data_range = checked_range(pos + 8, size, 1, end)?;
         let data = &source[data_range.clone()];
         order.push(fourcc);
@@ -367,17 +382,29 @@ pub(crate) fn embed(
         let Some(header) = vp8x_header(width, height, flags) else {
             return super::rollback(encoded, prepared);
         };
-        new_chunks.push(RiffChunk::new(WEBP_VP8X, RiffContent::Data(Bytes::copy_from_slice(&header))));
+        new_chunks.push(RiffChunk::new(
+            WEBP_VP8X,
+            RiffContent::Data(Bytes::copy_from_slice(&header)),
+        ));
     }
     if let Some(icc) = &final_icc {
-        new_chunks.push(RiffChunk::new(WEBP_ICCP, RiffContent::Data(Bytes::from(icc.clone()))));
+        new_chunks.push(RiffChunk::new(
+            WEBP_ICCP,
+            RiffContent::Data(Bytes::from(icc.clone())),
+        ));
     }
     new_chunks.extend(body);
     if let Some(exif) = &final_exif {
-        new_chunks.push(RiffChunk::new(WEBP_EXIF, RiffContent::Data(Bytes::from(exif.clone()))));
+        new_chunks.push(RiffChunk::new(
+            WEBP_EXIF,
+            RiffContent::Data(Bytes::from(exif.clone())),
+        ));
     }
     if let Some(xmp) = &final_xmp {
-        new_chunks.push(RiffChunk::new(WEBP_XMP, RiffContent::Data(Bytes::from(xmp.clone()))));
+        new_chunks.push(RiffChunk::new(
+            WEBP_XMP,
+            RiffContent::Data(Bytes::from(xmp.clone())),
+        ));
     }
     *webp.chunks_mut() = new_chunks;
 
@@ -435,7 +462,12 @@ fn valid_order(order: &[[u8; 4]]) -> bool {
 /// Re-scan the just-written bytes with this module's own bounded extractor
 /// and confirm every payload we attempted round-trips byte-identically,
 /// chunk ordering/flags are legal, and dimensions match `facts`.
-fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: &MetadataLimits) -> bool {
+fn validate(
+    merged: &[u8],
+    attempted: &[&Payload],
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> bool {
     let bundle = extract(merged, limits);
     if bundle
         .report()
@@ -447,9 +479,18 @@ fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: 
     }
     for payload in attempted {
         let present = match payload {
-            Payload::Exif(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Exif(pb) if pb == b)),
-            Payload::Xmp(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Xmp(pb) if pb == b)),
-            Payload::Icc(b) => bundle.payloads.iter().any(|p| matches!(p, Payload::Icc(pb) if pb == b)),
+            Payload::Exif(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Exif(pb) if pb == b)),
+            Payload::Xmp(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Xmp(pb) if pb == b)),
+            Payload::Icc(b) => bundle
+                .payloads
+                .iter()
+                .any(|p| matches!(p, Payload::Icc(pb) if pb == b)),
             _ => true,
         };
         if !present {
@@ -526,7 +567,7 @@ mod tests {
         // Odd-length XMP payload forces a pad byte; a later chunk must
         // still parse correctly, proving the pad byte was skipped.
         let data = webp(&[
-            chunk(b"XMP ", b"<a/>"), // 4 bytes, even, no padding needed on its own
+            chunk(b"XMP ", b"<a/>"),     // 4 bytes, even, no padding needed on its own
             chunk(b"EXIF", b"MM\0*odd"), // 7 bytes: odd, needs padding
             chunk(b"ICCP", b"profile-bytes"),
         ]);
@@ -566,7 +607,10 @@ mod tests {
         inner.extend_from_slice(b"body");
         let data = webp(&[chunk(b"LIST", &inner)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Exif(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Exif(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Unknown
                 && i.reason == MetadataIssueReason::Unsupported
@@ -594,7 +638,10 @@ mod tests {
     fn duplicate_xmp_is_dropped_as_conflicting() {
         let data = webp(&[chunk(b"XMP ", b"<one/>"), chunk(b"XMP ", b"<two/>")]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Xmp(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Xmp(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Xmp && i.reason == MetadataIssueReason::Malformed
         }));

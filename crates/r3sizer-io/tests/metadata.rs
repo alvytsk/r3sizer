@@ -82,7 +82,11 @@ fn build_icc_app2() -> Vec<u8> {
 /// must stay the first marker after SOI). `base` is assumed to start with
 /// `FF D8 FF E0` (SOI then APP0), as `plain.jpg` does.
 fn insert_after_app0(base: &[u8], segment: &[u8]) -> Vec<u8> {
-    assert_eq!(&base[0..4], &[0xFF, 0xD8, 0xFF, 0xE0], "expected SOI+APP0 prefix");
+    assert_eq!(
+        &base[0..4],
+        &[0xFF, 0xD8, 0xFF, 0xE0],
+        "expected SOI+APP0 prefix"
+    );
     let app0_len = u16::from_be_bytes([base[4], base[5]]) as usize;
     let insert_at = 4 + app0_len;
     let mut out = Vec::with_capacity(base.len() + segment.len());
@@ -100,7 +104,9 @@ fn write_bytes(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 
 fn read_exif(path: &Path) -> exif::Exif {
     exif::Reader::new()
-        .read_from_container(&mut std::io::BufReader::new(std::fs::File::open(path).unwrap()))
+        .read_from_container(&mut std::io::BufReader::new(
+            std::fs::File::open(path).unwrap(),
+        ))
         .unwrap()
 }
 
@@ -153,8 +159,12 @@ fn pixel_parity_with_load_as_linear() {
     let source = write_bytes(dir.path(), "in.jpg", METADATA_JPG);
 
     let plain = r3sizer_io::load_as_linear(&source).unwrap();
-    let with_meta = load_with_metadata(&source, &DecodeLimits::default(), &MetadataLimits::default())
-        .unwrap();
+    let with_meta = load_with_metadata(
+        &source,
+        &DecodeLimits::default(),
+        &MetadataLimits::default(),
+    )
+    .unwrap();
 
     assert_eq!(plain.width(), with_meta.image.width());
     assert_eq!(plain.height(), with_meta.image.height());
@@ -172,7 +182,10 @@ fn default_dimension_limits_reject_oversized_image() {
     };
     let err = load_with_metadata(&source, &tiny_limits, &MetadataLimits::default())
         .expect_err("32x16 image should exceed a 3px dimension cap");
-    assert!(matches!(err, r3sizer_io::IoError::TooLarge { .. }), "got {err}");
+    assert!(
+        matches!(err, r3sizer_io::IoError::TooLarge { .. }),
+        "got {err}"
+    );
 }
 
 #[test]
@@ -206,7 +219,11 @@ fn no_metadata_round_trips_without_warnings() {
     assert!(loaded.metadata.report().issues.is_empty());
 
     let report = save_with_metadata(&loaded.image, &dest, &loaded, &limits).unwrap();
-    assert!(report.issues.is_empty(), "unexpected issues: {:?}", report.issues);
+    assert!(
+        report.issues.is_empty(),
+        "unexpected issues: {:?}",
+        report.issues
+    );
 }
 
 #[test]
@@ -232,7 +249,10 @@ fn malformed_metadata_with_valid_pixels_reports_issue_but_still_exports() {
 
     let report = save_with_metadata(&loaded.image, &dest, &loaded, &limits).unwrap();
     assert!(
-        report.issues.iter().any(|i| i.reason == MetadataIssueReason::Malformed),
+        report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::Malformed),
         "expected a Malformed issue, got {:?}",
         report.issues
     );
@@ -252,7 +272,10 @@ fn unsupported_bmp_destination_warns_when_source_has_metadata() {
 
     let report = save_with_metadata(&loaded.image, &dest, &loaded, &limits).unwrap();
     assert!(
-        report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        report
+            .issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::MergeFailed),
         "expected MergeFailed issues for an unsupported destination, got {:?}",
         report.issues
     );
@@ -335,7 +358,10 @@ fn native_orientation_values_round_trip_unchanged() {
         let dest = dir.path().join(format!("out_{orientation}.jpg"));
 
         let loaded = load_with_metadata(&source, &DecodeLimits::default(), &limits).unwrap();
-        assert_eq!(loaded.orientation, r3sizer_metadata::OrientationAction::Preserve);
+        assert_eq!(
+            loaded.orientation,
+            r3sizer_metadata::OrientationAction::Preserve
+        );
 
         save_with_metadata(&loaded.image, &dest, &loaded, &limits).unwrap();
         let actual = read_exif(&dest)

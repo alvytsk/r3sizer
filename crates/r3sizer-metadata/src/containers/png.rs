@@ -13,7 +13,9 @@ use img_parts::Bytes;
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::containers::{inflate_bounded, Collector, InflateError};
 use crate::limits::{checked_range, MetadataLimits};
-use crate::types::{MetadataCategory, MetadataExport, MetadataIssueReason, MetadataReport, OutputFacts};
+use crate::types::{
+    MetadataCategory, MetadataExport, MetadataIssueReason, MetadataReport, OutputFacts,
+};
 
 const XMP_KEYWORD: &[u8] = b"XML:com.adobe.xmp";
 
@@ -554,7 +556,8 @@ fn insert_before_iend(png: &mut Png, chunk: PngChunk) {
 fn set_exif_before_idat(png: &mut Png, exif: &[u8]) {
     png.remove_chunks_by_type(CHUNK_EXIF);
     let pos = before_idat_pos(png);
-    png.chunks_mut().insert(pos, PngChunk::new(CHUNK_EXIF, Bytes::from(exif.to_vec())));
+    png.chunks_mut()
+        .insert(pos, PngChunk::new(CHUNK_EXIF, Bytes::from(exif.to_vec())));
 }
 
 /// Hand-rolled equivalent of `img_parts::png::Png::set_icc_profile`: same
@@ -584,7 +587,8 @@ fn set_icc(png: &mut Png, profile: &[u8]) {
     };
     contents.extend_from_slice(&compressed);
     let pos = png.chunks().len().min(1);
-    png.chunks_mut().insert(pos, PngChunk::new(CHUNK_ICCP, Bytes::from(contents)));
+    png.chunks_mut()
+        .insert(pos, PngChunk::new(CHUNK_ICCP, Bytes::from(contents)));
 }
 
 fn is_xmp_itxt(contents: &[u8]) -> bool {
@@ -596,7 +600,8 @@ fn is_xmp_itxt(contents: &[u8]) -> bool {
 /// language/translated-keyword fields, then the raw XMP text -- matching
 /// what `handle_itxt` in this file's extractor reads back as XMP.
 fn set_xmp(png: &mut Png, xmp: &[u8]) {
-    png.chunks_mut().retain(|c| !(c.kind() == *b"iTXt" && is_xmp_itxt(c.contents())));
+    png.chunks_mut()
+        .retain(|c| !(c.kind() == *b"iTXt" && is_xmp_itxt(c.contents())));
     let mut contents = XMP_KEYWORD.to_vec();
     contents.push(0); // end keyword
     contents.push(0); // compression flag
@@ -612,8 +617,10 @@ fn set_xmp(png: &mut Png, xmp: &[u8]) {
 /// the source's own text chunks.
 fn strip_non_xmp_text(png: &mut Png) {
     png.chunks_mut().retain(|c| {
-        !matches!(c.kind(), [b't', b'E', b'X', b't'] | [b'z', b'T', b'X', b't'])
-            && !(c.kind() == *b"iTXt" && !is_xmp_itxt(c.contents()))
+        !matches!(
+            c.kind(),
+            [b't', b'E', b'X', b't'] | [b'z', b'T', b'X', b't']
+        ) && !(c.kind() == *b"iTXt" && !is_xmp_itxt(c.contents()))
     });
 }
 
@@ -638,7 +645,12 @@ fn set_phys(png: &mut Png, x: u32, y: u32, unit: u8) {
 /// and confirm every payload we attempted round-trips byte-identically,
 /// with no new structural damage and dimensions matching `facts`. Never
 /// inflates IDAT.
-fn validate(merged: &[u8], attempted: &[&Payload], facts: &OutputFacts, limits: &MetadataLimits) -> bool {
+fn validate(
+    merged: &[u8],
+    attempted: &[&Payload],
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> bool {
     let bundle = extract(merged, limits);
     if bundle
         .report()
@@ -681,8 +693,16 @@ fn dimensions(source: &[u8]) -> Option<(u32, u32)> {
     if &source[range.start + 4..range.start + 8] != b"IHDR" {
         return None;
     }
-    let width = u32::from_be_bytes(source[range.start + 8..range.start + 12].try_into().unwrap());
-    let height = u32::from_be_bytes(source[range.start + 12..range.start + 16].try_into().unwrap());
+    let width = u32::from_be_bytes(
+        source[range.start + 8..range.start + 12]
+            .try_into()
+            .unwrap(),
+    );
+    let height = u32::from_be_bytes(
+        source[range.start + 12..range.start + 16]
+            .try_into()
+            .unwrap(),
+    );
     Some((width, height))
 }
 
@@ -786,7 +806,10 @@ mod tests {
         b.extend_from_slice(&compressed2);
         let data = png(&[chunk(b"iCCP", &a), chunk(b"iCCP", &b)]);
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::Icc(_))));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::Icc(_))));
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Malformed
         }));
@@ -837,7 +860,15 @@ mod tests {
         let stored_ztxt = bundle
             .payloads
             .iter()
-            .filter(|p| matches!(p, Payload::PngText { kind: [b'z', b'T', b'X', b't'], .. }))
+            .filter(|p| {
+                matches!(
+                    p,
+                    Payload::PngText {
+                        kind: [b'z', b'T', b'X', b't'],
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(
             stored_ztxt, 1,
@@ -863,7 +894,10 @@ mod tests {
             .payloads
             .iter()
             .any(|p| matches!(p, Payload::Xmp(b) if b == b"<x:xmpmeta>hi</x:xmpmeta>")));
-        assert!(bundle.payloads.iter().all(|p| !matches!(p, Payload::PngText { .. })));
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::PngText { .. })));
     }
 
     #[test]
@@ -884,9 +918,11 @@ mod tests {
         data.extend_from_slice(&1000u32.to_be_bytes());
         data.extend_from_slice(b"tEXt");
         let bundle = extract(&data, &MetadataLimits::default());
-        assert!(bundle.report().issues.iter().any(|i| {
-            i.reason == MetadataIssueReason::Malformed
-        }));
+        assert!(bundle
+            .report()
+            .issues
+            .iter()
+            .any(|i| { i.reason == MetadataIssueReason::Malformed }));
         assert_eq!(bundle.source_color(), SourceColor::Unknown);
     }
 

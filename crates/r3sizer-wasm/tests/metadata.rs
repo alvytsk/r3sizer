@@ -13,12 +13,14 @@ fn metadata_response_uses_typed_bytes_and_nullable_fields() {
             color: r3sizer_metadata::ColorAction::Srgb,
         },
     };
-    let result = r3sizer_wasm::preserve_metadata(serde_wasm_bindgen::to_value(&request).unwrap())
-        .unwrap();
+    let result =
+        r3sizer_wasm::preserve_metadata(serde_wasm_bindgen::to_value(&request).unwrap()).unwrap();
     let bytes = js_sys::Reflect::get(&result, &"bytes".into()).unwrap();
     assert!(bytes.is_instance_of::<js_sys::Uint8Array>());
     let report = js_sys::Reflect::get(&result, &"report".into()).unwrap();
     let issues = js_sys::Reflect::get(&report, &"issues".into()).unwrap();
     let first = js_sys::Array::from(&issues).get(0);
-    assert!(js_sys::Reflect::get(&first, &"field".into()).unwrap().is_null());
+    assert!(js_sys::Reflect::get(&first, &"field".into())
+        .unwrap()
+        .is_null());
 }

@@ -14,8 +14,7 @@
 use crate::bundle::{MetadataBundle, Payload};
 use crate::limits::{checked_range, MetadataLimits};
 use crate::types::{
-    ColorAction, MetadataCategory, MetadataIssue, MetadataIssueReason, MetadataReport,
-    OutputFacts,
+    ColorAction, MetadataCategory, MetadataIssue, MetadataIssueReason, MetadataReport, OutputFacts,
 };
 use crate::{exif, xmp};
 
@@ -48,11 +47,12 @@ pub fn prepare(
                     payloads.push(Payload::Xmp(b));
                 }
             }
-            Payload::Icc(bytes) => match icc_decision(bytes, facts.color, destination_icc, limits)
-            {
-                Ok(()) => payloads.push(payload.clone()),
-                Err(issue) => issues.push(issue),
-            },
+            Payload::Icc(bytes) => {
+                match icc_decision(bytes, facts.color, destination_icc, limits) {
+                    Ok(()) => payloads.push(payload.clone()),
+                    Err(issue) => issues.push(issue),
+                }
+            }
             other => payloads.push(other.clone()),
         }
     }
@@ -155,10 +155,18 @@ fn is_structurally_valid_icc(bytes: &[u8], limits: &MetadataLimits) -> bool {
     };
     for i in 0..tag_count {
         let pos = table_range.start + i * 12;
-        let offset = u32::from_be_bytes([bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]])
-            as usize;
-        let size = u32::from_be_bytes([bytes[pos + 8], bytes[pos + 9], bytes[pos + 10], bytes[pos + 11]])
-            as usize;
+        let offset = u32::from_be_bytes([
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]) as usize;
+        let size = u32::from_be_bytes([
+            bytes[pos + 8],
+            bytes[pos + 9],
+            bytes[pos + 10],
+            bytes[pos + 11],
+        ]) as usize;
         if checked_range(offset, size, 1, bytes.len()).is_none() {
             return false;
         }
@@ -234,12 +242,18 @@ mod tests {
 
     #[test]
     fn valid_icc_structure_passes() {
-        assert!(is_structurally_valid_icc(&valid_icc(1), &MetadataLimits::default()));
+        assert!(is_structurally_valid_icc(
+            &valid_icc(1),
+            &MetadataLimits::default()
+        ));
     }
 
     #[test]
     fn truncated_icc_fails_structural_check() {
-        assert!(!is_structurally_valid_icc(&[0u8; 10], &MetadataLimits::default()));
+        assert!(!is_structurally_valid_icc(
+            &[0u8; 10],
+            &MetadataLimits::default()
+        ));
     }
 
     #[test]
@@ -266,7 +280,12 @@ mod tests {
     #[test]
     fn unchanged_keeps_valid_icc_without_issue() {
         let bundle = icc_only_bundle(valid_icc(1));
-        let prepared = prepare(&bundle, &facts(ColorAction::Unchanged), None, &MetadataLimits::default());
+        let prepared = prepare(
+            &bundle,
+            &facts(ColorAction::Unchanged),
+            None,
+            &MetadataLimits::default(),
+        );
         assert!(prepared.report().issues.is_empty());
     }
 
@@ -300,7 +319,12 @@ mod tests {
     #[test]
     fn srgb_drops_icc_when_no_destination_given() {
         let bundle = icc_only_bundle(valid_icc(1));
-        let prepared = prepare(&bundle, &facts(ColorAction::Srgb), None, &MetadataLimits::default());
+        let prepared = prepare(
+            &bundle,
+            &facts(ColorAction::Srgb),
+            None,
+            &MetadataLimits::default(),
+        );
         assert!(prepared.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified
         }));
@@ -324,7 +348,12 @@ mod tests {
     #[test]
     fn malformed_icc_reported_regardless_of_action() {
         let bundle = icc_only_bundle(vec![0u8; 4]);
-        let prepared = prepare(&bundle, &facts(ColorAction::Unchanged), None, &MetadataLimits::default());
+        let prepared = prepare(
+            &bundle,
+            &facts(ColorAction::Unchanged),
+            None,
+            &MetadataLimits::default(),
+        );
         assert!(prepared.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Malformed
         }));
@@ -371,12 +400,19 @@ mod tests {
         );
         // Srgb with no destination also raises the identical Icc/Unverified
         // issue, so the prepared report must still only carry it once.
-        let prepared = prepare(&bundle, &facts(ColorAction::Srgb), None, &MetadataLimits::default());
+        let prepared = prepare(
+            &bundle,
+            &facts(ColorAction::Srgb),
+            None,
+            &MetadataLimits::default(),
+        );
         let count = prepared
             .report()
             .issues
             .iter()
-            .filter(|i| i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified)
+            .filter(|i| {
+                i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified
+            })
             .count();
         assert_eq!(count, 1);
     }

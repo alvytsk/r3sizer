@@ -238,9 +238,11 @@ impl<'a> Collector<'a> {
     /// payload, accounting for both the per-payload cap and what's left of
     /// the total budget. Used to bound decompression (iCCP/zTXt/iTXt).
     pub(crate) fn remaining_budget(&self) -> usize {
-        self.limits
-            .max_payload_bytes
-            .min(self.limits.max_total_metadata_bytes.saturating_sub(self.total_bytes))
+        self.limits.max_payload_bytes.min(
+            self.limits
+                .max_total_metadata_bytes
+                .saturating_sub(self.total_bytes),
+        )
     }
 
     /// Reserve `len` bytes against the budget *immediately*, independent of
@@ -258,7 +260,11 @@ impl<'a> Collector<'a> {
         if len > self.limits.max_payload_bytes
             || self.total_bytes.saturating_add(len) > self.limits.max_total_metadata_bytes
         {
-            self.push_issue(category, MetadataIssueReason::LimitExceeded, Some(field.to_string()));
+            self.push_issue(
+                category,
+                MetadataIssueReason::LimitExceeded,
+                Some(field.to_string()),
+            );
             return false;
         }
         self.total_bytes += len;
@@ -279,7 +285,11 @@ impl<'a> Collector<'a> {
             || self.total_bytes.saturating_add(len) > self.limits.max_total_metadata_bytes
             || self.payloads.len() >= self.limits.max_records
         {
-            self.push_issue(category, MetadataIssueReason::LimitExceeded, Some(field.to_string()));
+            self.push_issue(
+                category,
+                MetadataIssueReason::LimitExceeded,
+                Some(field.to_string()),
+            );
             return false;
         }
         self.total_bytes += len;
@@ -294,7 +304,11 @@ impl<'a> Collector<'a> {
     /// still enforced here, so bytes are never double-charged.
     fn store_prevalidated(&mut self, payload: Payload, category: MetadataCategory, field: &str) {
         if self.payloads.len() >= self.limits.max_records {
-            self.push_issue(category, MetadataIssueReason::LimitExceeded, Some(field.to_string()));
+            self.push_issue(
+                category,
+                MetadataIssueReason::LimitExceeded,
+                Some(field.to_string()),
+            );
             return;
         }
         self.payloads.push(payload);

@@ -185,7 +185,13 @@ pub(crate) fn correct(
     limits: &MetadataLimits,
 ) -> (Option<Vec<u8>>, Vec<MetadataIssue>) {
     if raw.len() > limits.max_payload_bytes {
-        return (None, vec![fatal(MetadataIssueReason::LimitExceeded, "max_payload_bytes")]);
+        return (
+            None,
+            vec![fatal(
+                MetadataIssueReason::LimitExceeded,
+                "max_payload_bytes",
+            )],
+        );
     }
     let text = match std::str::from_utf8(raw) {
         Ok(t) => t,
@@ -733,7 +739,12 @@ mod tests {
             <dc:description>Set the ImageWidth and Orientation tags before export</dc:description>
           </rdf:Description>
         </rdf:RDF>"#;
-        let facts = facts(100, 50, OrientationAction::Normalize, ColorAction::Unchanged);
+        let facts = facts(
+            100,
+            50,
+            OrientationAction::Normalize,
+            ColorAction::Unchanged,
+        );
         let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
@@ -755,7 +766,12 @@ mod tests {
             <exif:PixelYDimension>3000</exif:PixelYDimension>
           </rdf:Description>
         </rdf:RDF>"#;
-        let facts = facts(800, 600, OrientationAction::Preserve, ColorAction::Unchanged);
+        let facts = facts(
+            800,
+            600,
+            OrientationAction::Preserve,
+            ColorAction::Unchanged,
+        );
         let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
@@ -796,7 +812,8 @@ mod tests {
         assert!(text.contains("<rdf:li>vacation</rdf:li>"));
         assert!(text.contains("<rdf:li>beach</rdf:li>"));
         assert!(text.contains("40,26.767N"));
-        assert!(text.contains("<custom:widget xmlns:custom=\"urn:example:custom\">kept</custom:widget>"));
+        assert!(text
+            .contains("<custom:widget xmlns:custom=\"urn:example:custom\">kept</custom:widget>"));
     }
 
     #[test]
@@ -805,7 +822,12 @@ mod tests {
           xmlns:tiff="http://ns.adobe.com/tiff/1.0/">
           <rdf:Description><tiff:ImageWidth/><tiff:ImageLength></tiff:ImageLength></rdf:Description>
         </rdf:RDF>"#;
-        let facts = facts(320, 240, OrientationAction::Preserve, ColorAction::Unchanged);
+        let facts = facts(
+            320,
+            240,
+            OrientationAction::Preserve,
+            ColorAction::Unchanged,
+        );
         let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
@@ -952,7 +974,9 @@ mod tests {
         let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("ModifyDate"));
-        assert!(text.contains("<exif:DateTimeOriginal>2020-05-05T10:00:00Z</exif:DateTimeOriginal>"));
+        assert!(
+            text.contains("<exif:DateTimeOriginal>2020-05-05T10:00:00Z</exif:DateTimeOriginal>")
+        );
         assert!(issues.iter().any(|i| {
             i.category == MetadataCategory::Xmp
                 && i.reason == Reason::RemovedStale
