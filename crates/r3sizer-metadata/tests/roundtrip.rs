@@ -126,7 +126,16 @@ fn webp(chunks: &[Vec<u8>]) -> Vec<u8> {
 /// profile: 128-byte header (declared size + `acsp` signature) followed by
 /// a zero-entry tag table, matching `policy.rs`'s own test helper shape.
 fn valid_icc(byte: u8) -> Vec<u8> {
-    let mut b = vec![byte; 132];
+    valid_icc_sized(byte, 132)
+}
+
+/// Same shape as `valid_icc`, but padded to an arbitrary total length --
+/// used to exercise the JPEG multi-segment ICC splitting path near its
+/// real size boundary. `total_len` must be at least 132 (header + a
+/// zero-entry tag table).
+fn valid_icc_sized(byte: u8, total_len: usize) -> Vec<u8> {
+    assert!(total_len >= 132);
+    let mut b = vec![byte; total_len];
     let size = (b.len() as u32).to_be_bytes();
     b[0..4].copy_from_slice(&size);
     b[36..40].copy_from_slice(b"acsp");
@@ -425,6 +434,89 @@ fn srgb_policy_drops_icc_when_destination_has_no_matching_profile() {
         .any(|i| i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified));
     let merged_bundle = extract(&output.bytes, &limits);
     assert_ne!(merged_bundle.source_color(), SourceColor::Other);
+}
+
+// --- Large ICC profiles: multi-segment splitting near the real boundary ----
+//
+// `containers::jpeg::set_icc`'s `ICC_SEGMENT_MAX_SIZE` must exactly match
+// `img_parts::jpeg::image::ICC_SEGMENT_MAX_SIZE` (65,519); a profile chunk
+// even one byte over that produces a `JpegSegment` whose content exceeds
+// 65,533 bytes, which panics inside `img-parts`' own encoder
+// (`(self.len() - 2).try_into::<u16>()`) rather than returning gracefully.
+// These tests build the *source* ICC profile via a WebP `ICCP` chunk
+// (uncompressed, no JPEG-segment-sized ceiling of its own) specifically so
+// a profile of this size can exist as a `Payload::Icc` at all, then merge
+// it into a real JPEG destination -- exercising `set_icc`'s splitting path
+// for real, not just the constant in isolation.
+
+/// Reassembles every `ICC_PROFILE\0`-prefixed APP2 segment's data (by
+/// sequence number) directly via `img-parts` -- a dependency this crate
+/// already has, used here as an independent check that `set_icc` produced
+/// well-formed segments `img-parts` itself can still parse, not just that
+/// nothing panicked.
+fn reassemble_icc_via_img_parts(jpeg_bytes: &[u8]) -> Vec<u8> {
+    let jpeg = img_parts::jpeg::Jpeg::from_bytes(img_parts::Bytes::from(jpeg_bytes.to_vec()))
+        .expect("output must still be a parseable JPEG");
+    let mut parts: Vec<(u8, u8, Vec<u8>)> = jpeg
+        .segments()
+        .iter()
+        .filter(|s| s.marker() == 0xE2 && s.contents().starts_with(b"ICC_PROFILE\0"))
+        .map(|s| {
+            let c = s.contents();
+            (c[12], c[13], c[14..].to_vec())
+        })
+        .collect();
+    parts.sort_by_key(|p| p.0);
+    parts.into_iter().flat_map(|p| p.2).collect()
+}
+
+#[test]
+fn icc_profile_exactly_at_the_segment_boundary_splits_without_panicking() {
+    let limits = MetadataLimits::default();
+    // 65,519 bytes: exactly `ICC_SEGMENT_MAX_SIZE`. At the *old, buggy*
+    // constant (65,521) this would have fit in what the code believed was
+    // one segment while actually needing 65,533 (segment cap) + 2 more --
+    // triggering the panic. At the correct constant, this size is safely
+    // within (indeed exactly at) one segment's payload capacity.
+    let icc = valid_icc_sized(3, 65_519);
+    let source = webp(&[webp_chunk(b"ICCP", &icc)]);
+    let bundle = extract(&source, &limits);
+    assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
+
+    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    assert!(
+        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        "{:?}",
+        output.report
+    );
+    assert_eq!(reassemble_icc_via_img_parts(&output.bytes), icc);
+}
+
+#[test]
+fn icc_profile_one_byte_past_the_segment_boundary_forces_a_second_segment() {
+    let limits = MetadataLimits::default();
+    // 65,520 bytes: one byte past `ICC_SEGMENT_MAX_SIZE`, genuinely forcing
+    // a second (1-byte) segment. This is the exact size the reviewer's
+    // reproduction used to trigger the pre-fix panic.
+    let icc = valid_icc_sized(5, 65_520);
+    let source = webp(&[webp_chunk(b"ICCP", &icc)]);
+    let bundle = extract(&source, &limits);
+    assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
+
+    let output = merge(PLAIN_JPG.to_vec(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    assert!(
+        !output.report.issues.iter().any(|i| i.reason == MetadataIssueReason::MergeFailed),
+        "{:?}",
+        output.report
+    );
+    let jpeg = img_parts::jpeg::Jpeg::from_bytes(img_parts::Bytes::from(output.bytes.clone())).unwrap();
+    let icc_segments = jpeg
+        .segments()
+        .iter()
+        .filter(|s| s.marker() == 0xE2 && s.contents().starts_with(b"ICC_PROFILE\0"))
+        .count();
+    assert!(icc_segments >= 2, "a profile past the boundary must span at least two segments, got {icc_segments}");
+    assert_eq!(reassemble_icc_via_img_parts(&output.bytes), icc);
 }
 
 // --- JPEG segment-size limits ------------------------------------------------

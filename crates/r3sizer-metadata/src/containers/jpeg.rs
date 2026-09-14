@@ -389,11 +389,21 @@ fn assemble_icc(chunks: Vec<(u8, u8, Vec<u8>)>, collector: &mut Collector) -> bo
 // scheme) but insert at `segments().len().min(3)`, exactly like this
 // file's own `set_xmp`/`set_app13`/`set_comment` already do.
 const MAX_APP_PAYLOAD: usize = 65_533;
-// Matches `img_parts::jpeg::image::ICC_SEGMENT_MAX_SIZE`: segment size
-// (u16::MAX) minus the ICC segment metadata (2-byte length field this
-// constant already excludes, plus the 12-byte "ICC_PROFILE\0" identifier
-// and 2-byte sequence/count pair).
-const ICC_SEGMENT_MAX_SIZE: usize = 65_535 - (ICC_PREFIX.len() + 2);
+// Matches `img_parts::jpeg::image::ICC_SEGMENT_MAX_SIZE` (verified against
+// that constant's own definition in `jpeg/image.rs`, not re-derived from
+// scratch): `65535 - ICC_PREFIX_SIZE` there, where `ICC_PREFIX_SIZE = 2 +
+// 14` -- the segment's 2-byte length field, plus 14 bytes of per-segment
+// ICC metadata (the 12-byte `ICC_PROFILE\0` identifier + a 1-byte sequence
+// number + a 1-byte sequence count). `ICC_PREFIX` here is only the
+// 12-byte identifier, so both extra bytes (sequence number + count) are
+// spelled out explicitly rather than folded into a generic "+2" that could
+// silently drift from upstream's real 16-byte total again.
+const ICC_SEGMENT_MAX_SIZE: usize = 65_535 - (ICC_PREFIX.len() + 1 + 1 + 2);
+// Pin the value itself, not just the formula: a future edit to any of the
+// terms above that still compiles but drifts from upstream's real 65,519
+// (the exact off-by-two this constant was originally wrong by) fails the
+// build instead of silently re-panicking at encode time for large profiles.
+const _: () = assert!(ICC_SEGMENT_MAX_SIZE == 65_519);
 
 /// Insert `prepared`'s payloads into an already-encoded destination JPEG.
 ///
