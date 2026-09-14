@@ -77,3 +77,31 @@ If ExifTool (`exiftool`) is installed, running it against `metadata.jpg`
 independently (`exiftool tests/fixtures/metadata.jpg`) is a useful sanity
 check during fixture preparation, but it is not a runtime dependency of
 this crate and no test depends on its presence.
+
+## `metadata-with-makernote.jpg` (Task 7: CLI stderr-warning regression test)
+
+A second, independent binary fixture used only by
+`crates/r3sizer/tests/metadata_cli.rs` to exercise the CLI's
+stderr-only metadata-loss warning end to end against a real dropped
+tag. Same 32x16 plain-pixel JPEG block as `plain.jpg`, with a
+hand-built TIFF block spliced in via the same `inject_jpeg_exif`
+helper, carrying: `Artist` = "Fixture Author" (same authorship
+convention as the fixtures above) in IFD0, and an `ExifIFD` holding a
+single `MakerNote` (tag `0x927c`, type UNDEFINED, 20 bytes of `0xAB`
+placeholder data) -- the exact shape `src/exif/patch.rs`'s
+`maker_note_is_removed` unit test exercises, and the shape Task 3's
+`correct()` is expected to drop with a `MakerNote`/`Unverified` issue.
+
+Regenerate it (independently of the other fixtures, which stay
+untouched) with:
+
+```sh
+cargo test -p r3sizer-metadata --test gen_fixtures generate_makernote_fixture -- --ignored --nocapture
+```
+
+That test (`generate_makernote_fixture` in `tests/gen_fixtures.rs`)
+independently re-reads the freshly written bytes with `kamadak-exif`
+and asserts both `Artist` and `MakerNote` are actually present in the
+*source* fixture before anything is committed -- confirming the CLI
+test's premise (Task 3 removes it) is exercising a MakerNote that was
+really there to begin with.

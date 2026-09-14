@@ -53,6 +53,17 @@ r3sizer sweep --in-dir ./photos --out-dir ./out --summary summary.json --width 8
 
 Run `r3sizer <subcommand> --help` for the full flag list, or see the [CLI reference](https://github.com/alvytsk/r3sizer/blob/main/docs/cli.md).
 
+## Metadata preservation
+
+EXIF/XMP/IPTC/ICC metadata is carried from the source into the output when the
+destination format supports it (JPEG, PNG, WebP). Anything that can't be safely
+preserved — a dropped `MakerNote`, a stale thumbnail, an unsupported destination
+format, malformed metadata — is reported as a `warning: <path>: metadata <category>/<reason> (<field>)`
+line on **stderr only**; it never appears in stdout, diagnostics JSON, or
+`sweep`'s `summary.json`, and never changes the exit code. See the
+[CLI reference](https://github.com/alvytsk/r3sizer/blob/main/docs/cli.md#metadata-preservation)
+for the full format and category list.
+
 ## Runtime modes
 
 Every processing command accepts `--mode fast | balanced | quality` (default: `balanced`):

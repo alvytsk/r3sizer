@@ -1,6 +1,7 @@
 mod args;
 mod corpus;
 mod diff;
+mod metadata;
 mod output;
 mod presets;
 mod run;

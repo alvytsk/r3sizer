@@ -119,8 +119,18 @@ fn build_tiff() -> (Vec<u8>, TiffOffsets) {
 
     let mut ifd0 = Vec::new();
     ifd0.extend((IFD0_ENTRIES as u16).to_le_bytes());
-    ifd0.extend(ifd_entry(0x010e, TYPE_ASCII, desc.len() as u32, offset_field(desc_offset)));
-    ifd0.extend(ifd_entry(0x013b, TYPE_ASCII, artist.len() as u32, offset_field(artist_offset)));
+    ifd0.extend(ifd_entry(
+        0x010e,
+        TYPE_ASCII,
+        desc.len() as u32,
+        offset_field(desc_offset),
+    ));
+    ifd0.extend(ifd_entry(
+        0x013b,
+        TYPE_ASCII,
+        artist.len() as u32,
+        offset_field(artist_offset),
+    ));
     ifd0.extend(ifd_entry(
         0x8298,
         TYPE_ASCII,
@@ -144,9 +154,19 @@ fn build_tiff() -> (Vec<u8>, TiffOffsets) {
     let mut gps_ifd = Vec::new();
     gps_ifd.extend((GPS_ENTRIES as u16).to_le_bytes());
     gps_ifd.extend(ifd_entry(0x0001, TYPE_ASCII, 2, inline_ascii(lat_ref)));
-    gps_ifd.extend(ifd_entry(0x0002, TYPE_RATIONAL, 3, offset_field(lat_offset)));
+    gps_ifd.extend(ifd_entry(
+        0x0002,
+        TYPE_RATIONAL,
+        3,
+        offset_field(lat_offset),
+    ));
     gps_ifd.extend(ifd_entry(0x0003, TYPE_ASCII, 2, inline_ascii(lon_ref)));
-    gps_ifd.extend(ifd_entry(0x0004, TYPE_RATIONAL, 3, offset_field(lon_offset)));
+    gps_ifd.extend(ifd_entry(
+        0x0004,
+        TYPE_RATIONAL,
+        3,
+        offset_field(lon_offset),
+    ));
     gps_ifd.extend(0u32.to_le_bytes());
 
     b.extend(ifd0);
@@ -211,7 +231,10 @@ fn png_chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
 
 fn inject_png_exif(png: &[u8], tiff: &[u8]) -> Vec<u8> {
     // eXIf must precede the first IDAT (PNG spec Table 7).
-    let idat_marker = png.windows(4).position(|w| w == b"IDAT").expect("IDAT present");
+    let idat_marker = png
+        .windows(4)
+        .position(|w| w == b"IDAT")
+        .expect("IDAT present");
     let insert_at = idat_marker - 4; // back up over IDAT's own length field
     let mut out = png[..insert_at].to_vec();
     out.extend(png_chunk(b"eXIf", tiff));
@@ -260,6 +283,100 @@ fn inject_webp_exif(webp: &[u8], tiff: &[u8], width: u32, height: u32) -> Vec<u8
 
 fn write(path: &Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
+}
+
+// --- MakerNote fixture (Task 7: CLI stderr-warning regression test) -------
+
+/// Builds a little-endian classic TIFF buffer carrying `Artist` = "Fixture
+/// Author" (same authorship convention as [`build_tiff`]) in IFD0, plus an
+/// `ExifIFD` holding a single `MakerNote` (0x927c, UNDEFINED, out-of-line
+/// fictional bytes) -- the shape `src/exif/patch.rs` drops with a
+/// `MakerNote`/`Unverified` issue (see `maker_note_is_removed` in
+/// `src/exif/mod.rs`).
+fn build_tiff_with_makernote() -> Vec<u8> {
+    let artist = b"Fixture Author\0";
+    let maker_note_data = vec![0xABu8; 20]; // fictional bytes, not decoded by anything
+
+    const IFD0_ENTRIES: u32 = 2; // Artist, ExifIFD pointer
+    const EXIF_ENTRIES: u32 = 1; // MakerNote
+    let ifd0_size = 2 + IFD0_ENTRIES * 12 + 4;
+    let exif_size = 2 + EXIF_ENTRIES * 12 + 4;
+
+    let ifd0_offset: u32 = 8;
+    let exif_offset = ifd0_offset + ifd0_size;
+    let pool_offset = exif_offset + exif_size;
+
+    let artist_offset = pool_offset;
+    let maker_note_offset = artist_offset + artist.len() as u32;
+
+    let mut b = b"II\x2a\0".to_vec();
+    b.extend(ifd0_offset.to_le_bytes());
+
+    let mut ifd0 = Vec::new();
+    ifd0.extend((IFD0_ENTRIES as u16).to_le_bytes());
+    ifd0.extend(ifd_entry(
+        0x013b,
+        TYPE_ASCII,
+        artist.len() as u32,
+        offset_field(artist_offset),
+    ));
+    ifd0.extend(ifd_entry(0x8769, TYPE_LONG, 1, offset_field(exif_offset)));
+    ifd0.extend(0u32.to_le_bytes());
+
+    let mut exif_ifd = Vec::new();
+    exif_ifd.extend((EXIF_ENTRIES as u16).to_le_bytes());
+    exif_ifd.extend(ifd_entry(
+        0x927c, // MakerNote
+        7,      // UNDEFINED
+        maker_note_data.len() as u32,
+        offset_field(maker_note_offset),
+    ));
+    exif_ifd.extend(0u32.to_le_bytes());
+
+    b.extend(ifd0);
+    b.extend(exif_ifd);
+    b.extend(artist);
+    b.extend(&maker_note_data);
+    b
+}
+
+#[test]
+#[ignore = "run explicitly to (re)generate the committed makernote fixture; see tests/fixtures/README.md"]
+fn generate_makernote_fixture() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+
+    // Same WIDTH×HEIGHT pixel block as the other fixtures -- 32×16 is
+    // divisible by a --width 16 --height 8 downscale target.
+    let plain_jpg = encode(image::ImageFormat::Jpeg);
+    let tiff = build_tiff_with_makernote();
+    let makernote_jpg = inject_jpeg_exif(&plain_jpg, &tiff);
+    write(&dir.join("metadata-with-makernote.jpg"), &makernote_jpg);
+
+    // Independently verify with kamadak-exif before committing anything:
+    // Artist must read back correctly and MakerNote must actually be present
+    // in the *source* fixture (Task 3's `correct()` is what's expected to
+    // drop it later -- this fixture must carry it going in).
+    let tags = exif::Reader::new()
+        .read_from_container(&mut std::io::Cursor::new(&makernote_jpg))
+        .unwrap_or_else(|e| {
+            panic!("metadata-with-makernote.jpg: kamadak-exif failed to read: {e}")
+        });
+    let artist = tags
+        .get_field(exif::Tag::Artist, exif::In::PRIMARY)
+        .expect("missing Artist");
+    assert_eq!(artist.display_value().to_string(), "\"Fixture Author\"");
+    let maker_note = tags
+        .get_field(exif::Tag::MakerNote, exif::In::PRIMARY)
+        .expect("missing MakerNote");
+    match &maker_note.value {
+        exif::Value::Undefined(bytes, _) => assert_eq!(bytes.as_slice(), &[0xABu8; 20][..]),
+        other => panic!("expected Undefined MakerNote value, got {other:?}"),
+    }
+
+    println!(
+        "Fixture written to {}",
+        dir.join("metadata-with-makernote.jpg").display()
+    );
 }
 
 #[test]
