@@ -30,13 +30,14 @@ export function planStripes(srcWidth: number, srcHeight: number): StripePlan {
 }
 
 export function decodeToBitmap(file: File): Promise<ImageBitmap> {
-  // Best-effort match with the previous loader's color behavior; perfect
-  // cross-browser consistency is not claimed. `colorSpace` is a newer DOM
-  // option not yet in the bundled TS lib, hence the cast.
+  // Explicit, standard options only: EXIF orientation applied, straight alpha,
+  // browser-default color conversion. The canvases that read these pixels
+  // request an sRGB context.
   return createImageBitmap(file, {
+    imageOrientation: "from-image",
     premultiplyAlpha: "none",
-    colorSpace: "srgb",
-  } as ImageBitmapOptions);
+    colorSpaceConversion: "default",
+  });
 }
 
 /** Full-size RGBA extraction — monolithic path only (image <= threshold). */
@@ -46,7 +47,7 @@ export function bitmapToRgba(bitmap: ImageBitmap): {
   height: number;
 } {
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { colorSpace: "srgb" })!;
   ctx.drawImage(bitmap, 0, 0);
   const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
   return {
@@ -66,7 +67,7 @@ export function makePreview(bitmap: ImageBitmap): {
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = new OffscreenCanvas(w, h);
-  const ctx = canvas.getContext("2d")!;
+  const ctx = canvas.getContext("2d", { colorSpace: "srgb" })!;
   ctx.drawImage(bitmap, 0, 0, w, h);
   const imageData = ctx.getImageData(0, 0, w, h);
   return { rgbaData: new Uint8Array(imageData.data.buffer), width: w, height: h };
@@ -83,7 +84,7 @@ export async function* extractStripes(
   const { stripeHeight } = planStripes(bitmap.width, bitmap.height);
   const chunkW = Math.min(bitmap.width, MAX_CHUNK_WIDTH);
   const canvas = new OffscreenCanvas(chunkW, stripeHeight);
-  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const ctx = canvas.getContext("2d", { colorSpace: "srgb", willReadFrequently: true })!;
 
   for (let y = 0; y < bitmap.height; y += stripeHeight) {
     const rows = Math.min(stripeHeight, bitmap.height - y);

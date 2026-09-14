@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { planStripes } from "./ingest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { bitmapToRgba, decodeToBitmap, extractStripes, makePreview, planStripes } from "./ingest";
 
 describe("planStripes", () => {
   it("targets ~16MB stripes for a wide panorama", () => {
@@ -23,5 +23,46 @@ describe("planStripes", () => {
     const { stripeHeight, count } = planStripes(8000, 12500);
     expect((count - 1) * stripeHeight).toBeLessThan(12500);
     expect(count * stripeHeight).toBeGreaterThanOrEqual(12500);
+  });
+});
+
+describe("sRGB ingestion", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("decodes with explicit standard bitmap options", async () => {
+    const create = vi.fn(async () => ({}) as ImageBitmap);
+    vi.stubGlobal("createImageBitmap", create);
+    const file = new File([], "a.jpg");
+    await decodeToBitmap(file);
+    expect(create).toHaveBeenCalledWith(file, {
+      imageOrientation: "from-image",
+      premultiplyAlpha: "none",
+      colorSpaceConversion: "default",
+    });
+  });
+
+  it("requests sRGB 2d contexts on the monolithic and striped paths", async () => {
+    const getContext = vi.fn(() => ({
+      drawImage: vi.fn(),
+      clearRect: vi.fn(),
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+      }),
+    }));
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext = getContext;
+      },
+    );
+    const bitmap = { width: 8, height: 4 } as ImageBitmap;
+    bitmapToRgba(bitmap);
+    makePreview(bitmap);
+    await extractStripes(bitmap).next();
+    expect(getContext.mock.calls).toEqual([
+      ["2d", { colorSpace: "srgb" }],
+      ["2d", { colorSpace: "srgb" }],
+      ["2d", { colorSpace: "srgb", willReadFrequently: true }],
+    ]);
   });
 });

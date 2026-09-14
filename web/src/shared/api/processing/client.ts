@@ -1,5 +1,5 @@
 import type { AutoSharpParams, ProcessResult } from "@/shared/lib";
-import { CancellationToken } from "./errors";
+import { CancellationToken, CancelledError } from "./errors";
 import { bitmapToRgba, decodeToBitmap, extractStripes, makePreview, planStripes } from "./ingest";
 import { destroyProbePool } from "./probe-pool";
 import { type ProcessingStage, ProgressAggregator, type ProgressEvent } from "./progress";
@@ -42,6 +42,8 @@ export interface DecodedInput {
 
 export interface ProcessJob {
   readonly promise: Promise<ProcessResult>;
+  /** The file this job processes, captured when the job starts. */
+  readonly sourceFile: File;
   onProgress(cb: (e: ProgressEvent) => void): void;
   cancel(): void;
 }
@@ -57,17 +59,28 @@ interface ClientInput {
 export class ProcessingClient {
   private input: ClientInput | null = null;
   private activeJob: JobImpl | null = null;
+  private decodeGeneration = 0;
 
   /**
    * Decode a file and cache it for subsequent process() calls. Decode
    * failures (e.g. Safari refusing a giant JPEG) reject here — that is the
    * spec's decode-stage error.
+   *
+   * The latest requested decode wins: an earlier decode that completes later
+   * closes its bitmap and rejects with CancelledError.
    */
   async decode(file: File): Promise<DecodedInput> {
+    const generation = ++this.decodeGeneration;
+    // Stop any job still reading the old bitmap before closing it.
+    this.activeJob?.cancel();
     this.input?.bitmap.close();
     this.input = null;
 
     const bitmap = await decodeToBitmap(file);
+    if (generation !== this.decodeGeneration) {
+      bitmap.close();
+      throw new CancelledError();
+    }
     const striped = bitmap.width * bitmap.height > DEFAULT_STRIPED_INGEST_THRESHOLD_PIXELS;
     const rgba = striped ? null : bitmapToRgba(bitmap);
     this.input = { file, bitmap, striped, rgba };
@@ -126,6 +139,7 @@ export class ProcessingClient {
 
 class JobImpl implements ProcessJob {
   readonly promise: Promise<ProcessResult>;
+  readonly sourceFile: File;
   private readonly token = new CancellationToken();
   private readonly listeners: Array<(e: ProgressEvent) => void> = [];
   private readonly aggregator: ProgressAggregator;
@@ -138,6 +152,7 @@ class JobImpl implements ProcessJob {
   private readonly striped: boolean;
 
   constructor(input: ClientInput, params: AutoSharpParams) {
+    this.sourceFile = input.file;
     const shrink = Math.max(
       input.bitmap.width / params.target_width,
       input.bitmap.height / params.target_height,
