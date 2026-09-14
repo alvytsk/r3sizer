@@ -9,11 +9,14 @@ mod containers;
 mod exif;
 mod iptc;
 mod limits;
+mod policy;
 mod types;
+mod xmp;
 
 pub use bundle::{MetadataBundle, SourceColor};
 pub use exif::correct;
 pub use limits::MetadataLimits;
+pub use policy::prepare;
 pub use types::{
     ColorAction, MetadataCategory, MetadataExport, MetadataIssue, MetadataIssueReason,
     MetadataReport, OrientationAction, OutputFacts,

@@ -17,6 +17,12 @@ serde       = { workspace = true }
 ts-rs       = { workspace = true, optional = true }
 crc32fast   = "1"
 flate2      = { version = "1", default-features = false, features = ["rust_backend"] }
+# default-features = false: keeps the optional `encoding` feature (non-UTF-8
+# autodetection via encoding_rs) off, so input is UTF-8 only. quick-xml never
+# fetches DTDs or resolves external entities over the network regardless of
+# features -- it's a pull parser, not a validating processor -- and doctype
+# events are rejected outright by xmp.rs before any DTD content is inspected.
+quick-xml   = { version = "0.38", default-features = false }
 
 [dev-dependencies]
 serde_json = { workspace = true }
