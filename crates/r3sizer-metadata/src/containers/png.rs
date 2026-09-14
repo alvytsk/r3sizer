@@ -8,7 +8,7 @@
 //! decision, not metadata to carry through verbatim.
 
 use img_parts::png::{Png, PngChunk};
-use img_parts::{Bytes, ImageICC};
+use img_parts::Bytes;
 
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::containers::{inflate_bounded, Collector, InflateError};
@@ -451,6 +451,7 @@ fn store_itxt_plain(is_xmp: bool, data: &[u8], text_bytes: &[u8], collector: &mu
 
 const CHUNK_IDAT: [u8; 4] = *b"IDAT";
 const CHUNK_EXIF: [u8; 4] = *b"eXIf";
+const CHUNK_ICCP: [u8; 4] = *b"iCCP";
 const CHUNK_PHYS: [u8; 4] = *b"pHYs";
 
 /// Insert `prepared`'s payloads into an already-encoded destination PNG.
@@ -458,8 +459,13 @@ const CHUNK_PHYS: [u8; 4] = *b"pHYs";
 /// `img-parts`'s own `Png::set_exif` inserts right before `IEND` -- after
 /// any `IDAT`, which the PNG spec forbids for `eXIf` (it must precede the
 /// first `IDAT`) -- so EXIF and `pHYs` (also "before IDAT") are placed by
-/// hand here rather than via that method. `set_icc_profile` is reused as-is
-/// since it inserts right after `IHDR`, which is always legal.
+/// hand here rather than via that method. `Png::set_icc_profile` is *not*
+/// reused either, despite inserting right after `IHDR` (always legal
+/// ordering-wise): it hardcodes `self.chunks.insert(1, chunk)` with no
+/// bounds check, and `Png::from_bytes` accepts a signature-only PNG (zero
+/// chunks), so calling it on such a destination would panic. `set_icc`
+/// below reimplements the same shape (keyword + zlib-compressed profile)
+/// with a clamped insertion position instead.
 pub(crate) fn embed(
     encoded: Vec<u8>,
     prepared: &MetadataBundle,
@@ -490,7 +496,7 @@ pub(crate) fn embed(
                 attempted.push(payload);
             }
             Payload::Icc(bytes) => {
-                png.set_icc_profile(Some(Bytes::from(bytes.clone())));
+                set_icc(&mut png, bytes);
                 attempted.push(payload);
             }
             Payload::PngText { kind, data } => {
@@ -549,6 +555,36 @@ fn set_exif_before_idat(png: &mut Png, exif: &[u8]) {
     png.remove_chunks_by_type(CHUNK_EXIF);
     let pos = before_idat_pos(png);
     png.chunks_mut().insert(pos, PngChunk::new(CHUNK_EXIF, Bytes::from(exif.to_vec())));
+}
+
+/// Hand-rolled equivalent of `img_parts::png::Png::set_icc_profile`: same
+/// `iCCP` chunk shape (a nul-terminated profile-name C string, a
+/// compression-method byte, then the zlib-compressed profile) but clamped
+/// to `chunks().len().min(1)` so a destination with fewer than one chunk
+/// (a bare 8-byte-signature-only PNG, which `Png::from_bytes` accepts)
+/// can't panic the way `Png::set_icc_profile`'s unconditional
+/// `insert(1, ...)` would.
+fn set_icc(png: &mut Png, profile: &[u8]) {
+    use std::io::Write;
+
+    png.remove_chunks_by_type(CHUNK_ICCP);
+    let mut contents = b"icc\0".to_vec(); // profile name, as a C string
+    contents.push(0); // compression method: zlib/deflate
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+    // `Vec<u8>` writes never fail; any error here would mean profile data
+    // was dropped silently, which this crate never does, so a write
+    // failure is treated the same as the img-parts equivalent would be --
+    // unreachable in practice, but omit the profile rather than embed a
+    // truncated one if it ever somehow happened.
+    if encoder.write_all(profile).is_err() {
+        return;
+    }
+    let Ok(compressed) = encoder.finish() else {
+        return;
+    };
+    contents.extend_from_slice(&compressed);
+    let pos = png.chunks().len().min(1);
+    png.chunks_mut().insert(pos, PngChunk::new(CHUNK_ICCP, Bytes::from(contents)));
 }
 
 fn is_xmp_itxt(contents: &[u8]) -> bool {

@@ -62,13 +62,30 @@ const TYPE_ASCII: u16 = 2;
 const TYPE_LONG: u16 = 4;
 const TYPE_RATIONAL: u16 = 5;
 
+/// The byte offset (from the start of the TIFF block -- the same offset
+/// space as `Payload::Exif` bytes, the JPEG APP1 payload after `Exif\0\0`,
+/// the PNG `eXIf` chunk data, and the WebP `EXIF` chunk data, since all
+/// three `metadata.*` fixtures share these exact TIFF bytes) at which each
+/// value's raw content begins. This is the "EXIF value-offset map" the
+/// fixture recipe promises in `expected.json`.
+struct TiffOffsets {
+    image_description: u32,
+    artist: u32,
+    copyright: u32,
+    date_time_original: u32,
+    gps_latitude: u32,
+    gps_longitude: u32,
+}
+
 /// Builds a little-endian classic TIFF buffer (starting at the `II*\0`
 /// byte-order marker, as `Payload::Exif` bytes are shaped) carrying:
 /// `Artist` = "Fixture Author", `Copyright` = "Fixture Copyright",
 /// `ImageDescription` = "Metadata fixture", an `ExifIFD` with
 /// `DateTimeOriginal` = "2024:01:02 03:04:05", and a `GPSIFD` for
-/// 1 deg 2 min 3 sec N, 4 deg 5 min 6 sec E.
-fn build_tiff() -> Vec<u8> {
+/// 1 deg 2 min 3 sec N, 4 deg 5 min 6 sec E. Returns the bytes alongside
+/// the exact byte offset of every value, computed (not hand-transcribed)
+/// from the same layout the bytes themselves are built from.
+fn build_tiff() -> (Vec<u8>, TiffOffsets) {
     let desc = b"Metadata fixture\0";
     let artist = b"Fixture Author\0";
     let copyright = b"Fixture Copyright\0";
@@ -145,7 +162,16 @@ fn build_tiff() -> Vec<u8> {
     for v in lon_rationals {
         b.extend(v.to_le_bytes());
     }
-    b
+
+    let offsets = TiffOffsets {
+        image_description: desc_offset,
+        artist: artist_offset,
+        copyright: copyright_offset,
+        date_time_original: datetime_offset,
+        gps_latitude: lat_offset,
+        gps_longitude: lon_offset,
+    };
+    (b, offsets)
 }
 
 // --- JPEG splice -------------------------------------------------------
@@ -249,7 +275,7 @@ fn generate_fixtures() {
     write(&dir.join("plain.png"), &plain_png);
     write(&dir.join("plain.webp"), &plain_webp);
 
-    let tiff = build_tiff();
+    let (tiff, offsets) = build_tiff();
     let metadata_jpg = inject_jpeg_exif(&plain_jpg, &tiff);
     let metadata_png = inject_png_exif(&plain_png, &tiff);
     let metadata_webp = inject_webp_exif(&plain_webp, &tiff, WIDTH, HEIGHT);
@@ -284,8 +310,13 @@ fn generate_fixtures() {
         "gps_longitude_ref": "E",
         "gps_longitude": "4 deg 5 min 6 sec",
         "tiff_value_offsets": {
-            "ifd0_offset": 8,
-            "note": "offsets are relative to the start of the TIFF block (the Exif payload after 'Exif\\0\\0'); see build_tiff() in this file for the exact layout"
+            "note": "byte offset of each value's raw content from the start of the TIFF block (the Exif payload after 'Exif\\0\\0', and identically the PNG eXIf/WebP EXIF chunk data, since all three metadata.* fixtures share these exact TIFF bytes); computed in build_tiff() in this file, not hand-transcribed",
+            "image_description": offsets.image_description,
+            "artist": offsets.artist,
+            "copyright": offsets.copyright,
+            "date_time_original": offsets.date_time_original,
+            "gps_latitude": offsets.gps_latitude,
+            "gps_longitude": offsets.gps_longitude
         }
     });
     write(

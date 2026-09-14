@@ -19,6 +19,32 @@ const PLAIN_WEBP: &[u8] = include_bytes!("fixtures/plain.webp");
 const METADATA_JPG: &[u8] = include_bytes!("fixtures/metadata.jpg");
 const METADATA_PNG: &[u8] = include_bytes!("fixtures/metadata.png");
 const METADATA_WEBP: &[u8] = include_bytes!("fixtures/metadata.webp");
+const EXPECTED_JSON: &str = include_str!("fixtures/expected.json");
+
+/// The single source of truth for every injected fixture value and its
+/// byte offset within the shared TIFF block -- see
+/// `tests/fixtures/expected.json` and `tests/gen_fixtures.rs`'s
+/// `TiffOffsets`.
+fn expected() -> serde_json::Value {
+    serde_json::from_str(EXPECTED_JSON).expect("expected.json must parse")
+}
+
+fn expected_str(field: &str) -> String {
+    expected()[field].as_str().unwrap_or_else(|| panic!("expected.json missing string field {field}")).to_string()
+}
+
+fn expected_offset(field: &str) -> usize {
+    expected()["tiff_value_offsets"][field]
+        .as_u64()
+        .unwrap_or_else(|| panic!("expected.json missing tiff_value_offsets.{field}")) as usize
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .unwrap_or_else(|| panic!("needle not found"))
+}
 
 fn facts() -> OutputFacts {
     OutputFacts {
@@ -147,13 +173,55 @@ fn preserves_artist_across_all_supported_destinations() {
         let bundle = extract(source, &limits);
         for dest in destinations {
             let output = merge(dest.to_vec(), &bundle, &facts(), &limits);
-            assert!(read_artist(&output.bytes).unwrap().contains("Fixture Author"));
+            assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
             assert_eq!(
                 image::load_from_memory(&output.bytes).unwrap().to_rgba8(),
                 image::load_from_memory(dest).unwrap().to_rgba8()
             );
         }
     }
+}
+
+// --- expected.json value-offset map is real, and matches the fixtures -----
+
+/// `expected.json`'s `tiff_value_offsets` map is asserted here against the
+/// *committed fixture bytes directly* (not through this crate's own
+/// extraction), proving each documented offset really does locate that
+/// value's raw content within the shared TIFF block -- the same block
+/// embedded, byte-for-byte, as the JPEG APP1 payload (after `Exif\0\0`),
+/// the PNG `eXIf` chunk data, and the WebP `EXIF` chunk data.
+#[test]
+fn expected_json_offsets_locate_the_real_artist_and_copyright_bytes() {
+    let artist = expected_str("artist").into_bytes();
+    let copyright = expected_str("copyright").into_bytes();
+    let artist_offset = expected_offset("artist");
+    let copyright_offset = expected_offset("copyright");
+
+    let jpeg_tiff_start = find(METADATA_JPG, b"Exif\0\0") + 6;
+    assert_eq!(
+        &METADATA_JPG[jpeg_tiff_start + artist_offset..][..artist.len()],
+        artist.as_slice()
+    );
+    assert_eq!(
+        &METADATA_JPG[jpeg_tiff_start + copyright_offset..][..copyright.len()],
+        copyright.as_slice()
+    );
+
+    // PNG's eXIf chunk data (length(4) + "eXIf"(4) + data) is the TIFF
+    // block directly, no "Exif\0\0" prefix.
+    let png_tiff_start = find(METADATA_PNG, b"eXIf") + 4;
+    assert_eq!(
+        &METADATA_PNG[png_tiff_start + artist_offset..][..artist.len()],
+        artist.as_slice()
+    );
+
+    // WebP's EXIF chunk data (fourcc(4) + size(4) + data) is likewise the
+    // TIFF block directly.
+    let webp_tiff_start = find(METADATA_WEBP, b"EXIF") + 8;
+    assert_eq!(
+        &METADATA_WEBP[webp_tiff_start + artist_offset..][..artist.len()],
+        artist.as_slice()
+    );
 }
 
 // --- No metadata source -----------------------------------------------------
@@ -426,7 +494,7 @@ fn merge_never_strips_an_unrelated_destination_segment() {
     let bundle = extract(METADATA_JPG, &limits);
     let output = merge(dest.clone(), &bundle, &facts(), &limits);
     assert!(bytes_contain(&output.bytes, marker_bytes));
-    assert!(read_artist(&output.bytes).unwrap().contains("Fixture Author"));
+    assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
 }
 
 // --- Corrupt metadata --------------------------------------------------------
@@ -569,7 +637,7 @@ fn adding_exif_to_an_existing_alpha_vp8l_file_keeps_the_alpha_flag() {
     let flags = output.bytes[12 + 8];
     assert_eq!(flags, 0b0001_1000, "EXIF bit (0x08) and alpha bit (0x10) must both be set");
     assert!(bytes_contain(&output.bytes, b"VP8L"), "the original VP8L chunk must survive untouched");
-    assert!(read_artist(&output.bytes).unwrap().contains("Fixture Author"));
+    assert!(read_artist(&output.bytes).unwrap().contains(&expected_str("artist")));
 }
 
 #[test]
@@ -603,6 +671,80 @@ fn count_chunks(webp: &[u8], fourcc: &[u8; 4]) -> usize {
         pos += 8 + size + pad;
     }
     count
+}
+
+// --- Minimal/degenerate destinations must never panic ----------------------
+//
+// `img_parts::jpeg::Jpeg::set_exif`/`set_icc_profile` and
+// `img_parts::png::Png::set_icc_profile` each hardcode an unconditional
+// `Vec::insert` at a fixed index (3 for JPEG, 1 for PNG) with no bounds
+// check, and their respective `from_bytes` parsers are lenient enough to
+// accept a destination with fewer segments/chunks than that index -- e.g. a
+// bare `SOI`+`EOI` JPEG (zero segments) or a signature-only PNG (zero
+// chunks). This crate's own `set_exif`/`set_icc` (jpeg.rs, png.rs) exist
+// specifically to avoid calling those library methods directly; these tests
+// are the regression guard for that fix -- merely completing without a
+// panic is the primary assertion.
+
+#[test]
+fn minimal_jpeg_destination_with_no_segments_never_panics_on_exif_or_icc() {
+    let limits = MetadataLimits::default();
+    // Bare SOI immediately followed by EOI: zero segments, well under the
+    // index (3) `Jpeg::set_exif`/`set_icc_profile` insert at unconditionally.
+    let bare = vec![0xFFu8, 0xD8, 0xFF, 0xD9];
+    let bundle = extract(METADATA_JPG, &limits); // carries both EXIF and (via ICC test path) nothing else here
+    let output = merge(bare.clone(), &bundle, &facts(), &limits); // must not panic
+    // No SOF marker exists to prove the claimed 32x16 facts, so this
+    // adapter's own dimension validation correctly refuses to return the
+    // mutated bytes -- a graceful `MergeFailed` rollback, not a crash.
+    assert_eq!(output.bytes, bare, "rollback must return the original bytes unchanged");
+    assert!(output
+        .report
+        .issues
+        .iter()
+        .any(|i| i.reason == MetadataIssueReason::MergeFailed));
+
+    // Same destination, this time with an ICC payload as the only content,
+    // exercising `set_icc`'s own insert path.
+    let icc_source = jpeg(&[jpeg_segment(0xE2, &{
+        let mut seg = b"ICC_PROFILE\0".to_vec();
+        seg.extend_from_slice(&[1, 1]);
+        seg.extend_from_slice(&valid_icc(9));
+        seg
+    })]);
+    let icc_bundle = extract(&icc_source, &limits);
+    let icc_output = merge(bare.clone(), &icc_bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    assert_eq!(icc_output.bytes, bare);
+}
+
+#[test]
+fn signature_only_png_destination_never_panics_on_icc() {
+    let limits = MetadataLimits::default();
+    // Just the 8-byte PNG signature: zero chunks, under the index (1)
+    // `Png::set_icc_profile` inserts at unconditionally.
+    let bare = b"\x89PNG\r\n\x1a\n".to_vec();
+    let source = png(&[png_chunk(b"iCCP", &{
+        let mut d = b"kw\0\0".to_vec();
+        d.extend_from_slice(&flate2_compress(&valid_icc(9)));
+        d
+    })]);
+    let bundle = extract(&source, &limits);
+    assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
+
+    let output = merge(bare.clone(), &bundle, &facts_with(ColorAction::Unchanged), &limits); // must not panic
+    assert_eq!(output.bytes, bare, "rollback must return the original bytes unchanged");
+    assert!(output
+        .report
+        .issues
+        .iter()
+        .any(|i| i.reason == MetadataIssueReason::MergeFailed));
+}
+
+fn flate2_compress(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
 }
 
 // --- No tag values leak into issue text -------------------------------------

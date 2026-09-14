@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use img_parts::jpeg::{markers, Jpeg, JpegSegment};
-use img_parts::{Bytes, ImageEXIF, ImageICC};
+use img_parts::Bytes;
 
 use crate::bundle::{MetadataBundle, Payload, SourceColor, SourceFormat};
 use crate::containers::Collector;
@@ -374,9 +374,26 @@ fn assemble_icc(chunks: Vec<(u8, u8, Vec<u8>)>, collector: &mut Collector) -> bo
 // JPEG APP segments carry a 16-bit big-endian length field that counts
 // itself, so the largest legal payload (identifier included) is
 // `u16::MAX - 2` bytes. Oversized EXIF/XMP is omitted with an issue, never
-// truncated or split (ICC already handles arbitrarily large profiles via
-// `set_icc_profile`'s own multi-segment APP2 splitting).
+// truncated or split (ICC handles arbitrarily large profiles via this
+// module's own multi-segment APP2 splitting, `set_icc` below).
+//
+// `img_parts::jpeg::Jpeg::set_exif`/`set_icc_profile` are deliberately NOT
+// used here (unlike the brief's own example, which this deviates from for
+// a confirmed reason): both hardcode `self.segments.insert(3, segment)`
+// with no bounds check, and `Jpeg::from_bytes` happily accepts a
+// zero-segment destination (bare `SOI` immediately followed by `EOI`), so
+// calling either on such a destination panics with "insertion index (is 3)
+// should be <= len (is 0)" instead of returning a graceful `MergeFailed`.
+// `set_exif`/`set_icc` below reimplement the same behavior (byte-for-byte
+// the same removal predicate and, for ICC, the same segment-splitting
+// scheme) but insert at `segments().len().min(3)`, exactly like this
+// file's own `set_xmp`/`set_app13`/`set_comment` already do.
 const MAX_APP_PAYLOAD: usize = 65_533;
+// Matches `img_parts::jpeg::image::ICC_SEGMENT_MAX_SIZE`: segment size
+// (u16::MAX) minus the ICC segment metadata (2-byte length field this
+// constant already excludes, plus the 12-byte "ICC_PROFILE\0" identifier
+// and 2-byte sequence/count pair).
+const ICC_SEGMENT_MAX_SIZE: usize = 65_535 - (ICC_PREFIX.len() + 2);
 
 /// Insert `prepared`'s payloads into an already-encoded destination JPEG.
 ///
@@ -406,7 +423,7 @@ pub(crate) fn embed(
                 if EXIF_PREFIX.len() + bytes.len() > MAX_APP_PAYLOAD {
                     attempt_issues.push(super::too_large(payload));
                 } else {
-                    jpeg.set_exif(Some(Bytes::from(bytes.clone())));
+                    set_exif(&mut jpeg, bytes);
                     attempted.push(payload);
                 }
             }
@@ -419,7 +436,7 @@ pub(crate) fn embed(
                 }
             }
             Payload::Icc(bytes) => {
-                jpeg.set_icc_profile(Some(Bytes::from(bytes.clone())));
+                set_icc(&mut jpeg, bytes);
                 attempted.push(payload);
             }
             Payload::Iptc(bytes) => {
@@ -464,6 +481,42 @@ pub(crate) fn embed(
     MetadataExport {
         bytes: merged,
         report: MetadataReport { issues },
+    }
+}
+
+/// Hand-rolled equivalent of `img_parts::jpeg::Jpeg::set_exif` -- same
+/// removal predicate (`marker == APP1 && contents.starts_with(EXIF_PREFIX)`)
+/// -- but clamps the insertion position to the current segment count so a
+/// destination with fewer than 3 segments can't panic (see the module-level
+/// comment above `embed`).
+fn set_exif(jpeg: &mut Jpeg, exif: &[u8]) {
+    jpeg.segments_mut()
+        .retain(|s| !(s.marker() == markers::APP1 && s.contents().starts_with(EXIF_PREFIX)));
+    let mut contents = EXIF_PREFIX.to_vec();
+    contents.extend_from_slice(exif);
+    let pos = jpeg.segments().len().min(3);
+    jpeg.segments_mut()
+        .insert(pos, JpegSegment::new_with_contents(markers::APP1, Bytes::from(contents)));
+}
+
+/// Hand-rolled equivalent of `img_parts::jpeg::Jpeg::set_icc_profile` --
+/// same removal predicate and the same multi-segment splitting scheme for
+/// profiles larger than one APP2 segment can hold -- but clamps every
+/// insertion position the same way `set_exif` above does.
+fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) {
+    jpeg.segments_mut()
+        .retain(|s| !(s.marker() == markers::APP2 && s.contents().starts_with(ICC_PREFIX)));
+    let segments_n = (profile.len() / ICC_SEGMENT_MAX_SIZE + 1) as u8;
+    for i in 0..segments_n {
+        let start = ICC_SEGMENT_MAX_SIZE * i as usize;
+        let end = profile.len().min(start + ICC_SEGMENT_MAX_SIZE);
+        let mut contents = ICC_PREFIX.to_vec();
+        contents.push(i + 1);
+        contents.push(segments_n);
+        contents.extend_from_slice(&profile[start..end]);
+        let pos = jpeg.segments().len().min(3);
+        jpeg.segments_mut()
+            .insert(pos, JpegSegment::new_with_contents(markers::APP2, Bytes::from(contents)));
     }
 }
 

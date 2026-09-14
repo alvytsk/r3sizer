@@ -9,8 +9,13 @@
   "height": 16,
   "image_description": "Metadata fixture",
   "tiff_value_offsets": {
-    "ifd0_offset": 8,
-    "note": "offsets are relative to the start of the TIFF block (the Exif payload after 'Exif\\0\\0'); see build_tiff() in this file for the exact layout"
+    "artist": 163,
+    "copyright": 178,
+    "date_time_original": 196,
+    "gps_latitude": 216,
+    "gps_longitude": 240,
+    "image_description": 146,
+    "note": "byte offset of each value's raw content from the start of the TIFF block (the Exif payload after 'Exif\\0\\0', and identically the PNG eXIf/WebP EXIF chunk data, since all three metadata.* fixtures share these exact TIFF bytes); computed in build_tiff() in this file, not hand-transcribed"
   },
   "width": 32
 }

@@ -57,11 +57,23 @@ pub fn merge(
     facts: &OutputFacts,
     limits: &MetadataLimits,
 ) -> MetadataExport {
-    let destination_bundle = containers::extract_payloads(&encoded, limits);
-    let destination_icc = destination_bundle.payloads.iter().find_map(|p| match p {
-        Payload::Icc(bytes) => Some(bytes.clone()),
-        _ => None,
-    });
+    // Same size gate `extract()` applies: an oversized destination is
+    // never scanned for its own ICC profile either, so this internal
+    // re-extraction can't be used to bypass `max_source_bytes` through the
+    // back door. `containers::embed` below still has to parse `encoded`
+    // regardless of size (that's the merge itself, not optional), but this
+    // ICC lookup is -- so it stays honest about the same limit.
+    let destination_icc = if encoded.len() > limits.max_source_bytes {
+        None
+    } else {
+        containers::extract_payloads(&encoded, limits)
+            .payloads
+            .iter()
+            .find_map(|p| match p {
+                Payload::Icc(bytes) => Some(bytes.clone()),
+                _ => None,
+            })
+    };
     let prepared = policy::prepare(source, facts, destination_icc.as_deref(), limits);
     containers::embed(encoded, &prepared, facts, limits)
 }
