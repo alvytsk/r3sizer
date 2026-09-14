@@ -38,6 +38,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      - name: Regenerate shared TypeScript types
+        run: cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
+      - name: Check generated types are committed
+        run: git diff --exit-code -- web/src/shared/lib/types/generated.ts
 
   doc:
     name: Doc
@@ -59,6 +63,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - run: wasm-pack test --node crates/r3sizer-wasm
       - run: wasm-pack build --target web crates/r3sizer-wasm
