@@ -268,6 +268,33 @@ fn png_compressed_text_exceeding_budget_is_limit_exceeded() {
     }));
 }
 
+/// Regression test for a budget-accounting gap: earlier, only bytes that
+/// ended up *stored* were charged against `max_total_metadata_bytes`, so a
+/// zTXt chunk that decompresses to validate and then keeps only its small
+/// original (still-compressed) bytes never shrank the remaining budget.
+/// Each of these two chunks decompresses to 3000 bytes — individually
+/// within `max_payload_bytes` — but the combined 6000 bytes of real
+/// decompression work exceeds a 5000-byte total budget, so the second one
+/// must be rejected with `LimitExceeded`, not silently accepted.
+#[test]
+fn png_cumulative_decompression_across_chunks_is_bounded() {
+    let payload = vec![b'a'; 3000];
+    let compressed = compress(&payload);
+    let mut ztxt_data = b"kw\0\0".to_vec();
+    ztxt_data.extend_from_slice(&compressed);
+    let one_chunk = chunk(b"zTXt", &ztxt_data);
+    let data = png(&[one_chunk.clone(), one_chunk]);
+    let limits = MetadataLimits {
+        max_payload_bytes: 4_000,
+        max_total_metadata_bytes: 5_000,
+        ..MetadataLimits::default()
+    };
+    let bundle = extract(&data, &limits);
+    assert!(bundle.report().issues.iter().any(|i| {
+        i.category == MetadataCategory::Text && i.reason == MetadataIssueReason::LimitExceeded
+    }));
+}
+
 #[test]
 fn png_duplicate_exif_via_exif_chunk_is_reported() {
     let mut tiff_a = b"MM\0*".to_vec();

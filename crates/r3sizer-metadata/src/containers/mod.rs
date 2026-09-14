@@ -146,6 +146,28 @@ impl<'a> Collector<'a> {
             .min(self.limits.max_total_metadata_bytes.saturating_sub(self.total_bytes))
     }
 
+    /// Reserve `len` bytes against the budget *immediately*, independent of
+    /// whether those bytes ever become a stored payload. This is the one
+    /// thing that makes `remaining_budget` mean anything across multiple
+    /// chunks: without it, a caller that decompresses to validate a chunk
+    /// and then discards or supersedes the result (a PNG zTXt/iTXt chunk
+    /// whose original compressed bytes are kept instead of the decompressed
+    /// ones; a duplicate EXIF/XMP/IPTC/ICC sighting that loses the
+    /// singleton race) would never shrink the budget, letting a file with
+    /// many such chunks each trigger a full-budget-sized decompression.
+    /// Returns `false` (and records a `LimitExceeded` issue) if charging
+    /// would exceed either the per-payload or total-metadata limit.
+    fn charge(&mut self, len: usize, category: MetadataCategory, field: &str) -> bool {
+        if len > self.limits.max_payload_bytes
+            || self.total_bytes.saturating_add(len) > self.limits.max_total_metadata_bytes
+        {
+            self.push_issue(category, MetadataIssueReason::LimitExceeded, Some(field.to_string()));
+            return false;
+        }
+        self.total_bytes += len;
+        true
+    }
+
     /// Validate size/record limits and, if they hold, store the payload.
     /// Returns `false` (and records a `LimitExceeded` issue) if the payload
     /// was rejected.
@@ -168,9 +190,44 @@ impl<'a> Collector<'a> {
         true
     }
 
+    /// Store a payload whose bytes were already charged against the budget
+    /// elsewhere (a pending singleton resolved in `finish`, or a chunk that
+    /// charged its real decompressed size up front via `charge` before
+    /// storing a smaller original-encoding copy). Only `max_records` is
+    /// still enforced here, so bytes are never double-charged.
+    fn store_prevalidated(&mut self, payload: Payload, category: MetadataCategory, field: &str) {
+        if self.payloads.len() >= self.limits.max_records {
+            self.push_issue(category, MetadataIssueReason::LimitExceeded, Some(field.to_string()));
+            return;
+        }
+        self.payloads.push(payload);
+    }
+
+    /// Decompress-then-store helper for PNG zTXt/non-XMP-iTXt: `decoded_len`
+    /// is charged against the budget immediately (the real cost of the
+    /// decompression that already happened), and only if that succeeds is
+    /// `payload` (typically the original, still-compressed bytes) stored.
+    pub(crate) fn charge_and_store(
+        &mut self,
+        decoded_len: usize,
+        payload: Payload,
+        category: MetadataCategory,
+        field: &str,
+    ) {
+        if self.charge(decoded_len, category, field) {
+            self.store_prevalidated(payload, category, field);
+        }
+    }
+
     /// Offer an EXIF candidate (from JPEG APP1, PNG eXIf, or WebP EXIF).
     /// A second sighting makes the category ambiguous; both are dropped.
+    /// Charged against the budget immediately (not deferred to `finish`),
+    /// so a run of oversized or duplicate candidates can't each dodge the
+    /// budget check while `total_bytes` sits unmoved.
     pub(crate) fn offer_exif(&mut self, bytes: Vec<u8>) {
+        if !self.charge(bytes.len(), MetadataCategory::Exif, "exif") {
+            return;
+        }
         self.exif_count += 1;
         if self.exif_count == 1 {
             self.exif_pending = Some(bytes);
@@ -187,7 +244,11 @@ impl<'a> Collector<'a> {
     }
 
     /// Offer a standard-XMP candidate (JPEG APP1, PNG iTXt, or WebP XMP).
+    /// Charged against the budget immediately; see `offer_exif`.
     pub(crate) fn offer_xmp(&mut self, bytes: Vec<u8>) {
+        if !self.charge(bytes.len(), MetadataCategory::Xmp, "xmp") {
+            return;
+        }
         self.xmp_count += 1;
         if self.xmp_count == 1 {
             self.xmp_pending = Some(bytes);
@@ -204,7 +265,11 @@ impl<'a> Collector<'a> {
     }
 
     /// Offer a validated IPTC IIM candidate (JPEG APP13 8BIM 0x0404).
+    /// Charged against the budget immediately; see `offer_exif`.
     pub(crate) fn offer_iptc(&mut self, bytes: Vec<u8>) {
+        if !self.charge(bytes.len(), MetadataCategory::Iptc, "iptc") {
+            return;
+        }
         self.iptc_count += 1;
         if self.iptc_count == 1 {
             self.iptc_pending = Some(bytes);
@@ -223,7 +288,12 @@ impl<'a> Collector<'a> {
     /// Offer an ICC profile candidate that is already fully decoded and
     /// validated (PNG iCCP, WebP ICCP). JPEG's multi-segment ICC assembly
     /// has its own duplicate/sequence handling and doesn't go through here.
+    /// Charged against the budget immediately (the bytes here are already
+    /// decompressed, for PNG iCCP); see `offer_exif`.
     pub(crate) fn offer_icc(&mut self, bytes: Vec<u8>) {
+        if !self.charge(bytes.len(), MetadataCategory::Icc, "icc") {
+            return;
+        }
         self.icc_count += 1;
         if self.icc_count == 1 {
             self.icc_pending = Some(bytes);
@@ -239,23 +309,26 @@ impl<'a> Collector<'a> {
         }
     }
 
-    /// Resolve pending singleton candidates against the budget and produce
-    /// the final bundle. `source_color` is a caller-computed policy
+    /// Resolve pending singleton candidates and produce the final bundle.
+    /// Their bytes were already charged against the budget when offered
+    /// (`offer_exif`/`offer_xmp`/`offer_iptc`/`offer_icc`), so this only
+    /// enforces `max_records` via `store_prevalidated` — charging again
+    /// here would double-count. `source_color` is a caller-computed policy
     /// decision (e.g. whether an ICC profile survived); callers that need
     /// to know whether ICC won the singleton race should inspect the
     /// returned bundle's payloads via `bundle.payloads` before overriding.
     pub(crate) fn finish(mut self, format: SourceFormat) -> MetadataBundle {
         if let Some(bytes) = self.exif_pending.take() {
-            self.add_payload(Payload::Exif(bytes), MetadataCategory::Exif, "exif");
+            self.store_prevalidated(Payload::Exif(bytes), MetadataCategory::Exif, "exif");
         }
         if let Some(bytes) = self.xmp_pending.take() {
-            self.add_payload(Payload::Xmp(bytes), MetadataCategory::Xmp, "xmp");
+            self.store_prevalidated(Payload::Xmp(bytes), MetadataCategory::Xmp, "xmp");
         }
         if let Some(bytes) = self.iptc_pending.take() {
-            self.add_payload(Payload::Iptc(bytes), MetadataCategory::Iptc, "iptc");
+            self.store_prevalidated(Payload::Iptc(bytes), MetadataCategory::Iptc, "iptc");
         }
         if let Some(bytes) = self.icc_pending.take() {
-            self.add_payload(Payload::Icc(bytes), MetadataCategory::Icc, "icc");
+            self.store_prevalidated(Payload::Icc(bytes), MetadataCategory::Icc, "icc");
         }
         MetadataBundle::new(
             format,

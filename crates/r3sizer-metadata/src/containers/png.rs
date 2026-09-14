@@ -297,9 +297,15 @@ fn handle_ztxt(data: &[u8], collector: &mut Collector) {
     match inflate_bounded(compressed, budget) {
         // Decompression only validates the chunk; the ORIGINAL (still
         // compressed) bytes are what get stored, for byte-exact fidelity
-        // and so re-embedding doesn't need a compressor.
-        Ok(_decompressed) => {
-            collector.add_payload(
+        // and so re-embedding doesn't need a compressor. The *decompressed*
+        // length is what gets charged against the budget, though — that's
+        // the real work/memory this chunk cost, even though it's discarded
+        // once validated. Charging only the tiny stored length here would
+        // let many small, highly-compressible zTXt chunks each dodge the
+        // budget check.
+        Ok(decompressed) => {
+            collector.charge_and_store(
+                decompressed.len(),
                 Payload::PngText {
                     kind: *b"zTXt",
                     data: data.to_vec(),
@@ -387,9 +393,13 @@ fn handle_itxt(data: &[u8], collector: &mut Collector) {
                         // XMP must be usable text, not a still-compressed
                         // blob, so this is the one iTXt case that stores
                         // the decompressed bytes rather than the original.
+                        // `offer_xmp` charges the budget itself.
                         collector.offer_xmp(decompressed);
                     } else {
-                        collector.add_payload(
+                        // As with zTXt: charge the real decompressed size,
+                        // not the smaller still-compressed bytes we keep.
+                        collector.charge_and_store(
+                            decompressed.len(),
                             Payload::PngText {
                                 kind: *b"iTXt",
                                 data: data.to_vec(),
@@ -554,6 +564,43 @@ mod tests {
         };
         let bundle = extract(&data, &limits);
         assert!(bundle.payloads.is_empty());
+        assert!(bundle.report().issues.iter().any(|i| {
+            i.category == MetadataCategory::Text && i.reason == MetadataIssueReason::LimitExceeded
+        }));
+    }
+
+    /// Each individual zTXt chunk here decompresses to well under
+    /// `max_payload_bytes`, so a per-chunk-only check would let every one
+    /// of them through. Only charging the *decompressed* size against the
+    /// total budget at the moment of decompression — not just what ends up
+    /// stored (the small, still-compressed original bytes) — catches the
+    /// cumulative cost: two 3000-byte decompressions can't both fit in a
+    /// 5000-byte total budget.
+    #[test]
+    fn cumulative_decompression_across_many_small_ztxt_chunks_is_bounded() {
+        let payload = vec![b'a'; 3000]; // highly compressible: tiny on the wire
+        let compressed = compress(&payload);
+        let mut ztxt_data = b"kw\0\0".to_vec();
+        ztxt_data.extend_from_slice(&compressed);
+        let one_chunk = chunk(b"zTXt", &ztxt_data);
+        let data = png(&[one_chunk.clone(), one_chunk]);
+
+        let limits = MetadataLimits {
+            max_payload_bytes: 4_000,
+            max_total_metadata_bytes: 5_000,
+            ..MetadataLimits::default()
+        };
+        let bundle = extract(&data, &limits);
+
+        let stored_ztxt = bundle
+            .payloads
+            .iter()
+            .filter(|p| matches!(p, Payload::PngText { kind: [b'z', b'T', b'X', b't'], .. }))
+            .count();
+        assert_eq!(
+            stored_ztxt, 1,
+            "the second chunk's decompression must be charged and rejected, not silently accepted"
+        );
         assert!(bundle.report().issues.iter().any(|i| {
             i.category == MetadataCategory::Text && i.reason == MetadataIssueReason::LimitExceeded
         }));
