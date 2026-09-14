@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Loaded {}×{} from {:?}",
         src.width(),
         src.height(),
-        &args[1]
+        args[1]
     );
 
     // 2. Prepare the base once — resize, classify, baseline measurement.

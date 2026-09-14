@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         d.selected_strength, d.selection_mode
     );
     save_from_linear(&result_a.image, Path::new(&args[2]))?;
-    println!("Saved (uniform) → {:?}", &args[2]);
+    println!("Saved (uniform) → {:?}", args[2]);
 
     // ------------------------------------------------------------------
     // Variant B: Content-adaptive sharpening (default strategy)
