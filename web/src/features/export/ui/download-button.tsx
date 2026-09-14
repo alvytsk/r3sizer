@@ -43,6 +43,19 @@ export function DownloadButton() {
     }
   }, [outputSourceFile, outputRgbaData, outputWidth, outputHeight]);
 
+  // The output-change effect above only runs while this component stays
+  // mounted. The toolbar unmounts it entirely (`hasOutput && <DownloadButton
+  // />`) as soon as the output is cleared — e.g. opening a new file, which
+  // calls clearOutput() before this effect ever gets a chance to react. A
+  // still-running export from before that point must not resume calling
+  // setState (or downloading) on a dead instance, so bump the generation on
+  // unmount too.
+  useEffect(() => {
+    return () => {
+      generationRef.current += 1;
+    };
+  }, []);
+
   const handleDownload = useCallback(() => {
     if (!outputRgbaData || !outputSourceFile || pendingRef.current) return;
 
@@ -50,6 +63,8 @@ export function DownloadButton() {
     setPending(true);
     setMessage({ kind: "pending" });
     const generation = generationRef.current;
+    const requestSourceFile = outputSourceFile;
+    const requestRgba = outputRgbaData;
 
     const snapshot: ExportSnapshot = {
       sourceFile: outputSourceFile,
@@ -60,9 +75,21 @@ export function DownloadButton() {
       quality,
     };
 
+    // Independent of this component's lifetime: even if the button has
+    // since unmounted (generationRef frozen at whatever it last was), the
+    // output store itself is the ground truth for whether this request's
+    // result still corresponds to what's on screen.
+    const isStale = () => {
+      if (generationRef.current !== generation) return true;
+      const current = useOutputStore.getState();
+      return (
+        current.outputSourceFile !== requestSourceFile || current.outputRgbaData !== requestRgba
+      );
+    };
+
     exportImage(snapshot)
       .then(({ blob, report, filename }) => {
-        if (generationRef.current !== generation) return; // output changed mid-export; discard
+        if (isStale()) return; // output changed (or this button unmounted) mid-export; discard
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -73,11 +100,11 @@ export function DownloadButton() {
         setMessage(report.issues.length > 0 ? { kind: "report", report } : null);
       })
       .catch(() => {
-        if (generationRef.current !== generation) return;
+        if (isStale()) return;
         setMessage({ kind: "error" });
       })
       .finally(() => {
-        if (generationRef.current !== generation) return;
+        if (isStale()) return;
         pendingRef.current = false;
         setPending(false);
       });

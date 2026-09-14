@@ -15,6 +15,15 @@ import en from "../../../../public/locales/en.json";
 import ru from "../../../../public/locales/ru.json";
 import { DownloadButton } from "./download-button";
 
+// Mirrors how the real toolbar mounts this button: `{hasOutput &&
+// <DownloadButton />}`. Unlike the button's own internal `if
+// (!outputRgbaData) return null`, this actually unmounts the component
+// (tears down its hooks/effects) once the output is cleared.
+function ConditionalDownloadButton() {
+  const hasOutput = useOutputStore((s) => !!s.outputRgbaData);
+  return hasOutput ? createElement(DownloadButton) : null;
+}
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 function makeI18n(lng: "en" | "ru" = "en") {
@@ -67,6 +76,22 @@ function renderButton(lng: "en" | "ru" = "en") {
   act(() => {
     root?.render(
       createElement(I18nextProvider, { i18n: makeI18n(lng) }, createElement(DownloadButton)),
+    );
+  });
+  return container;
+}
+
+function renderConditional(lng: "en" | "ru" = "en") {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root?.render(
+      createElement(
+        I18nextProvider,
+        { i18n: makeI18n(lng) },
+        createElement(ConditionalDownloadButton),
+      ),
     );
   });
   return container;
@@ -286,4 +311,43 @@ it("a null canvas blob produces no download and an export-error message", async 
     "Could not prepare the image download.",
   );
   expect(saveButton(el).disabled).toBe(false);
+});
+
+it("discards a stale export when the button is unmounted mid-export (toolbar clearing output)", async () => {
+  setOutput({ sourceFile: new File(["a"], "first.jpg") });
+  stubCanvas();
+  const { createUrl, clickSpy } = stubDownloadLink();
+  const resolve = deferredMetadata();
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const el = renderConditional();
+
+  await act(async () => {
+    saveButton(el).click();
+    await flush();
+  });
+  expect(preserveEncodedMetadata).toHaveBeenCalledTimes(1);
+
+  // Opening a new file (or resetting processing) clears the output before
+  // anything else — this unmounts DownloadButton entirely, same as the
+  // toolbar's `hasOutput && <DownloadButton />}`.
+  act(() => {
+    useOutputStore.getState().clearOutput();
+  });
+  expect(el.querySelector('[role="status"]')).toBeNull();
+
+  await act(async () => {
+    resolve({
+      blob: new Blob([new Uint8Array([9])], { type: "image/jpeg" }),
+      report: { issues: [{ category: "exif", reason: "malformed", field: null }] },
+    });
+    await flush();
+    await flush();
+  });
+
+  expect(createUrl).not.toHaveBeenCalled();
+  expect(clickSpy).not.toHaveBeenCalled();
+  expect(el.querySelector('[role="status"]')).toBeNull();
+  for (const call of errorSpy.mock.calls) {
+    expect(call.join(" ")).not.toMatch(/unmounted component/i);
+  }
 });
