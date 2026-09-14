@@ -230,6 +230,30 @@ describe("ProcessingClient", () => {
     await next;
   });
 
+  it("settles a striped job cancelled by a new decode as CancelledError", async () => {
+    const stripe = deferred<void>();
+    vi.mocked(wasm.ingestStripe).mockReturnValueOnce(stripe.promise);
+    vi.mocked(ingest.extractStripes).mockImplementationOnce(async function* (bitmap) {
+      yield { rgba: new Uint8Array(8), rows: 1024 };
+      // Drawing a closed bitmap throws before the loop's cancellation check.
+      if (vi.mocked(bitmap.close).mock.calls.length > 0) {
+        throw new DOMException("The image source is detached", "InvalidStateError");
+      }
+      yield { rgba: new Uint8Array(8), rows: 1024 };
+    });
+    await client.decode(new File(["a"], "a.jpg")); // 8000x6000 -> striped
+    const job = client.process(params()); // 10x shrink -> striped job
+    await vi.waitFor(() => expect(wasm.ingestStripe).toHaveBeenCalled());
+
+    // Loading a new file cancels job A and closes its bitmap mid-ingest.
+    const next = client.decode(new File(["b"], "b.jpg"));
+    stripe.resolve();
+
+    await expect(job.promise).rejects.toBeInstanceOf(CancelledError);
+    expect(wasm.ingestAbortFireAndForget).toHaveBeenCalled();
+    await next;
+  });
+
   it("reset terminates workers and the probe pool", async () => {
     await client.reset();
     expect(wasm.resetWorker).toHaveBeenCalled();

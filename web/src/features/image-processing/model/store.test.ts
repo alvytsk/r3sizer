@@ -10,7 +10,7 @@ vi.mock("@/shared/api", () => {
 
 import { useImageStore } from "@/entities/images";
 import { useOutputStore } from "@/entities/outputs";
-import { type DecodedInput, type ProcessJob, processingClient } from "@/shared/api";
+import { CancelledError, type DecodedInput, type ProcessJob, processingClient } from "@/shared/api";
 import type { ProcessResult } from "@/shared/lib";
 import { useProcessingStore } from "./store";
 
@@ -34,7 +34,7 @@ function fakeJob(sourceFile: File) {
     onProgress: () => {},
     cancel: vi.fn(),
   };
-  return { job, resolve: d.resolve };
+  return { job, resolve: d.resolve, reject: d.reject };
 }
 
 function result(tag: number): ProcessResult {
@@ -114,6 +114,20 @@ describe("image-processing store lifecycle", () => {
     expect(useOutputStore.getState().outputRgbaData).toBeNull();
     expect(useOutputStore.getState().outputSourceFile).toBeNull();
     expect(useProcessingStore.getState().isProcessing).toBe(false);
+  });
+
+  it("sets no error when the active job is cancelled by loading a new file", async () => {
+    // The loading UI calls setInput without resetting processing, so job A is
+    // still current when the client settles it as a cancellation.
+    const a = fakeJob(fileA);
+    vi.mocked(processingClient.process).mockReturnValueOnce(a.job);
+    vi.mocked(processingClient.decode).mockResolvedValueOnce(decoded());
+    const run = useProcessingStore.getState().process();
+    await useImageStore.getState().setInput(fileB);
+    a.reject(new CancelledError());
+    await run;
+    expect(useProcessingStore.getState()).toMatchObject({ error: null, isProcessing: false });
+    expect(useOutputStore.getState().outputRgbaData).toBeNull();
   });
 
   it("clearOutput resets the output source file", async () => {

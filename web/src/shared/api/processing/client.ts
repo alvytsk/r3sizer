@@ -188,6 +188,12 @@ class JobImpl implements ProcessJob {
         : await this.runMonolithic(input, params);
       this.aggregator.complete("finalize");
       return result;
+    } catch (err) {
+      // A cancelled job always settles as a cancellation, even when a
+      // follow-on failure (e.g. drawing the bitmap a new decode closed)
+      // surfaces before the next cancellation check.
+      this.token.throwIfCancelled();
+      throw err;
     } finally {
       setProgressCallback(null);
     }
