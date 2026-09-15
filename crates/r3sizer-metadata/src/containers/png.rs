@@ -5,7 +5,9 @@
 //! the Adobe XMP keyword), tEXt, zTXt, iCCP, and pHYs. Color-declaring
 //! chunks (sRGB/gAMA/cHRM/iCCP) are used only to set `source_color`, not
 //! copied as payloads, since color handling is a resize-pipeline policy
-//! decision, not metadata to carry through verbatim.
+//! decision, not metadata to carry through verbatim. A gAMA/cHRM chunk not
+//! overridden by sRGB is reported as `Icc`/`Unverified`, since its loss can
+//! change how the output renders.
 
 use img_parts::png::{Png, PngChunk};
 use img_parts::Bytes;
@@ -35,7 +37,8 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
     let mut fatal = false;
     let mut iend_found = false;
     let mut srgb_seen = false;
-    let mut color_decl_seen = false; // gAMA or cHRM
+    let mut gama_seen = false;
+    let mut chrm_seen = false;
 
     loop {
         if pos >= source.len() {
@@ -128,7 +131,8 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
                         );
                     }
                 }
-                b"gAMA" | b"cHRM" => color_decl_seen = true,
+                b"gAMA" => gama_seen = true,
+                b"cHRM" => chrm_seen = true,
                 _ if KNOWN_IGNORED.contains(&&kind) => {}
                 _ => collector.push_issue(
                     MetadataCategory::Unknown,
@@ -160,6 +164,21 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
         );
     }
 
+    // gAMA/cHRM are never carried into the output (the destination encoder
+    // owns color chunks), so their loss is reported -- unless an sRGB chunk
+    // is present, which overrides both per the PNG spec.
+    if !srgb_seen {
+        for (seen, field) in [(gama_seen, "gAMA"), (chrm_seen, "cHRM")] {
+            if seen {
+                collector.push_issue(
+                    MetadataCategory::Icc,
+                    MetadataIssueReason::Unverified,
+                    Some(field.to_string()),
+                );
+            }
+        }
+    }
+
     let mut bundle = collector.finish(SourceFormat::Png);
     let icc_added = bundle.payloads.iter().any(|p| matches!(p, Payload::Icc(_)));
     bundle.source_color = if icc_added {
@@ -168,7 +187,7 @@ pub(crate) fn extract(source: &[u8], limits: &MetadataLimits) -> MetadataBundle 
         SourceColor::Unknown
     } else if srgb_seen {
         SourceColor::Srgb
-    } else if color_decl_seen {
+    } else if gama_seen || chrm_seen {
         SourceColor::Other
     } else {
         SourceColor::Unspecified
@@ -952,6 +971,46 @@ mod tests {
     fn srgb_declaration_sets_source_color() {
         let data = png(&[chunk(b"sRGB", &[0])]);
         let bundle = extract(&data, &MetadataLimits::default());
+        assert_eq!(bundle.source_color(), SourceColor::Srgb);
+    }
+
+    fn color_chunk_issues(bundle: &MetadataBundle) -> Vec<String> {
+        bundle
+            .report()
+            .issues
+            .iter()
+            .filter(|i| {
+                i.category == MetadataCategory::Icc && i.reason == MetadataIssueReason::Unverified
+            })
+            .filter_map(|i| i.field.clone())
+            .collect()
+    }
+
+    #[test]
+    fn gama_without_srgb_is_reported_once() {
+        let gama = chunk(b"gAMA", &45455u32.to_be_bytes());
+        let data = png(&[gama.clone(), gama]);
+        let bundle = extract(&data, &MetadataLimits::default());
+        assert_eq!(color_chunk_issues(&bundle), vec!["gAMA".to_string()]);
+        assert_eq!(bundle.source_color(), SourceColor::Other);
+    }
+
+    #[test]
+    fn chrm_without_srgb_is_reported() {
+        let data = png(&[chunk(b"cHRM", &[0u8; 32])]);
+        let bundle = extract(&data, &MetadataLimits::default());
+        assert_eq!(color_chunk_issues(&bundle), vec!["cHRM".to_string()]);
+    }
+
+    #[test]
+    fn srgb_overrides_gama_and_chrm_without_warning() {
+        let data = png(&[
+            chunk(b"sRGB", &[0]),
+            chunk(b"gAMA", &45455u32.to_be_bytes()),
+            chunk(b"cHRM", &[0u8; 32]),
+        ]);
+        let bundle = extract(&data, &MetadataLimits::default());
+        assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
         assert_eq!(bundle.source_color(), SourceColor::Srgb);
     }
 

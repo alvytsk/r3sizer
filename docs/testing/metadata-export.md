@@ -73,9 +73,11 @@ unit-test assertions):
   stderr warning lines, confirming a no-output sweep emits no preservation
   warnings.
 - `r3sizer sweep --in-dir <fixtures> --out-dir <dir> --summary summary.json`
-  → per-file stderr warnings appear (e.g. `metadata density/unsupported
-  (jfif)` for JPEG→PNG destination conversions, `metadata exif/malformed
-  (ifd_header)` for the malformed fixture), and `summary.json`'s keys were
+  → per-file stderr warnings appear (e.g. `metadata exif/malformed
+  (ifd_header)` for the malformed fixture; at the time of this run JPEG→PNG
+  conversions also warned `metadata density/unsupported (jfif)`, which no
+  longer happens for aspect-ratio-only JFIF (`units = 0`) sources since that
+  carries no physical density), and `summary.json`'s keys were
   enumerated recursively — **no** `metadata` key anywhere in it, confirming
   metadata issues never reach the JSON summary.
 

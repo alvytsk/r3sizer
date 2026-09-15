@@ -286,8 +286,7 @@ fn unsupported_bmp_destination_warns_when_source_has_metadata() {
 #[test]
 fn unsupported_tiff_destination_with_no_source_metadata_has_no_issues() {
     let dir = tempfile::tempdir().unwrap();
-    // `plain.png` (unlike `plain.jpg`, which always carries a JFIF density
-    // payload) has genuinely no metadata: the PNG encoder emits no pHYs
+    // `plain.png` has genuinely no metadata: the PNG encoder emits no pHYs
     // chunk by default.
     let source = write_bytes(dir.path(), "in.png", PLAIN_PNG);
     let dest = dir.path().join("out.tiff");

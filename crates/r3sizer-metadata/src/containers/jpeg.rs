@@ -263,6 +263,10 @@ fn handle_app0(data: &[u8], collector: &mut Collector) {
         return;
     }
     let units = data[7];
+    if units == 0 {
+        // Aspect ratio only: no physical density to carry.
+        return;
+    }
     let x = u16::from_be_bytes([data[8], data[9]]);
     let y = u16::from_be_bytes([data[10], data[11]]);
     collector.add_payload(
@@ -892,6 +896,23 @@ mod tests {
                 y: 96
             }
         )));
+    }
+
+    #[test]
+    fn jfif_aspect_ratio_only_density_is_not_a_payload() {
+        let mut app0 = b"JFIF\0".to_vec();
+        app0.extend_from_slice(&[1, 1]); // version
+        app0.push(0); // units = aspect ratio only, no physical density
+        app0.extend_from_slice(&1u16.to_be_bytes());
+        app0.extend_from_slice(&1u16.to_be_bytes());
+        app0.extend_from_slice(&[0, 0]);
+        let data = jpeg(&[segment(0xE0, &app0)]);
+        let bundle = extract(&data, &MetadataLimits::default());
+        assert!(bundle.report().issues.is_empty(), "{:?}", bundle.report());
+        assert!(bundle
+            .payloads
+            .iter()
+            .all(|p| !matches!(p, Payload::JfifDensity { .. })));
     }
 
     #[test]
