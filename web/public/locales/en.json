@@ -1,12 +1,12 @@
 {
   "app": {
     "title": "r3sizer",
-    "subtitle": "Downscale a photo. The sharpening strength gets picked for you, right before halos and clipping appear.",
+    "subtitle": "Choose the size you need. r3sizer takes care of the rest.",
     "badge": "Runs entirely in your browser",
     "returnHome": "Return to home",
     "viewOnGithub": "View on GitHub",
     "algorithm": "Algorithm",
-    "headline": "Shrink photos without the mush."
+    "headline": "Smart photo resizing"
   },
   "upload": {
     "dropOrClick": "Drop an image or click to upload",
