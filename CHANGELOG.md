@@ -18,6 +18,60 @@ This project is pre-1.0 — breaking changes may occur in any release.
   via `wasm-pack`.
 - New **weekly security audit** (`.github/workflows/audit.yml`) using
   `rustsec/audit-check`, also triggered on any `Cargo.lock` change.
+- CI regenerates the TypeScript bindings and fails if `generated.ts` is not
+  committed, and runs `wasm-pack test --node crates/r3sizer-wasm` before the
+  WASM build.
+
+#### Embedded metadata preservation (`r3sizer-metadata`)
+- New **`r3sizer-metadata`** crate (fifth workspace member, no pixel decoding,
+  no filesystem access): `extract` inventories JPEG/PNG/WebP metadata and
+  `merge` re-embeds it into already-encoded JPEG/PNG/WebP output.
+- Preserves EXIF (including GPS, capture settings, dates, copyright) and XMP
+  across JPEG, PNG and WebP; IPTC, JPEG comments, PNG text chunks and density
+  on same-format exports; and ICC profiles only when they can be verified to
+  still describe the output.
+- Corrects output-dependent fields: EXIF/XMP pixel dimensions, orientation
+  (normalized only when the pixels were actually rotated), and color-space
+  declarations. Unverifiable color declarations are dropped rather than
+  relabeled as sRGB.
+- Deliberately not preserved: MakerNote, SubIFDs, embedded previews and
+  thumbnails, extended XMP. Unsupported formats and categories are reported,
+  never claimed as preserved.
+- Every omission or correction is returned as a typed
+  `MetadataIssue { category, reason, field }` in a `MetadataReport`; `field`
+  names a tag or chunk, never a value.
+- Bounded parsing with `MetadataLimits` defaults: 256 MiB source, 8 MiB per
+  payload, 16 MiB total metadata, 4,096 records, 4,096 EXIF entries, 32 IFDs,
+  XML depth 64. Exceeding a limit skips that metadata with an issue; it never
+  rejects a decodable image.
+- Merge failures return the original encoded bytes unchanged with
+  `merge_failed` issues.
+
+#### Metadata-aware I/O (`r3sizer-io`)
+- New `LoadedImage`, `load_with_metadata(path, &DecodeLimits, &MetadataLimits)`
+  and `save_with_metadata(&image, path, &loaded, &MetadataLimits)`, which read
+  the source once and return a `MetadataReport` from the save.
+- Re-exports `MetadataLimits`, `MetadataReport`, `MetadataIssue`,
+  `MetadataCategory` and `MetadataIssueReason`.
+
+#### CLI metadata warnings
+- `process` and `sweep` (with `--out-dir`) preserve source metadata in outputs
+  and print one stderr line per issue:
+  `warning: <output path>: metadata <category>/<reason> (<field>)`.
+- Warnings never appear in `--diagnostics` JSON, `--output-format json`
+  stdout, or `summary.json`, and never change exit codes or sweep counts. A
+  sweep without `--out-dir` emits no metadata warnings.
+
+#### WASM and web export
+- New stateless WASM export `preserve_metadata`, with `MetadataExportRequest` /
+  `MetadataExportResponse` and seven related metadata types generated into
+  `generated.ts` (binary payloads cross as `Uint8Array`).
+- Web downloads now carry the source file's metadata. Each processed output is
+  bound to the file that produced it, and stale exports after the image
+  changes are discarded.
+- Localized (EN/RU) accessible export warning when metadata is lost or
+  unverified; duplicate export clicks are ignored while a download is being
+  prepared.
 
 #### CLI — subcommand migration
 - CLI restructured from flag-multiplexed modes to **clap subcommands**:
@@ -72,6 +126,13 @@ This project is pre-1.0 — breaking changes may occur in any release.
   works naturally.  The produced binary name (`r3sizer`) is unchanged.
 - `README.md` CLI examples updated to use the new subcommand syntax
   (`r3sizer process -i … -o …`).
+- **Metadata is preserved by default** in CLI outputs and web downloads;
+  previously exports carried no source metadata.
+- `save_from_linear` now encodes in memory before writing, so a failed encode
+  no longer leaves a partial output file.
+- Web ingestion requests EXIF orientation (`imageOrientation: "from-image"`)
+  and sRGB canvas contexts explicitly; web exports report color as unverified
+  when the browser cannot confirm an sRGB canvas.
 
 ---
 
