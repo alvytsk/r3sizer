@@ -109,6 +109,11 @@ Use `r3sizer_core::prelude::*` to import the stable public surface only.
 Imperative subject line, ≤ 72 characters.  No ticket numbers required.
 Keep the body focused on *why*, not *what* (the diff shows what).
 
+## Releasing
+
+Versioning, crate publish order, and the release checklist are in
+[`docs/releasing.md`](docs/releasing.md).
+
 ## Reporting bugs
 
 Open a GitHub issue with:
