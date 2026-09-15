@@ -228,13 +228,13 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
                 {"\u2606"}
               </span>
               <div className="space-y-1 min-w-0 flex-1">
-                <div className={`text-[12px] font-mono font-medium ${s.title}`}>
+                <div className={`text-[13px] font-medium ${s.title}`}>
                   {t(REC_KIND_KEYS[rec.kind] ?? rec.kind)}
                 </div>
                 <p className="text-[12px] text-muted-foreground leading-relaxed">{rec.reason}</p>
                 <button
                   type="button"
-                  className="text-[11px] font-mono font-medium text-primary hover:text-primary/80 transition-colors mt-0.5"
+                  className="text-xs font-medium text-primary hover:text-primary/80 transition-colors mt-0.5"
                   onClick={() => applyPatch(rec)}
                 >
                   {t("advice.apply")}
@@ -247,7 +247,7 @@ function RecommendationCards({ recommendations }: { recommendations: Recommendat
       {recommendations.length > 1 && (
         <button
           type="button"
-          className="w-full text-[11px] font-mono font-medium text-primary/70 hover:text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 rounded-md transition-colors text-center py-1.5"
+          className="w-full text-xs font-medium text-primary/70 hover:text-primary border border-primary/20 hover:border-primary/40 hover:bg-primary/5 rounded-md transition-colors text-center py-1.5"
           onClick={applyAll}
         >
           {t("advice.applyAll")}
@@ -271,7 +271,7 @@ export function AdviceTab({ diagnostics }: { diagnostics: AutoSharpDiagnostics }
                 {item.icon}
               </span>
               <div className="space-y-1 min-w-0">
-                <div className={`text-[12px] font-mono font-medium ${s.title}`}>{item.title}</div>
+                <div className={`text-[13px] font-medium ${s.title}`}>{item.title}</div>
                 <p className="text-[12px] text-muted-foreground leading-relaxed">{item.body}</p>
               </div>
             </div>

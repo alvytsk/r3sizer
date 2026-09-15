@@ -2,57 +2,44 @@ import { Activity } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { AutoSharpDiagnostics } from "@/shared/lib";
 
+function Value({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <span className={`font-mono font-medium tabular-nums text-foreground ${className}`}>
+      {children}
+    </span>
+  );
+}
+
 export function StatusBar({ diagnostics }: { diagnostics: AutoSharpDiagnostics | null }) {
   const { t } = useTranslation();
 
   return (
-    <footer className="footer-separator border-t border-border/40 px-5 flex items-center gap-5 bg-background/90 backdrop-blur-sm flex-shrink-0 h-9">
+    <footer className="border-t border-border/40 px-4 flex items-center gap-3 bg-background flex-shrink-0 h-9 text-xs text-muted-foreground">
       {diagnostics ? (
         <>
           <span className="flex items-center gap-1.5">
             <span
               className={`led ${diagnostics.selection_mode === "polynomial_root" ? "led-green" : "led-amber"}`}
             />
-            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">
-              S*
-            </span>
-            <span className="text-[11px] font-mono text-foreground tabular-nums">
-              {diagnostics.selected_strength.toFixed(4)}
-            </span>
+            {t("status.sharpness")} <Value>{diagnostics.selected_strength.toFixed(2)}</Value>
           </span>
-          <span className="w-px h-3 bg-border/30 flex-shrink-0" />
-          <span className="flex items-center gap-1.5">
-            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">
-              P
-            </span>
-            <span className="text-[11px] font-mono text-foreground tabular-nums">
-              {diagnostics.measured_artifact_ratio.toExponential(2)}
-            </span>
+          <span aria-hidden>·</span>
+          <span>
+            {t("status.artifacts")}{" "}
+            <Value>{(diagnostics.measured_artifact_ratio * 100).toFixed(2)}%</Value>
           </span>
-          <span className="w-px h-3 bg-border/30 flex-shrink-0" />
-          <span className="flex items-center gap-1.5">
-            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">
-              {t("diagnostics.output")}
-            </span>
-            <span className="text-[11px] font-mono text-foreground tabular-nums">
-              {diagnostics.output_size.width}&times;{diagnostics.output_size.height}
-            </span>
-          </span>
-          <span className="ml-auto flex items-center gap-1.5">
-            <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/50">
-              Total
-            </span>
-            <span className="text-[11px] font-mono text-primary tabular-nums">
-              {(diagnostics.timing.total_us / 1000).toFixed(0)}ms
-            </span>
-          </span>
+          <span aria-hidden>·</span>
+          <Value>
+            {diagnostics.output_size.width}&times;{diagnostics.output_size.height}
+          </Value>
+          <Value className="ml-auto text-primary">
+            {(diagnostics.timing.total_us / 1000).toFixed(0)} ms
+          </Value>
         </>
       ) : (
         <span className="flex items-center gap-2">
-          <Activity className="h-3 w-3 text-muted-foreground/30" />
-          <span className="text-[9px] font-mono tracking-[0.15em] uppercase text-muted-foreground/30">
-            {t("status.ready")}
-          </span>
+          <Activity className="h-3 w-3" />
+          {t("status.ready")}
         </span>
       )}
     </footer>

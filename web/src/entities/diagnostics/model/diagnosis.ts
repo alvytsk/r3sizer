@@ -33,6 +33,8 @@ export interface DiagnosisEntry {
   severity: Severity;
   headline: string;
   detail: string;
+  /** Raw enum value shown as a small tag after the human headline. */
+  tag?: string;
 }
 
 export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): DiagnosisEntry[] {
@@ -44,6 +46,7 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
         severity: "ok",
         headline: t("diagnostics.selection.polynomialRoot"),
         detail: t("diagnostics.selection.polynomialRootDetail"),
+        tag: d.selection_mode,
       });
       break;
     case "best_sample_within_budget":
@@ -51,6 +54,7 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
         severity: "warn",
         headline: t("diagnostics.selection.bestSample"),
         detail: t("diagnostics.selection.bestSampleDetail"),
+        tag: d.selection_mode,
       });
       break;
     case "least_bad_sample":
@@ -58,6 +62,7 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
         severity: "warn",
         headline: t("diagnostics.selection.leastBad"),
         detail: t("diagnostics.selection.leastBadDetail"),
+        tag: d.selection_mode,
       });
       break;
     case "budget_unreachable":
@@ -65,6 +70,7 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
         severity: "error",
         headline: t("diagnostics.selection.budgetUnreachable"),
         detail: t("diagnostics.selection.budgetUnreachableDetail"),
+        tag: d.selection_mode,
       });
       break;
   }
@@ -104,10 +110,9 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
     if (r) {
       entries.push({
         severity: r.severity,
-        headline: t("diagnostics.fallback.fallbackReason", {
-          reason: d.fallback_reason.replace(/_/g, " "),
-        }),
+        headline: t("diagnostics.fallback.fallbackReason"),
         detail: t(r.key, r.interpolation),
+        tag: d.fallback_reason,
       });
     }
   }

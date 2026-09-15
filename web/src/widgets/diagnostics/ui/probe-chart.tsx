@@ -25,11 +25,11 @@ function niceTicks(min: number, max: number, count = 5): number[] {
 
 /* ---------- darkroom palette (unchanged) ---------- */
 
-const AMBER = "oklch(0.78 0.16 75)";
-const BLUE = "oklch(0.65 0.14 230)";
-const RED = "oklch(0.6 0.2 25)";
-const GRID = "oklch(0.30 0.01 270)";
-const TEXT_DIM = "oklch(0.5 0.01 80)";
+const AMBER = "#fabd2f";
+const BLUE = "#83a598";
+const RED = "#fb4934";
+const GRID = "#3c3836";
+const TEXT_DIM = "#928374";
 const MONO = "JetBrains Mono Variable, monospace";
 
 /* ---------- geometry ---------- */
@@ -188,9 +188,7 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
   return (
     <div className="rounded-sm border border-border/30 bg-background p-2 pt-3">
       <div className="flex items-baseline justify-between px-2 mb-2">
-        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary/70">
-          P(s) Probe Curve
-        </span>
+        <span className="text-xs font-semibold text-foreground/80">Probe curve P(s)</span>
         {xZoom ? (
           <button
             onClick={() => {
@@ -450,13 +448,13 @@ export function ProbeChart({ diagnostics }: { diagnostics: AutoSharpDiagnostics 
               position: "absolute",
               left: Math.min(Math.max(hover.sx + 10, 4), width - 120),
               top: Math.max(hover.sy - 38, 4),
-              background: "oklch(0.22 0.006 270)",
-              border: "1px solid oklch(0.28 0.01 270)",
+              background: "#3c3836",
+              border: "1px solid #504945",
               borderRadius: 4,
               padding: "3px 6px",
               fontSize: 10,
               fontFamily: MONO,
-              color: "oklch(0.88 0.01 80)",
+              color: "#ebdbb2",
               pointerEvents: "none",
               whiteSpace: "nowrap",
             }}

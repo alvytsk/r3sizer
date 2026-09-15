@@ -164,11 +164,9 @@ export function DownloadButton() {
           )}
         </div>
         <Button
-          variant="outline"
           size="sm"
           onClick={handleDownload}
           disabled={pending}
-          className="font-mono text-[11px] dark:border-primary/30 dark:text-primary dark:hover:bg-primary/10 dark:hover:border-primary/50"
           title={
             isLossy
               ? t("download.saveAsQuality", { format: format.toUpperCase(), quality })

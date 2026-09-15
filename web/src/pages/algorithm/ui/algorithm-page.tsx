@@ -242,33 +242,26 @@ function HeroCurve() {
         y1="215"
         x2="1200"
         y2="215"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1"
         strokeDasharray="8 5"
         opacity="0.15"
       />
-      <text
-        x="1208"
-        y="219"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="oklch(0.78 0.16 75)"
-        opacity="0.2"
-      >
+      <text x="1208" y="219" fontSize="10" fontFamily="monospace" fill="#fabd2f" opacity="0.2">
         P₀
       </text>
 
       {/* Fill under curve — very subtle */}
       <path
         d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20 L 1150 340 Z"
-        fill="oklch(0.78 0.16 75)"
+        fill="#fabd2f"
         opacity="0.015"
       />
 
       {/* The cubic curve */}
       <path
         d="M 160 335 C 320 328, 500 290, 680 235 S 960 95, 1150 20"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1.5"
         opacity="0.2"
         fill="none"
@@ -280,25 +273,18 @@ function HeroCurve() {
         y1="215"
         x2="700"
         y2="340"
-        stroke="oklch(0.78 0.16 75)"
+        stroke="#fabd2f"
         strokeWidth="1"
         strokeDasharray="3 3"
         opacity="0.12"
       />
-      <text
-        x="692"
-        y="356"
-        fontSize="10"
-        fontFamily="monospace"
-        fill="oklch(0.78 0.16 75)"
-        opacity="0.2"
-      >
+      <text x="692" y="356" fontSize="10" fontFamily="monospace" fill="#fabd2f" opacity="0.2">
         s*
       </text>
 
       {/* Intersection dot with glow */}
-      <circle cx="700" cy="215" r="14" fill="oklch(0.78 0.16 75)" opacity="0.04" />
-      <circle cx="700" cy="215" r="4" fill="oklch(0.78 0.16 75)" opacity="0.4" />
+      <circle cx="700" cy="215" r="14" fill="#fabd2f" opacity="0.04" />
+      <circle cx="700" cy="215" r="4" fill="#fabd2f" opacity="0.4" />
 
       {/* Probe sample dots */}
       {probePoints.map((p, i) => (
@@ -309,14 +295,6 @@ function HeroCurve() {
 }
 
 /* ---------- reusable pieces ---------- */
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-block px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-mono tracking-wide">
-      {children}
-    </span>
-  );
-}
 
 type ChecklistEntry = string | [tex: string, suffix: string];
 
@@ -397,9 +375,9 @@ export default function AlgorithmPage() {
   const activeSection = useActiveSection(TOC_IDS);
 
   return (
-    <div className="min-h-screen bg-background grain relative">
+    <div className="min-h-screen bg-background relative">
       {/* Navigation bar */}
-      <nav className="sticky top-0 z-20 backdrop-blur-sm bg-background/80">
+      <nav className="sticky top-0 z-20 backdrop-blur-sm bg-background/80 border-b border-border/40">
         <div className="max-w-6xl mx-auto px-6 py-2.5 flex items-center gap-3">
           <Link
             to="/"
@@ -411,7 +389,6 @@ export default function AlgorithmPage() {
           <div className="h-4 w-px bg-border/40" />
           <span className="text-xs font-mono text-muted-foreground/50">algorithm</span>
         </div>
-        <div className="h-px accent-line" />
       </nav>
 
       {/* Hero with curve background */}
@@ -429,10 +406,6 @@ export default function AlgorithmPage() {
           </div>
 
           <div className="relative z-10 py-16 sm:py-20 max-w-xl">
-            <div className="flex items-center gap-3 mb-5 animate-fade-up">
-              <Tag>v0.8</Tag>
-              <Tag>auto-sharpness</Tag>
-            </div>
             <h1 className="text-4xl sm:text-5xl font-heading font-bold text-foreground tracking-tight mb-5 animate-fade-up delay-100">
               The Algorithm
             </h1>
@@ -466,9 +439,7 @@ export default function AlgorithmPage() {
         {/* Sticky TOC — desktop only */}
         <aside className="hidden xl:block w-44 flex-shrink-0 pt-10 pl-6">
           <nav className="sticky top-16">
-            <p className="text-[10px] font-mono tracking-[0.2em] uppercase text-muted-foreground/40 mb-3">
-              On this page
-            </p>
+            <p className="text-xs font-medium text-muted-foreground mb-3">On this page</p>
             <ul className="space-y-0.5 border-l border-border/30">
               {TOC_SECTIONS.map(({ id, label }) => {
                 const isActive = activeSection === id;
@@ -494,7 +465,7 @@ export default function AlgorithmPage() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 min-w-0 px-6 pt-4 pb-24 max-w-3xl">
+        <main className="flex-1 min-w-0 px-6 pt-4 pb-24 max-w-2xl">
           {/* Pipeline overview */}
           <SectionHeading id="pipeline">Pipeline Overview</SectionHeading>
           <p className="text-sm text-muted-foreground mb-6">
@@ -839,28 +810,28 @@ export default function AlgorithmPage() {
               <p className="mt-2">Four selection outcomes are possible:</p>
               <ul className="mt-2 space-y-1.5 list-none">
                 <li className="flex gap-2">
-                  <span className="text-emerald-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-chart-3/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Polynomial root</strong> — ideal: <InlineMath tex="s^*" /> from cubic
                     solution
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-amber-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-primary/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Best sample within budget</strong> — largest probe within{" "}
                     <InlineMath tex="P_0" />
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-orange-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-orange/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Least bad sample</strong> — all probes exceed budget; pick minimum
                     metric
                   </span>
                 </li>
                 <li className="flex gap-2">
-                  <span className="text-red-400/70 mt-0.5">&#9679;</span>
+                  <span className="text-destructive/70 mt-0.5">&#9679;</span>
                   <span>
                     <strong>Budget unreachable</strong> — no valid solution exists
                   </span>
@@ -1019,7 +990,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="&#10003;"
-            markerClass="text-emerald-400/60"
+            markerClass="text-chart-3/60"
             items={[
               "All processing in linear RGB space",
               ["P", " = fraction of color values outside valid gamut"],
@@ -1035,7 +1006,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="&#9679;"
-            markerClass="text-amber-400/60"
+            markerClass="text-primary/60"
             items={[
               "Lanczos3 downscale kernel (exact kernel not confirmed)",
               "Unsharp mask sharpening operator (exact operator unknown)",
@@ -1052,7 +1023,7 @@ export default function AlgorithmPage() {
           </h3>
           <Checklist
             marker="?"
-            markerClass="text-blue-400/60"
+            markerClass="text-chart-2/60"
             items={[
               "Is the sharpening operator spatial USM, frequency-domain, or something else?",
               "Does P count per-channel, per-pixel, or a custom colour-space measure?",

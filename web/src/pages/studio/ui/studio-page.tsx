@@ -65,7 +65,7 @@ export default function App() {
   }, [resetImage, resetProcessing]);
 
   return (
-    <div className="h-screen flex flex-col relative grain overflow-hidden">
+    <div className="h-screen flex flex-col relative overflow-hidden">
       {/* Hidden file input for "Open" */}
       <input
         ref={fileInputRef}
@@ -121,7 +121,7 @@ export default function App() {
                   )}
                 </button>
                 <span
-                  className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}
+                  className={`text-sm font-semibold text-foreground/80 whitespace-nowrap transition-opacity duration-150 ${sidebarOpen ? "opacity-100" : "lg:opacity-0"}`}
                 >
                   {t("sidebar.parameters")}
                 </span>
@@ -207,7 +207,7 @@ export default function App() {
                   )}
                 </button>
                 <span
-                  className={`text-sm font-mono font-semibold text-foreground/80 tracking-tight whitespace-nowrap transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}
+                  className={`text-sm font-semibold text-foreground/80 whitespace-nowrap transition-opacity duration-150 ${diagOpen ? "opacity-100" : "lg:opacity-0"}`}
                 >
                   {t("sidebar.diagnostics")}
                 </span>
@@ -225,10 +225,8 @@ export default function App() {
                       <BarChart3 className="h-5 w-5" />
                     </div>
                     <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground/50">
-                        {t("sidebar.noDiagnostics")}
-                      </p>
-                      <p className="text-[11px] font-mono text-muted-foreground/30">
+                      <p className="text-sm text-muted-foreground">{t("sidebar.noDiagnostics")}</p>
+                      <p className="text-xs text-muted-foreground/60">
                         {t("sidebar.processPrompt")}
                       </p>
                     </div>

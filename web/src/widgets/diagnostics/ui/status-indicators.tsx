@@ -8,25 +8,25 @@ const selectionStyles: Record<string, { dot: string; text: string }> = {
 };
 
 const selectionLabels: Record<string, string> = {
-  polynomial_root: "Polynomial Root",
-  best_sample_within_budget: "Best Sample",
-  least_bad_sample: "Least Bad",
+  polynomial_root: "Analytic root",
+  best_sample_within_budget: "Best probe",
+  least_bad_sample: "Least bad probe",
   budget_unreachable: "Unreachable",
 };
 
 const policyLabels: Record<string, string> = {
-  gamut_only: "Gamut Only",
+  gamut_only: "Gamut only",
   hybrid: "Hybrid",
-  composite_only: "Composite Only",
+  composite_only: "Composite only",
 };
 
 const fallbackLabels: Record<string, string> = {
-  fit_failed: "Fit Failed",
-  fit_unstable: "Fit Unstable",
-  root_out_of_range: "Root Out of Range",
-  metric_non_monotonic: "Non-Monotonic",
-  budget_too_strict_for_content: "Budget Too Strict",
-  direct_search_configured: "Direct Search",
+  fit_failed: "Fit failed",
+  fit_unstable: "Fit unstable",
+  root_out_of_range: "Root out of range",
+  metric_non_monotonic: "Non-monotonic",
+  budget_too_strict_for_content: "Budget too strict",
+  direct_search_configured: "Direct search",
 };
 
 export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagnostics }) {
@@ -40,7 +40,7 @@ export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagno
       {/* Selection mode */}
       <div className="flex items-center gap-1.5">
         <div className={`w-2 h-2 rounded-full ${style.dot}`} />
-        <span className={`text-[13px] font-mono font-medium ${style.text}`}>
+        <span className={`text-[13px] font-medium ${style.text}`}>
           {selectionLabels[diagnostics.selection_mode] ?? diagnostics.selection_mode}
         </span>
       </div>
@@ -51,9 +51,9 @@ export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagno
           className={`w-2 h-2 rounded-full ${diagnostics.budget_reachable ? "bg-chart-3" : "bg-destructive"}`}
         />
         <span
-          className={`text-[13px] font-mono ${diagnostics.budget_reachable ? "text-chart-3" : "text-destructive"}`}
+          className={`text-[13px] ${diagnostics.budget_reachable ? "text-chart-3" : "text-destructive"}`}
         >
-          {diagnostics.budget_reachable ? "Budget OK" : "Unreachable"}
+          {diagnostics.budget_reachable ? "Budget met" : "Budget missed"}
         </span>
       </div>
 
@@ -61,7 +61,7 @@ export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagno
       {diagnostics.selection_policy && diagnostics.selection_policy !== "gamut_only" && (
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-chart-4" />
-          <span className="text-[13px] font-mono text-chart-4">
+          <span className="text-[13px] text-chart-4">
             {policyLabels[diagnostics.selection_policy] ?? diagnostics.selection_policy}
           </span>
         </div>
@@ -71,7 +71,7 @@ export function StatusIndicators({ diagnostics }: { diagnostics: AutoSharpDiagno
       {diagnostics.fallback_reason && (
         <div className="flex items-center gap-1.5">
           <div className="w-2 h-2 rounded-full bg-primary/60" />
-          <span className="text-[13px] font-mono text-primary/80">
+          <span className="text-[13px] text-primary/80">
             {fallbackLabels[diagnostics.fallback_reason] ?? diagnostics.fallback_reason}
           </span>
         </div>
