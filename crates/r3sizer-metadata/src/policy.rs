@@ -30,6 +30,11 @@ pub fn prepare(
 ) -> MetadataBundle {
     let mut issues = bundle.report().issues.clone();
     let mut payloads = Vec::with_capacity(bundle.payloads.len());
+    // Decided up front so XMP correction (which may run before the ICC
+    // payload is reached) knows whether `photoshop:ICCProfile` is stale.
+    let icc_retained = bundle.payloads.iter().any(|p| {
+        matches!(p, Payload::Icc(b) if icc_decision(b, facts.color, destination_icc, limits).is_ok())
+    });
 
     for payload in &bundle.payloads {
         match payload {
@@ -41,7 +46,7 @@ pub fn prepare(
                 }
             }
             Payload::Xmp(bytes) => {
-                let (corrected, mut new_issues) = xmp::correct(bytes, facts, limits);
+                let (corrected, mut new_issues) = xmp::correct(bytes, facts, limits, icc_retained);
                 issues.append(&mut new_issues);
                 if let Some(b) = corrected {
                     payloads.push(Payload::Xmp(b));
@@ -381,6 +386,61 @@ mod tests {
         };
         let prepared = prepare(&bundle, &shrink_facts, None, &MetadataLimits::default());
         assert!(prepared.report().issues.is_empty());
+    }
+
+    fn icc_and_xmp_bundle() -> MetadataBundle {
+        let xmp = br#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+          xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+          photoshop:ICCProfile="Adobe RGB (1998)"><rdf:Description/></rdf:RDF>"#;
+        MetadataBundle::new(
+            SourceFormat::Jpeg,
+            vec![Payload::Xmp(xmp.to_vec()), Payload::Icc(valid_icc(1))],
+            crate::bundle::SourceColor::Other,
+            MetadataReport { issues: Vec::new() },
+        )
+    }
+
+    fn prepared_xmp(prepared: &MetadataBundle) -> String {
+        prepared
+            .payloads
+            .iter()
+            .find_map(|p| match p {
+                Payload::Xmp(b) => Some(String::from_utf8(b.clone()).unwrap()),
+                _ => None,
+            })
+            .expect("XMP packet retained")
+    }
+
+    fn stale_icc_ref_issue(prepared: &MetadataBundle) -> bool {
+        prepared.report().issues.iter().any(|i| {
+            i.category == MetadataCategory::Icc
+                && i.reason == MetadataIssueReason::RemovedStale
+                && i.field.as_deref() == Some("ICCProfile")
+        })
+    }
+
+    #[test]
+    fn xmp_icc_profile_name_kept_when_icc_is_retained() {
+        let prepared = prepare(
+            &icc_and_xmp_bundle(),
+            &facts(ColorAction::Unchanged),
+            None,
+            &MetadataLimits::default(),
+        );
+        assert!(prepared_xmp(&prepared).contains("photoshop:ICCProfile="));
+        assert!(!stale_icc_ref_issue(&prepared), "{:?}", prepared.report());
+    }
+
+    #[test]
+    fn xmp_icc_profile_name_removed_when_icc_is_dropped() {
+        let prepared = prepare(
+            &icc_and_xmp_bundle(),
+            &facts(ColorAction::Unverified),
+            None,
+            &MetadataLimits::default(),
+        );
+        assert!(!prepared_xmp(&prepared).contains("ICCProfile"));
+        assert!(stale_icc_ref_issue(&prepared), "{:?}", prepared.report());
     }
 
     #[test]

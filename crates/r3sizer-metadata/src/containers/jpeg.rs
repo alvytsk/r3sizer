@@ -454,8 +454,11 @@ pub(crate) fn embed(
                 }
             }
             Payload::Icc(bytes) => {
-                set_icc(&mut jpeg, bytes);
-                attempted.push(payload);
+                if set_icc(&mut jpeg, bytes) {
+                    attempted.push(payload);
+                } else {
+                    attempt_issues.push(super::too_large(payload));
+                }
             }
             Payload::Iptc(bytes) => {
                 let contents = build_app13(bytes);
@@ -523,10 +526,15 @@ fn set_exif(jpeg: &mut Jpeg, exif: &[u8]) {
 /// same removal predicate and the same multi-segment splitting scheme for
 /// profiles larger than one APP2 segment can hold -- but clamps every
 /// insertion position the same way `set_exif` above does.
-fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) {
+///
+/// Returns `false` (inserting nothing) when the profile needs more APP2
+/// segments than the one-byte sequence count can number.
+fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) -> bool {
+    let Some(segments_n) = icc_segment_count(profile.len()) else {
+        return false;
+    };
     jpeg.segments_mut()
         .retain(|s| !(s.marker() == markers::APP2 && s.contents().starts_with(ICC_PREFIX)));
-    let segments_n = (profile.len() / ICC_SEGMENT_MAX_SIZE + 1) as u8;
     for i in 0..segments_n {
         let start = ICC_SEGMENT_MAX_SIZE * i as usize;
         let end = profile.len().min(start + ICC_SEGMENT_MAX_SIZE);
@@ -540,6 +548,14 @@ fn set_icc(jpeg: &mut Jpeg, profile: &[u8]) {
             JpegSegment::new_with_contents(markers::APP2, Bytes::from(contents)),
         );
     }
+    true
+}
+
+/// APP2 segment count for an ICC profile of `len` bytes, or `None` if it
+/// exceeds the 255 a one-byte count can hold (~16 MiB; unreachable under
+/// the default 8 MiB payload limit, but never wrapped).
+fn icc_segment_count(len: usize) -> Option<u8> {
+    u8::try_from(len / ICC_SEGMENT_MAX_SIZE + 1).ok()
 }
 
 /// No `ImageEXIF`-style trait exists for XMP in `img-parts`, so this is
@@ -913,6 +929,14 @@ mod tests {
             .payloads
             .iter()
             .all(|p| !matches!(p, Payload::JfifDensity { .. })));
+    }
+
+    #[test]
+    fn icc_segment_count_guard() {
+        assert_eq!(icc_segment_count(0), Some(1));
+        assert_eq!(icc_segment_count(ICC_SEGMENT_MAX_SIZE), Some(2));
+        assert_eq!(icc_segment_count(ICC_SEGMENT_MAX_SIZE * 255 - 1), Some(255));
+        assert_eq!(icc_segment_count(ICC_SEGMENT_MAX_SIZE * 255), None);
     }
 
     #[test]

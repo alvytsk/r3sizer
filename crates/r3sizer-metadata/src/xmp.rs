@@ -51,6 +51,7 @@ const TIFF_NS: &[u8] = b"http://ns.adobe.com/tiff/1.0/";
 const EXIF_NS: &[u8] = b"http://ns.adobe.com/exif/1.0/";
 const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/";
 const XMP_NOTE_NS: &[u8] = b"http://ns.adobe.com/xmp/note/";
+const PHOTOSHOP_NS: &[u8] = b"http://ns.adobe.com/photoshop/1.0/";
 
 /// (namespace, local name) -- the identity of one managed/removed property,
 /// independent of whatever prefix alias the packet used for it.
@@ -127,6 +128,13 @@ fn classify(ns: &[u8], local: &[u8]) -> Option<TagKind> {
             MetadataIssueReason::RemovedStale,
             "modify_date",
         ))),
+        // Names the source ICC profile; `correct` un-marks it when that
+        // profile is actually retained in the output.
+        (PHOTOSHOP_NS, b"ICCProfile") => Some(TagKind::Remove(issue(
+            MetadataCategory::Icc,
+            MetadataIssueReason::RemovedStale,
+            "ICCProfile",
+        ))),
         (XMP_NS, b"MetadataDate") => Some(TagKind::Remove(issue(
             MetadataCategory::Xmp,
             MetadataIssueReason::RemovedStale,
@@ -180,10 +188,15 @@ struct Parsed {
 /// UTF-8, malformed XML, a DTD, an undefined entity, excessive nesting, or
 /// oversized input) -- the caller should omit the XMP block entirely rather
 /// than embed unverified bytes.
+///
+/// `icc_retained` says whether the source ICC profile is carried into the
+/// output (a policy decision only `policy::prepare` can make); when it
+/// isn't, `photoshop:ICCProfile` names a profile that's gone and is removed.
 pub(crate) fn correct(
     raw: &[u8],
     facts: &OutputFacts,
     limits: &MetadataLimits,
+    icc_retained: bool,
 ) -> (Option<Vec<u8>>, Vec<MetadataIssue>) {
     if raw.len() > limits.max_payload_bytes {
         return (
@@ -198,10 +211,19 @@ pub(crate) fn correct(
         Ok(t) => t,
         Err(_) => return (None, vec![fatal(MetadataIssueReason::Malformed, "utf8")]),
     };
-    let parsed = match parse(text, limits) {
+    let mut parsed = match parse(text, limits) {
         Ok(p) => p,
         Err(iss) => return (None, vec![iss]),
     };
+    if icc_retained {
+        let is_icc_ref = |h: &Hit| h.key.0 == PHOTOSHOP_NS && h.key.1 == b"ICCProfile";
+        for meta in &mut parsed.metas {
+            if meta.own.as_ref().is_some_and(is_icc_ref) {
+                meta.own = None;
+            }
+            meta.attrs.retain(|(_, h)| !is_icc_ref(h));
+        }
+    }
     let (decisions, mut issues) = decide(&parsed.metas, facts);
     match rewrite(&parsed.events, &parsed.metas, &decisions, &mut issues) {
         Ok(bytes) => (Some(bytes), issues),
@@ -721,7 +743,7 @@ mod tests {
             orientation: OrientationAction::Normalize,
             color: ColorAction::Srgb,
         };
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("t:ImageWidth=\"100\""));
@@ -748,7 +770,7 @@ mod tests {
             OrientationAction::Normalize,
             ColorAction::Unchanged,
         );
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains(
@@ -775,7 +797,7 @@ mod tests {
             OrientationAction::Preserve,
             ColorAction::Unchanged,
         );
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("<tiff:ImageWidth>800</tiff:ImageWidth>"));
@@ -806,7 +828,7 @@ mod tests {
           </rdf:Description>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("All rights reserved"));
@@ -831,7 +853,7 @@ mod tests {
             OrientationAction::Preserve,
             ColorAction::Unchanged,
         );
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("<tiff:ImageWidth>320</tiff:ImageWidth>"));
@@ -849,7 +871,7 @@ mod tests {
           <rdf:Description><tiff:ImageWidth><rdf:Description><rdf:value>400</rdf:value></rdf:Description></tiff:ImageWidth></rdf:Description>
         </rdf:RDF>"#;
         let facts = facts(100, 50, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("ImageWidth"));
         assert!(issues.iter().any(|i| {
@@ -866,7 +888,7 @@ mod tests {
           <rdf:Description><tiff:Orientation>6</tiff:Orientation></rdf:Description>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("Orientation"));
         assert!(issues.iter().any(|i| {
@@ -883,7 +905,7 @@ mod tests {
           <rdf:Description tiff:Orientation="9"/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("Orientation"));
         assert!(issues
@@ -898,7 +920,7 @@ mod tests {
           <rdf:Description/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Srgb);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("exif:ColorSpace=\"1\""));
@@ -917,7 +939,7 @@ mod tests {
             </rdf:RDF>"#[..],
         ] {
             let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Srgb);
-            let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+            let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
             let text = String::from_utf8(bytes.unwrap()).unwrap();
             assert!(!text.contains("ColorSpace"), "{text}");
             assert!(issues.iter().any(|i| {
@@ -935,7 +957,7 @@ mod tests {
           <rdf:Description/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unverified);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("ColorSpace"));
         assert!(issues.iter().any(|i| {
@@ -959,7 +981,7 @@ mod tests {
           </rdf:Description>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("Thumbnails"));
         assert!(!text.contains("base64data"));
@@ -978,7 +1000,7 @@ mod tests {
           <rdf:Description/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("HasExtendedXMP"));
         assert!(issues.iter().any(|i| {
@@ -998,7 +1020,7 @@ mod tests {
           </rdf:Description>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(!text.contains("ModifyDate"));
         assert!(
@@ -1025,7 +1047,7 @@ mod tests {
           <rdf:Description/>
         </rdf:RDF>"#;
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         let text = String::from_utf8(bytes.unwrap()).unwrap();
         assert!(text.contains("photoshop:LegacyIPTCDigest=\"D41D8CD98F00B204E9800998ECF8427E\""));
@@ -1035,7 +1057,7 @@ mod tests {
     fn malformed_xml_is_rejected() {
         let raw = b"<rdf:RDF><rdf:Description></rdf:RDF>";
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(bytes.is_none());
         assert!(issues
             .iter()
@@ -1046,7 +1068,7 @@ mod tests {
     fn doctype_is_rejected() {
         let raw = b"<!DOCTYPE foo><rdf:RDF xmlns:rdf=\"ns\"><rdf:Description/></rdf:RDF>";
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(bytes.is_none());
         assert!(issues.iter().any(|i| i.reason == Reason::Unsupported));
     }
@@ -1055,7 +1077,7 @@ mod tests {
     fn undefined_entity_is_rejected() {
         let raw = b"<rdf:RDF xmlns:rdf=\"ns\"><rdf:Description>&bogus;</rdf:Description></rdf:RDF>";
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(bytes.is_none());
         assert!(issues.iter().any(|i| i.reason == Reason::Malformed));
     }
@@ -1065,7 +1087,7 @@ mod tests {
         let raw = b"<rdf:RDF xmlns:rdf=\"ns\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
             <rdf:Description><dc:description>A &amp; B &#65;</dc:description></rdf:Description></rdf:RDF>";
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(raw, &facts, &MetadataLimits::default(), false);
         assert!(issues.is_empty(), "{issues:?}");
         assert!(bytes.is_some());
     }
@@ -1085,7 +1107,7 @@ mod tests {
             ..MetadataLimits::default()
         };
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(raw.as_bytes(), &facts, &limits);
+        let (bytes, issues) = correct(raw.as_bytes(), &facts, &limits, false);
         assert!(bytes.is_none());
         assert!(issues.iter().any(|i| i.reason == Reason::LimitExceeded));
     }
@@ -1098,7 +1120,7 @@ mod tests {
             ..MetadataLimits::default()
         };
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(&raw, &facts, &limits);
+        let (bytes, issues) = correct(&raw, &facts, &limits, false);
         assert!(bytes.is_none());
         assert!(issues.iter().any(|i| i.reason == Reason::LimitExceeded));
     }
@@ -1107,7 +1129,7 @@ mod tests {
     fn non_utf8_input_is_rejected() {
         let raw = vec![0xFF, 0xFE, 0x00, 0x01];
         let facts = facts(10, 10, OrientationAction::Preserve, ColorAction::Unchanged);
-        let (bytes, issues) = correct(&raw, &facts, &MetadataLimits::default());
+        let (bytes, issues) = correct(&raw, &facts, &MetadataLimits::default(), false);
         assert!(bytes.is_none());
         assert!(issues.iter().any(|i| i.reason == Reason::Malformed));
     }
