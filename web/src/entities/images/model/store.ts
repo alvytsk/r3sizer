@@ -46,6 +46,9 @@ interface ImageState {
 
 const initDims = loadDimsForOrientation(false); // landscape default for pre-load state
 
+/** Bumped per setInput/resetImage; only the latest request may commit. */
+let inputGeneration = 0;
+
 export const useImageStore = create<ImageState>((set, get) => ({
   inputFile: null,
   sourceWidth: 0,
@@ -66,13 +69,17 @@ export const useImageStore = create<ImageState>((set, get) => ({
   error: null,
 
   setInput: async (file) => {
+    const generation = ++inputGeneration;
     let decoded: DecodedInput | undefined;
     try {
       decoded = await processingClient.decode(file);
     } catch (e) {
-      set({ error: e instanceof Error ? e.message : String(e) });
+      if (generation === inputGeneration) {
+        set({ error: e instanceof Error ? e.message : String(e) });
+      }
       return;
     }
+    if (generation !== inputGeneration) return;
     const { width, height } = decoded;
 
     const state = get();
@@ -164,6 +171,7 @@ export const useImageStore = create<ImageState>((set, get) => ({
   clearError: () => set({ error: null }),
 
   resetImage: () => {
+    inputGeneration++;
     const dims = loadDimsForOrientation(false);
     set({
       inputFile: null,

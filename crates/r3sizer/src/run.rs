@@ -2,10 +2,11 @@
 use anyhow::{bail, Context, Result};
 
 use r3sizer_core::{AutoSharpParams, ClampPolicy, FitStrategy, MetricWeights, ProbeConfig};
-use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
+use r3sizer_io::{load_with_metadata, save_with_metadata, DecodeLimits, MetadataLimits};
 
 use crate::{
     args::{OutputFormat, PipelineArgs, ProcessArgs},
+    metadata::write_metadata_warnings,
     output::{print_summary, print_summary_json},
 };
 
@@ -93,23 +94,25 @@ pub fn run(args: &ProcessArgs) -> Result<()> {
         max_pixels: args.pipeline.max_pixels,
         max_dimension: args.pipeline.max_dimension,
     };
-    let input = load_as_linear_with_limits(&args.input, &limits)
+    let metadata_limits = MetadataLimits::default();
+    let loaded = load_with_metadata(&args.input, &limits, &metadata_limits)
         .with_context(|| format!("failed to load input file: {}", args.input.display()))?;
 
     // --- Resolve target dimensions ---
     let (target_width, target_height) =
-        resolve_dimensions(&args.pipeline, input.width(), input.height())?;
+        resolve_dimensions(&args.pipeline, loaded.image.width(), loaded.image.height())?;
 
     // --- Build params ---
     let params = build_params(&args.pipeline, target_width, target_height);
 
     // --- Process ---
-    let output = r3sizer_core::process_auto_sharp_downscale(&input, &params)
+    let output = r3sizer_core::process_auto_sharp_downscale(&loaded.image, &params)
         .context("pipeline processing failed")?;
 
-    // --- Save image ---
-    save_from_linear(&output.image, &args.output)
+    // --- Save image (merging source metadata) ---
+    let report = save_with_metadata(&output.image, &args.output, &loaded, &metadata_limits)
         .with_context(|| format!("failed to save output file: {}", args.output.display()))?;
+    write_metadata_warnings(&mut std::io::stderr().lock(), &args.output, &report)?;
 
     // --- Print summary ---
     match args.output_format {

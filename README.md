@@ -40,6 +40,7 @@ r3sizer solves this automatically. It probes multiple sharpening strengths, fits
 - **Robust quality control** — R² fit quality, leave-one-out stability, monotonicity checks, and typed fallback reasons. The pipeline always produces a result.
 - **Fast** — SIMD-accelerated Lanczos3 resize, staged bilinear pre-reduce for large shrink ratios, detail precomputation eliminates redundant Gaussian blurs during probing.
 - **Runs anywhere** — pure Rust core with no I/O dependencies. Ships as a CLI, runs in the browser via WASM, and embeds in any Rust application.
+- **Preserves embedded metadata by default** — EXIF, XMP, IPTC, ICC, text, and density are carried from source to output (JPEG/PNG/WebP) with no companion files. Fields that can't be safely preserved are reported, not silently dropped or claimed as complete — see [Metadata preservation](#metadata-preservation).
 
 ---
 
@@ -89,6 +90,17 @@ let src = load_as_linear(Path::new("input.jpg"))?;
 let params = AutoSharpParams::photo(800, 600).resolved();
 let result = process_auto_sharp_downscale(&src, &params)?;
 save_from_linear(&result.image, Path::new("output.png"))?;
+```
+
+To also carry embedded metadata (EXIF/XMP/IPTC/ICC/text/density) from source to output, use the additive `*_with_metadata` pair instead — same pixels, plus a `MetadataReport` of anything that couldn't be preserved:
+
+```rust
+let metadata_limits = r3sizer_io::MetadataLimits::default();
+let loaded = r3sizer_io::load_with_metadata(
+    input_path, &r3sizer_io::DecodeLimits::default(), &metadata_limits)?;
+let output = r3sizer_core::process_auto_sharp_downscale(&loaded.image, &params)?;
+let report = r3sizer_io::save_with_metadata(
+    &output.image, output_path, &loaded, &metadata_limits)?;
 ```
 
 For interactive use (e.g., GUI or WASM), the two-phase API avoids recomputing the expensive resize and classification steps:
@@ -152,16 +164,31 @@ See [`docs/algorithm.md`](docs/algorithm.md) for the complete pipeline descripti
 
 ```
 crates/
-  r3sizer-core/    Pure processing — no I/O, no dependencies on CLI or WASM
-  r3sizer-io/      Image I/O (PNG/JPEG via the image crate)
-  r3sizer/         Command-line interface (clap)
-  r3sizer-wasm/    WebAssembly bindings (wasm-bindgen)
-web/               React + Vite + Tailwind diagnostic UI
+  r3sizer-core/      Pure processing — no I/O, no dependencies on CLI or WASM
+  r3sizer-metadata/  Embedded-metadata extraction/merging (EXIF/XMP/IPTC/ICC/…)
+  r3sizer-io/        Image I/O (PNG/JPEG/WebP/… via the image crate) + metadata
+  r3sizer/           Command-line interface (clap)
+  r3sizer-wasm/      WebAssembly bindings (wasm-bindgen)
+web/                 React + Vite + Tailwind diagnostic UI
 ```
 
-`r3sizer-core` is the heart of the project. It has zero I/O dependencies and can be embedded in a Tauri desktop app, compiled to WASM, or used as a plain Rust library.
+`r3sizer-core` is the heart of the project. It has zero I/O dependencies and can be embedded in a Tauri desktop app, compiled to WASM, or used as a plain Rust library. Its only link to `r3sizer-metadata` is a **dev-only** dependency used to generate TypeScript types — production builds of `r3sizer-core` never pull in metadata handling. `r3sizer-io` and `r3sizer-wasm` depend on `r3sizer-metadata` for real, at runtime.
 
 The WASM build powers the web UI via a Web Worker architecture with a **parallel probe pool** (up to 6 workers) for real-time interactive processing.
+
+## Metadata preservation
+
+By default, r3sizer carries embedded metadata from source to output for JPEG, PNG, and WebP, in both the CLI and the web UI. No companion sidecar files — metadata is embedded in the output image itself.
+
+Preserved when present and verifiable: EXIF (including orientation, GPS, camera settings, dates, copyright), XMP, IPTC, ICC color profiles, text comments, and pixel density. EXIF/XMP dimension and color-space fields are corrected to match the actual output rather than left stale.
+
+**Not preserved**, by design: MakerNote payloads, embedded previews/thumbnails, and extended XMP. An ICC profile is only retained when it can be verified against the destination's own declared profile; otherwise it's dropped and reported, not silently mismatched. Formats outside JPEG/PNG/WebP (e.g. BMP, TIFF, GIF) are unsupported for metadata merging — pixels still process normally, but nothing is carried over. This is not an exhaustive list of every possible loss case; consult the returned report for what actually happened on a given file.
+
+r3sizer does not promise universal or byte-identical metadata preservation across formats, and filesystem timestamps/permissions are outside this scope entirely.
+
+**CLI**: metadata issues are reported to stderr only, one line per issue, as `warning: <output path>: metadata <category>/<reason> (<field>)`. They never appear in `--diagnostics` JSON, stdout, or a sweep's `summary.json`; a sweep run without `--out-dir` writes no images and therefore emits no metadata warnings.
+
+**Web**: a download export shows a visible, localized warning when metadata couldn't be fully carried over; a failed extract/merge falls back to the original encoded output rather than blocking the download.
 
 ---
 
@@ -201,6 +228,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, workflow, and PR expectation
 | [`docs/cli.md`](docs/cli.md) | Complete CLI flag reference |
 | [`docs/assumptions.md`](docs/assumptions.md) | Confirmed vs. engineering approximations |
 | [`docs/future_work.md`](docs/future_work.md) | Roadmap and next steps |
+| [`docs/testing/metadata-export.md`](docs/testing/metadata-export.md) | Metadata preservation verification recipe and observed results |
 
 ---
 

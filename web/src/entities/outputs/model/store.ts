@@ -16,6 +16,8 @@ export interface OutputResult {
   diagnostics: AutoSharpDiagnostics;
   params: AutoSharpParams;
   paramsVersion: number;
+  /** The source file this output was processed from. */
+  sourceFile: File;
 }
 
 interface OutputState {
@@ -25,6 +27,7 @@ interface OutputState {
   diagnostics: AutoSharpDiagnostics | null;
   lastProcessedParams: AutoSharpParams | null;
   lastProcessedVersion: number;
+  outputSourceFile: File | null;
 
   setResult: (r: OutputResult) => void;
   clearOutput: () => void;
@@ -37,6 +40,7 @@ const CLEARED = {
   diagnostics: null,
   lastProcessedParams: null,
   lastProcessedVersion: 0,
+  outputSourceFile: null,
 } as const;
 
 export const useOutputStore = create<OutputState>((set) => ({
@@ -49,6 +53,7 @@ export const useOutputStore = create<OutputState>((set) => ({
       diagnostics: r.diagnostics,
       lastProcessedParams: { ...r.params },
       lastProcessedVersion: r.paramsVersion,
+      outputSourceFile: r.sourceFile,
     }),
   clearOutput: () => set({ ...CLEARED }),
 }));

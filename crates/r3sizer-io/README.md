@@ -30,9 +30,34 @@ let result = process_auto_sharp_downscale(&src, &params)?;
 save_from_linear(&result.image, Path::new("out.png"))?;
 ```
 
+### With embedded metadata preserved
+
+`load_with_metadata` / `save_with_metadata` are additive — same decoded pixels
+as above, plus the source's embedded metadata (EXIF, XMP, IPTC, ICC, text,
+density) carried into the output via [`r3sizer-metadata`](https://crates.io/crates/r3sizer-metadata),
+for JPEG/PNG/WebP. `save_with_metadata` returns a `MetadataReport` listing
+anything that couldn't be safely preserved (not an error — the image is
+still written):
+
+```rust
+let metadata_limits = r3sizer_io::MetadataLimits::default();
+let loaded = r3sizer_io::load_with_metadata(
+    Path::new("photo.jpg"), &r3sizer_io::DecodeLimits::default(), &metadata_limits)?;
+let result = process_auto_sharp_downscale(&loaded.image, &params)?;
+let report = r3sizer_io::save_with_metadata(
+    &result.image, Path::new("out.png"), &loaded, &metadata_limits)?;
+```
+
 ## Supported formats
 
 PNG, JPEG, GIF, BMP, TIFF, WebP — all via the `image` crate with the matching feature flags enabled by default.
+
+Metadata preservation (`*_with_metadata`) covers JPEG, PNG, and WebP only —
+other formats decode/encode pixels normally but carry no metadata over. Not
+every metadata preservation is guaranteed even for the covered formats; see
+[`r3sizer-metadata`](../r3sizer-metadata/README.md) for the exact limits and
+what's never preserved (MakerNote, embedded previews/thumbnails, extended
+XMP).
 
 ## Examples
 

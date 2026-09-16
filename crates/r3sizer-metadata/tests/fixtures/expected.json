@@ -1,0 +1,21 @@
+{
+  "artist": "Fixture Author",
+  "copyright": "Fixture Copyright",
+  "date_time_original": "2024:01:02 03:04:05",
+  "gps_latitude": "1 deg 2 min 3 sec",
+  "gps_latitude_ref": "N",
+  "gps_longitude": "4 deg 5 min 6 sec",
+  "gps_longitude_ref": "E",
+  "height": 16,
+  "image_description": "Metadata fixture",
+  "tiff_value_offsets": {
+    "artist": 163,
+    "copyright": 178,
+    "date_time_original": 196,
+    "gps_latitude": 216,
+    "gps_longitude": 240,
+    "image_description": 146,
+    "note": "byte offset of each value's raw content from the start of the TIFF block (the Exif payload after 'Exif\\0\\0', and identically the PNG eXIf/WebP EXIF chunk data, since all three metadata.* fixtures share these exact TIFF bytes); computed in build_tiff() in this file, not hand-transcribed"
+  },
+  "width": 32
+}

@@ -55,6 +55,26 @@ the human-readable text format:
 r3sizer process -i photo.jpg -o out.png --width 800 --height 600 --output-format json
 ```
 
+### Metadata preservation
+
+`process` and `sweep` carry EXIF/XMP/IPTC/ICC metadata from the source file
+into the output image where the destination format supports it (JPEG, PNG,
+WebP). Anything that can't be safely carried over — a dropped `MakerNote`,
+a stale embedded thumbnail, an unverified color tag, a destination format
+outside JPEG/PNG/WebP, or a metadata block that failed to parse — is
+reported as a warning on **stderr only**, one line per distinct issue:
+
+```
+warning: <output path>: metadata <category>/<reason> (<field>)
+```
+
+The `(<field>)` suffix is omitted when the issue has no associated field
+name. Categories/reasons are the same identifiers `r3sizer-metadata`
+reports internally (e.g. `maker_note/unverified`, `exif/removed_stale`,
+`icc/merge_failed`) — never the tag's actual value. These warnings never
+appear in stdout, `--diagnostics` JSON, or (for `sweep`) `summary.json`;
+they don't affect the exit code or `sweep`'s success/failure counts.
+
 ---
 
 ## `sweep` — Batch mode
@@ -71,6 +91,10 @@ r3sizer sweep \
 
 The summary JSON includes per-file results (selected strength, selection mode, timing)
 and aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+
+Metadata warnings (see above) are only emitted when `--out-dir` is set, one warning line
+per affected output file as it's written; a sweep with no `--out-dir` writes no images and
+so emits none. Warnings never enter `summary.json` and never count toward `aggregate.failed`.
 
 ---
 

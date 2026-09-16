@@ -1,0 +1,877 @@
+//! EXIF correction: bounded TIFF structural validation and patching.
+//!
+//! `correct()` is the only entry point used by the rest of the crate. It
+//! never partially patches an ambiguous or malformed structure -- either
+//! the whole corrected TIFF block comes back, or `None` does, with the
+//! reason recorded as a single issue. See `reader.rs` for the validating
+//! parser (structure only, no tag semantics) and `patch.rs` for the
+//! tag-by-tag correction policy and the actual byte patching.
+
+mod patch;
+mod reader;
+
+use crate::limits::MetadataLimits;
+use crate::types::{MetadataCategory, MetadataIssue, MetadataIssueReason, OutputFacts};
+
+/// Correct dimension, orientation, and color-space EXIF fields in `raw`
+/// (TIFF bytes starting at the byte-order marker, as produced by the
+/// container scanners in Task 2) to match `facts`, within `limits`.
+///
+/// Returns `None` when the block can't be safely corrected at all (bad
+/// header, BigTIFF, a cycle, a duplicate tag, an aliasing table/value
+/// region, or any other structural inconsistency) -- the caller should omit
+/// the EXIF block entirely rather than embed unverified bytes.
+pub fn correct(
+    raw: &[u8],
+    facts: &OutputFacts,
+    limits: &MetadataLimits,
+) -> (Option<Vec<u8>>, Vec<MetadataIssue>) {
+    let parsed = match reader::parse(raw, limits) {
+        Ok(p) => p,
+        Err(issue) => return (None, vec![issue]),
+    };
+    match patch::apply(raw, &parsed, facts) {
+        // Defense in depth: never hand back bytes the same bounded reader
+        // can no longer parse (a zeroed range the overlap check missed).
+        Ok((bytes, _)) if reader::parse(&bytes, limits).is_err() => (
+            None,
+            vec![MetadataIssue {
+                category: MetadataCategory::Exif,
+                reason: MetadataIssueReason::Malformed,
+                field: Some("aliasing".to_string()),
+            }],
+        ),
+        Ok((bytes, issues)) => (Some(bytes), issues),
+        Err(issue) => (None, vec![issue]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ColorAction, OrientationAction};
+
+    /// TIFF-6.0-style IFD builder for tests: `entries` are
+    /// `(tag, type, count, value)` where `value` is the raw 4-byte
+    /// value/offset field content as a u32 (matching how small-value
+    /// fixtures are naturally written).
+    fn build_ifd(little_endian: bool, entries: &[(u16, u16, u32, u32)], next_ifd: u32) -> Vec<u8> {
+        let mut b = Vec::new();
+        if little_endian {
+            b.extend(b"II\x2a\0");
+        } else {
+            b.extend(b"MM\0\x2a");
+        }
+        let ifd0_offset: u32 = 8;
+        push_u32(&mut b, ifd0_offset, little_endian);
+        push_u16(&mut b, entries.len() as u16, little_endian);
+        for &(tag, kind, count, value) in entries {
+            push_u16(&mut b, tag, little_endian);
+            push_u16(&mut b, kind, little_endian);
+            push_u32(&mut b, count, little_endian);
+            // Inline values are left-justified in the 4-byte field for both
+            // byte orders: a SHORT's 2 encoded bytes go first, padded with
+            // zeros, never just the low/high half of a 4-byte encoding of
+            // `value` (which only coincides with left-justification for
+            // little-endian). Out-of-line entries (this helper's tests
+            // don't build any directly with a narrower type) and LONGs use
+            // the full 4 bytes either way.
+            if kind == 3 && count == 1 {
+                // SHORT
+                let mut field = [0u8; 4];
+                if little_endian {
+                    field[0..2].copy_from_slice(&(value as u16).to_le_bytes());
+                } else {
+                    field[0..2].copy_from_slice(&(value as u16).to_be_bytes());
+                }
+                b.extend(field);
+            } else {
+                push_u32(&mut b, value, little_endian);
+            }
+        }
+        push_u32(&mut b, next_ifd, little_endian);
+        b
+    }
+
+    fn push_u16(b: &mut Vec<u8>, v: u16, little_endian: bool) {
+        if little_endian {
+            b.extend(v.to_le_bytes());
+        } else {
+            b.extend(v.to_be_bytes());
+        }
+    }
+
+    fn push_u32(b: &mut Vec<u8>, v: u32, little_endian: bool) {
+        if little_endian {
+            b.extend(v.to_le_bytes());
+        } else {
+            b.extend(v.to_be_bytes());
+        }
+    }
+
+    fn tiny_exif() -> Vec<u8> {
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        b.extend(3u16.to_le_bytes());
+        for (tag, kind, value) in [(0x0100u16, 4u16, 400u32), (0x0101, 4, 200), (0x0112, 3, 6)] {
+            b.extend(tag.to_le_bytes());
+            b.extend(kind.to_le_bytes());
+            b.extend(1u32.to_le_bytes());
+            b.extend(value.to_le_bytes());
+        }
+        b.extend(0u32.to_le_bytes());
+        b
+    }
+
+    fn default_facts(orientation: OrientationAction, color: ColorAction) -> OutputFacts {
+        OutputFacts {
+            width: 100,
+            height: 50,
+            orientation,
+            color,
+        }
+    }
+
+    // Keep this test inside exif/mod.rs so it can call the private correct().
+    #[test]
+    fn updates_dimensions_and_normalizes_only_on_request() {
+        let facts = OutputFacts {
+            width: 100,
+            height: 50,
+            orientation: OrientationAction::Normalize,
+            color: ColorAction::Unverified,
+        };
+        let (bytes, issues) = correct(&tiny_exif(), &facts, &MetadataLimits::default());
+        assert!(issues.is_empty());
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::ImageWidth, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(100)
+        );
+        assert_eq!(
+            exif.get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn preserve_keeps_original_orientation() {
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&tiny_exif(), &facts, &MetadataLimits::default());
+        assert!(issues.is_empty());
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(6)
+        );
+    }
+
+    #[test]
+    fn big_endian_is_supported() {
+        let ifd = build_ifd(
+            false,
+            &[(0x0100, 4, 1, 400), (0x0101, 4, 1, 200), (0x0112, 3, 1, 3)],
+            0,
+        );
+        let facts = default_facts(OrientationAction::Normalize, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::ImageWidth, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(100)
+        );
+        assert_eq!(
+            exif.get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn all_eight_orientations_preserve_and_normalize() {
+        for original in 1u32..=8 {
+            let ifd = build_ifd(true, &[(0x0112, 3, 1, original)], 0);
+
+            let preserve_facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+            let (bytes, issues) = correct(&ifd, &preserve_facts, &MetadataLimits::default());
+            assert!(issues.is_empty());
+            let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+            assert_eq!(
+                exif.get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+                    .unwrap()
+                    .value
+                    .get_uint(0),
+                Some(original)
+            );
+
+            let normalize_facts =
+                default_facts(OrientationAction::Normalize, ColorAction::Unchanged);
+            let (bytes, issues) = correct(&ifd, &normalize_facts, &MetadataLimits::default());
+            assert!(issues.is_empty());
+            let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+            assert_eq!(
+                exif.get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+                    .unwrap()
+                    .value
+                    .get_uint(0),
+                Some(1)
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_orientation_value_is_dropped_as_malformed() {
+        let ifd = build_ifd(true, &[(0x0112, 3, 1, 9)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::Orientation, ::exif::In::PRIMARY)
+            .is_none());
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Malformed
+                && i.field.as_deref() == Some("orientation")
+        }));
+    }
+
+    #[test]
+    fn short_dimension_promotes_to_long_when_it_no_longer_fits() {
+        // ImageWidth stored as SHORT (type 3); requested output width
+        // exceeds u16::MAX, forcing a promotion to LONG in the same entry.
+        let ifd = build_ifd(true, &[(0x0100, 3, 1, 1000)], 0);
+        let facts = OutputFacts {
+            width: 70_000,
+            height: 50,
+            orientation: OrientationAction::Preserve,
+            color: ColorAction::Unchanged,
+        };
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::ImageWidth, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(70_000)
+        );
+    }
+
+    #[test]
+    fn short_dimension_stays_short_when_it_still_fits() {
+        let ifd = build_ifd(true, &[(0x0100, 3, 1, 1000)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty());
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::ImageWidth, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn maker_note_is_removed() {
+        // ExifIFD with a MakerNote (0x927c, UNDEFINED, out-of-line blob).
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8769, true); // ExifIFD pointer
+        push_u16(&mut b, 4, true); // LONG
+        push_u32(&mut b, 1, true);
+        let exif_ifd_offset_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder, patched below
+        push_u32(&mut b, 0, true); // next IFD = 0
+
+        let exif_ifd_offset = b.len() as u32;
+        b[exif_ifd_offset_pos..exif_ifd_offset_pos + 4]
+            .copy_from_slice(&exif_ifd_offset.to_le_bytes());
+
+        let maker_note_data = vec![0xABu8; 20];
+        push_u16(&mut b, 1, true); // 1 entry in ExifIFD
+        push_u16(&mut b, 0x927c, true); // MakerNote
+        push_u16(&mut b, 7, true); // UNDEFINED
+        push_u32(&mut b, maker_note_data.len() as u32, true);
+        let maker_note_offset_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder
+        push_u32(&mut b, 0, true); // next IFD = 0
+
+        let maker_note_offset = b.len() as u32;
+        b[maker_note_offset_pos..maker_note_offset_pos + 4]
+            .copy_from_slice(&maker_note_offset.to_le_bytes());
+        b.extend(&maker_note_data);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid, should not be omitted");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::MakerNote && i.reason == MetadataIssueReason::Unverified
+        }));
+        // MakerNote bytes are zeroed in the output.
+        let start = maker_note_offset as usize;
+        assert!(bytes[start..start + maker_note_data.len()]
+            .iter()
+            .all(|&b| b == 0));
+        let exif = ::exif::Reader::new().read_raw(bytes).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::MakerNote, ::exif::In::PRIMARY)
+            .is_none());
+    }
+
+    #[test]
+    fn embedded_preview_pointer_is_removed() {
+        let ifd = build_ifd(true, &[(0x0201, 4, 1, 1234), (0x0202, 4, 1, 100)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(bytes.is_some());
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.category == MetadataCategory::Thumbnail
+                    && i.reason == MetadataIssueReason::RemovedStale
+                    && i.field.as_deref() == Some("preview"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn thumbnail_chain_is_detached_and_zeroed() {
+        // IFD0 (no entries) with a next-IFD pointing at a thumbnail IFD
+        // that itself holds one SHORT entry (inline, nothing out-of-line
+        // to worry about beyond the table itself).
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 0, true); // 0 entries in IFD0
+        let next_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder next-IFD offset
+
+        let thumb_offset = b.len() as u32;
+        b[next_pos..next_pos + 4].copy_from_slice(&thumb_offset.to_le_bytes());
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x0100, true);
+        push_u16(&mut b, 3, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 64, true);
+        push_u32(&mut b, 0, true); // next = 0
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("valid structure");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Thumbnail
+                && i.reason == MetadataIssueReason::RemovedStale
+                && i.field.as_deref() == Some("thumbnail_chain")
+        }));
+        // The (former) thumbnail IFD table bytes are now all zero.
+        let thumb_span = thumb_offset as usize..thumb_offset as usize + 2 + 12 + 4;
+        assert!(bytes[thumb_span].iter().all(|&b| b == 0));
+        // IFD0's own next-IFD pointer is now zero (chain detached).
+        assert_eq!(&bytes[next_pos..next_pos + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn thumbnail_preview_bytes_are_zeroed() {
+        // IFD0 (no entries) -> next points at a thumbnail IFD1 carrying a
+        // real JPEGInterchangeFormat(0x0201)/Length(0x0202) pair that
+        // points at real out-of-band "JPEG" bytes appended after the
+        // table. Dropping the two directory entries isn't enough -- the
+        // actual preview bytes they point at must be zeroed too.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 0, true); // 0 entries in IFD0
+        let next_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder next-IFD offset
+
+        let thumb_offset = b.len() as u32;
+        b[next_pos..next_pos + 4].copy_from_slice(&thumb_offset.to_le_bytes());
+        push_u16(&mut b, 2, true); // 2 entries in the thumbnail IFD
+        push_u16(&mut b, 0x0201, true); // JPEGInterchangeFormat
+        push_u16(&mut b, 4, true); // LONG
+        push_u32(&mut b, 1, true);
+        let preview_offset_pos = b.len();
+        push_u32(&mut b, 0, true); // placeholder offset, patched below
+        push_u16(&mut b, 0x0202, true); // JPEGInterchangeFormatLength
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_data = vec![0xFFu8, 0xD8, 0xAA, 0xBB, 0xFF, 0xD9];
+        push_u32(&mut b, preview_data.len() as u32, true); // real length, known up front
+        push_u32(&mut b, 0, true); // thumbnail IFD's own next = 0
+
+        let preview_offset = b.len() as u32;
+        b[preview_offset_pos..preview_offset_pos + 4]
+            .copy_from_slice(&preview_offset.to_le_bytes());
+        b.extend(&preview_data);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Thumbnail
+                && i.reason == MetadataIssueReason::RemovedStale
+                && i.field.as_deref() == Some("thumbnail_chain")
+        }));
+        let start = preview_offset as usize;
+        assert!(
+            bytes[start..start + preview_data.len()]
+                .iter()
+                .all(|&b| b == 0),
+            "preview JPEG bytes were not zeroed"
+        );
+    }
+
+    #[test]
+    fn embedded_preview_bytes_in_kept_ifd_are_also_zeroed() {
+        // The same JPEGInterchangeFormat/Length pair, but living directly
+        // in IFD0 (a "kept" IFD, not a wholesale-discarded thumbnail
+        // chain) alongside a real, in-bounds preview payload.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 2, true); // 2 entries
+        push_u16(&mut b, 0x0201, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u16(&mut b, 0x0202, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let preview_data = vec![0xFFu8, 0xD8, 0x11, 0x22, 0xFF, 0xD9];
+        push_u32(&mut b, preview_data.len() as u32, true);
+        push_u32(&mut b, 0, true); // next = 0
+
+        let preview_offset = b.len() as u32;
+        b[preview_offset_pos..preview_offset_pos + 4]
+            .copy_from_slice(&preview_offset.to_le_bytes());
+        b.extend(&preview_data);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid");
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|i| i.category == MetadataCategory::Thumbnail
+                    && i.reason == MetadataIssueReason::RemovedStale
+                    && i.field.as_deref() == Some("preview"))
+                .count(),
+            2
+        );
+        let start = preview_offset as usize;
+        assert!(bytes[start..start + preview_data.len()]
+            .iter()
+            .all(|&b| b == 0));
+    }
+
+    #[test]
+    fn unrecognized_standard_tag_is_retained_with_unverified_issue() {
+        // BitsPerSample (0x0102) is a standard baseline TIFF SHORT tag but
+        // isn't in the curated "known good" allowlist: it must still be
+        // retained (it's a plain scalar, no pointer semantics of its own)
+        // but flagged Unverified rather than silently blessed.
+        let ifd = build_ifd(true, &[(0x0102, 3, 1, 8)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("standard scalar tags are retained, not rejected");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Unverified
+                && i.field.as_deref() == Some("0x0102")
+        }));
+        let exif = ::exif::Reader::new().read_raw(bytes).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::BitsPerSample, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn curated_known_tag_is_retained_without_issue() {
+        // Software (0x0131) IS in the curated allowlist: retained silently.
+        // count=6 ("abcde\0") keeps this genuinely out-of-line (6*1 > 4).
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x0131, true); // Software
+        push_u16(&mut b, 2, true); // ASCII
+        push_u32(&mut b, 6, true);
+        let value_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let value_offset = b.len() as u32;
+        b[value_offset_pos..value_offset_pos + 4].copy_from_slice(&value_offset.to_le_bytes());
+        b.extend(b"abcde\0");
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        assert!(bytes.is_some());
+    }
+
+    #[test]
+    fn cycle_is_rejected() {
+        // IFD0's next-IFD pointer points back at IFD0's own offset (8).
+        let ifd = build_ifd(true, &[], 8);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(bytes.is_none());
+        assert!(issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::Malformed
+                && i.field.as_deref() == Some("cycle")));
+    }
+
+    #[test]
+    fn overlapping_value_and_table_is_rejected() {
+        // An ASCII entry (out-of-line, needs 10 bytes) whose declared
+        // offset points squarely into IFD0's own entry table -- classic
+        // aliasing attempt.
+        let ifd = build_ifd(true, &[(0x010e, 2, 10, 10)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(bytes.is_none());
+        assert!(issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::Malformed
+                && i.field.as_deref() == Some("aliasing")));
+    }
+
+    fn assert_omitted_as_malformed(bytes: Option<Vec<u8>>, issues: &[MetadataIssue]) {
+        assert!(
+            bytes.is_none(),
+            "must not return EXIF whose TIFF header was zeroed: {:?}",
+            bytes.map(|b| b[..8].to_vec())
+        );
+        assert!(
+            issues.iter().any(|i| {
+                i.category == MetadataCategory::Exif && i.reason == MetadataIssueReason::Malformed
+            }),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    fn dropped_value_aliasing_tiff_header_omits_exif() {
+        // Reviewer probe: an opaque UNDEFINED tag (dropped) whose 8-byte
+        // out-of-line value sits at offset 0 -- zeroing it would destroy
+        // the TIFF header itself.
+        let ifd = build_ifd(true, &[(0xc000, 7, 8, 0)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert_omitted_as_malformed(bytes, &issues);
+    }
+
+    #[test]
+    fn preview_range_aliasing_tiff_header_omits_exif() {
+        let ifd = build_ifd(true, &[(0x0201, 4, 1, 0), (0x0202, 4, 1, 8)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert_omitted_as_malformed(bytes, &issues);
+    }
+
+    #[test]
+    fn duplicate_tag_is_rejected_as_malformed() {
+        let ifd = build_ifd(true, &[(0x0100, 4, 1, 100), (0x0100, 4, 1, 200)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        assert!(bytes.is_none());
+        assert!(issues
+            .iter()
+            .any(|i| i.reason == MetadataIssueReason::Malformed
+                && i.field.as_deref() == Some("duplicate_tag")));
+    }
+
+    #[test]
+    fn malformed_count_does_not_panic_and_is_rejected() {
+        // Tag 0x9286 (UserComment) is kind 7 (UNDEFINED, 1-byte-wide), so
+        // count * width = u32::MAX doesn't overflow `checked_mul` on a
+        // 64-bit target -- it's `checked_range`'s bounds check (offset +
+        // count > raw.len()) that rejects this entry as `Invalid`. Either
+        // way, no panic and no out-of-bounds read.
+        let ifd = build_ifd(true, &[(0x9286, 7, u32::MAX, 0)], 0);
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, _issues) = correct(&ifd, &facts, &MetadataLimits::default());
+        // The entry itself is dropped as invalid; the rest of the (empty
+        // otherwise) IFD is still fine to keep.
+        assert!(bytes.is_some());
+    }
+
+    #[test]
+    fn exif_ifd_dimensions_are_updated() {
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8769, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let exif_ifd_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let exif_ifd_offset = b.len() as u32;
+        b[exif_ifd_offset_pos..exif_ifd_offset_pos + 4]
+            .copy_from_slice(&exif_ifd_offset.to_le_bytes());
+        push_u16(&mut b, 2, true);
+        push_u16(&mut b, 0xa002, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 4000, true);
+        push_u16(&mut b, 0xa003, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 3000, true);
+        push_u32(&mut b, 0, true);
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::PixelXDimension, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(100)
+        );
+        assert_eq!(
+            exif.get_field(::exif::Tag::PixelYDimension, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(50)
+        );
+    }
+
+    #[test]
+    fn rational_gps_and_capture_settings_survive_at_original_offset() {
+        // GPSLatitude (3 RATIONALs = 24 bytes, out-of-line) inside a GPS
+        // IFD reached from IFD0.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8825, true); // GPSIFD pointer
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let gps_ifd_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let gps_ifd_offset = b.len() as u32;
+        b[gps_ifd_offset_pos..gps_ifd_offset_pos + 4]
+            .copy_from_slice(&gps_ifd_offset.to_le_bytes());
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x0002, true); // GPSLatitude
+        push_u16(&mut b, 5, true); // RATIONAL
+        push_u32(&mut b, 3, true);
+        let value_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true); // next = 0
+
+        let value_offset = b.len() as u32;
+        b[value_offset_pos..value_offset_pos + 4].copy_from_slice(&value_offset.to_le_bytes());
+        let rationals: [u32; 6] = [10, 1, 20, 1, 30, 1];
+        for v in rationals {
+            push_u32(&mut b, v, true);
+        }
+
+        let original_value_bytes = b[value_offset as usize..value_offset as usize + 24].to_vec();
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let bytes = bytes.unwrap();
+        // The value bytes are byte-for-byte unchanged at their original offset.
+        assert_eq!(
+            &bytes[value_offset as usize..value_offset as usize + 24],
+            &original_value_bytes[..]
+        );
+        let exif = ::exif::Reader::new().read_raw(bytes).unwrap();
+        let field = exif
+            .get_field(::exif::Tag::GPSLatitude, ::exif::In::PRIMARY)
+            .unwrap();
+        assert_eq!(format!("{}", field.display_value()), "10 deg 20 min 30 sec");
+    }
+
+    /// IFD0 -> ExifIFD holding ColorSpace (SHORT) and, optionally, an
+    /// InteropIFD pointer to an InteropIndex (4-byte inline ASCII).
+    fn exif_with_color(color_space: u16, interop_index: Option<&[u8; 4]>) -> Vec<u8> {
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8769, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 26, true); // ExifIFD right after IFD0 (8 + 18)
+        push_u32(&mut b, 0, true);
+
+        push_u16(&mut b, 1 + interop_index.is_some() as u16, true);
+        push_u16(&mut b, 0xa001, true); // ColorSpace
+        push_u16(&mut b, 3, true); // SHORT
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, color_space as u32, true);
+        if interop_index.is_some() {
+            let interop_offset = (b.len() + 12 + 4) as u32;
+            push_u16(&mut b, 0xa005, true); // InteropIFD pointer
+            push_u16(&mut b, 4, true);
+            push_u32(&mut b, 1, true);
+            push_u32(&mut b, interop_offset, true);
+        }
+        push_u32(&mut b, 0, true);
+
+        if let Some(index) = interop_index {
+            push_u16(&mut b, 1, true);
+            push_u16(&mut b, 0x0001, true); // InteropIndex
+            push_u16(&mut b, 2, true); // ASCII
+            push_u32(&mut b, 4, true);
+            b.extend(index);
+            push_u32(&mut b, 0, true);
+        }
+        b
+    }
+
+    fn has_issue(issues: &[MetadataIssue], field: &str) -> bool {
+        issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Unverified
+                && i.field.as_deref() == Some(field)
+        })
+    }
+
+    #[test]
+    fn color_space_srgb_keeps_existing_srgb_declarations_silently() {
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(1, Some(b"R98\0")),
+            &facts,
+            &MetadataLimits::default(),
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert_eq!(
+            exif.get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+                .unwrap()
+                .value
+                .get_uint(0),
+            Some(1)
+        );
+        assert!(exif
+            .get_field(::exif::Tag::InteroperabilityIndex, ::exif::In::PRIMARY)
+            .is_some());
+    }
+
+    #[test]
+    fn color_space_srgb_drops_uncalibrated_r03_declaration_with_issues() {
+        // How cameras declare Adobe RGB without an ICC profile: must not be
+        // silently relabeled as sRGB.
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(0xFFFF, Some(b"R03\0")),
+            &facts,
+            &MetadataLimits::default(),
+        );
+        assert!(has_issue(&issues, "color_space"), "{issues:?}");
+        assert!(has_issue(&issues, "interop_index"), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+            .is_none());
+        assert!(exif
+            .get_field(::exif::Tag::InteroperabilityIndex, ::exif::In::PRIMARY)
+            .is_none());
+    }
+
+    #[test]
+    fn color_space_srgb_drops_non_srgb_value_with_issue() {
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Srgb);
+        let (bytes, issues) = correct(
+            &exif_with_color(2, None),
+            &facts,
+            &MetadataLimits::default(),
+        );
+        assert!(has_issue(&issues, "color_space"), "{issues:?}");
+        let exif = ::exif::Reader::new().read_raw(bytes.unwrap()).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+            .is_none());
+    }
+
+    #[test]
+    fn color_space_unverified_removes_declaration_with_issue() {
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8769, true);
+        push_u16(&mut b, 4, true);
+        push_u32(&mut b, 1, true);
+        let exif_ifd_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let exif_ifd_offset = b.len() as u32;
+        b[exif_ifd_offset_pos..exif_ifd_offset_pos + 4]
+            .copy_from_slice(&exif_ifd_offset.to_le_bytes());
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0xa001, true);
+        push_u16(&mut b, 3, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 1, true);
+        push_u32(&mut b, 0, true);
+
+        let facts = OutputFacts {
+            width: 10,
+            height: 10,
+            orientation: OrientationAction::Preserve,
+            color: ColorAction::Unverified,
+        };
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        let bytes = bytes.expect("structurally valid");
+        assert!(issues.iter().any(|i| {
+            i.category == MetadataCategory::Exif
+                && i.reason == MetadataIssueReason::Unverified
+                && i.field.as_deref() == Some("color_space")
+        }));
+        let exif = ::exif::Reader::new().read_raw(bytes).unwrap();
+        assert!(exif
+            .get_field(::exif::Tag::ColorSpace, ::exif::In::PRIMARY)
+            .is_none());
+    }
+
+    #[test]
+    fn value_offset_stability_for_retained_scalar() {
+        // A retained ASCII tag (Copyright, out-of-line) must sit at exactly
+        // its original file offset in the output.
+        let mut b = b"II\x2a\0\x08\0\0\0".to_vec();
+        push_u16(&mut b, 1, true);
+        push_u16(&mut b, 0x8298, true); // Copyright
+        push_u16(&mut b, 2, true); // ASCII
+        push_u32(&mut b, 6, true); // "abcde\0"
+        let value_offset_pos = b.len();
+        push_u32(&mut b, 0, true);
+        push_u32(&mut b, 0, true);
+
+        let value_offset = b.len() as u32;
+        b[value_offset_pos..value_offset_pos + 4].copy_from_slice(&value_offset.to_le_bytes());
+        b.extend(b"abcde\0");
+
+        let facts = default_facts(OrientationAction::Preserve, ColorAction::Unchanged);
+        let (bytes, issues) = correct(&b, &facts, &MetadataLimits::default());
+        assert!(issues.is_empty(), "{issues:?}");
+        let bytes = bytes.unwrap();
+        assert_eq!(
+            &bytes[value_offset as usize..value_offset as usize + 6],
+            b"abcde\0"
+        );
+    }
+}

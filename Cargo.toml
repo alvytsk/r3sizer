@@ -4,6 +4,7 @@ members = [
     "crates/r3sizer-io",
     "crates/r3sizer",
     "crates/r3sizer-wasm",
+    "crates/r3sizer-metadata",
 ]
 resolver = "2"
 

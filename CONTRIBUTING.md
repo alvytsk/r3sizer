@@ -40,8 +40,11 @@ npm run dev           # starts Vite dev server
 
 ### TypeScript type regeneration
 
-When you change serializable types in `r3sizer-core/src/types.rs`, regenerate the
-TypeScript bindings and commit the result:
+When you change serializable types in `r3sizer-core/src/types.rs` **or**
+`r3sizer-metadata/src/types.rs` (the exporter includes the nine metadata
+types listed in `crates/r3sizer-core/tests/typegen.rs` via `r3sizer-core`'s
+dev-only `typegen` dependency on it; `MetadataLimits` in `limits.rs` is not
+exported), regenerate the TypeScript bindings and commit the result:
 
 ```sh
 cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
@@ -49,21 +52,31 @@ cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --no
 git add web/src/shared/lib/types/generated.ts
 ```
 
+CI re-runs this command and fails the `test` job with `git diff --exit-code`
+if the committed file is stale.
+
 ## Project structure
 
 ```
 crates/
-  r3sizer-core/   Pure image-processing library — no I/O.  This is the heart
-                  of the project; all algorithm work lives here.
-  r3sizer-io/     File I/O bridge: load PNG/JPEG/… → LinearRgbImage, save back.
-  r3sizer/        CLI (clap subcommands: process, sweep, diff, corpus, presets).
-  r3sizer-wasm/   WebAssembly bindings consumed by the web UI.
-web/              React 19 + Vite + Tailwind diagnostic UI.
-docs/             Algorithm notes, assumptions, CLI reference.
+  r3sizer-core/     Pure image-processing library — no I/O.  This is the heart
+                    of the project; all algorithm work lives here.
+  r3sizer-metadata/ Embedded-metadata extraction/correction/merging for
+                    JPEG/PNG/WebP (EXIF, XMP, IPTC, ICC, text, density).
+  r3sizer-io/       File I/O bridge: load PNG/JPEG/… → LinearRgbImage, save
+                    back, plus metadata-aware load_with_metadata/save_with_metadata.
+  r3sizer/          CLI (clap subcommands: process, sweep, diff, corpus, presets).
+  r3sizer-wasm/     WebAssembly bindings consumed by the web UI.
+web/                React 19 + Vite + Tailwind diagnostic UI.
+docs/               Algorithm notes, assumptions, CLI reference.
 ```
 
 Dependency direction is strict: `r3sizer-core` ← `r3sizer-io` ← `r3sizer`,
-and `r3sizer-core` ← `r3sizer-wasm`.  `r3sizer-core` must never depend on I/O.
+`r3sizer-core` ← `r3sizer-wasm`, and `r3sizer-metadata` ← `r3sizer-io`,
+`r3sizer-metadata` ← `r3sizer-wasm`.  `r3sizer-core` must never depend on I/O,
+and its only relationship to `r3sizer-metadata` is a **dev-only** dependency
+(feature `typegen`) used purely to generate TypeScript types — it is never
+linked in a production build of `r3sizer-core`.
 
 ## Pull request checklist
 
@@ -75,7 +88,8 @@ Before opening a PR, make sure:
 - [ ] `cargo doc --workspace --no-deps` is warning-free (`RUSTDOCFLAGS="-D warnings"`)
 - [ ] New public API has doc comments; internal helpers don't need them
 - [ ] Unsafe code has a `// SAFETY:` comment explaining the invariant
-- [ ] If you changed `types.rs`, regenerated `web/src/shared/lib/types/generated.ts`
+- [ ] If you changed `types.rs` (core or metadata), regenerated `web/src/shared/lib/types/generated.ts`
+- [ ] `wasm-pack test --node crates/r3sizer-wasm` passes, if you touched `r3sizer-wasm`
 
 CI enforces all of the above on every push and PR.
 
@@ -94,6 +108,11 @@ Use `r3sizer_core::prelude::*` to import the stable public surface only.
 
 Imperative subject line, ≤ 72 characters.  No ticket numbers required.
 Keep the body focused on *why*, not *what* (the diff shows what).
+
+## Releasing
+
+Versioning, crate publish order, and the release checklist are in
+[`docs/releasing.md`](docs/releasing.md).
 
 ## Reporting bugs
 

@@ -70,7 +70,23 @@ pub fn load_as_linear_with_limits(
     let (width, height) = image::ImageReader::open(path)?
         .with_guessed_format()?
         .into_dimensions()?;
+    check_dimensions(width, height, limits)?;
 
+    // --- Phase 2: full decode (dimensions are within budget) ---
+    let dyn_img = image::open(path)?;
+    decode_from_dynamic(dyn_img, width, height)
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers (used by `crate::metadata` too)
+// ---------------------------------------------------------------------------
+
+/// Reject `width`×`height` if it exceeds `limits`.
+pub(crate) fn check_dimensions(
+    width: u32,
+    height: u32,
+    limits: &DecodeLimits,
+) -> Result<(), IoError> {
     if width > limits.max_dimension || height > limits.max_dimension {
         return Err(IoError::TooLarge { width, height });
     }
@@ -78,9 +94,16 @@ pub fn load_as_linear_with_limits(
     if pixel_count > limits.max_pixels {
         return Err(IoError::TooLarge { width, height });
     }
+    Ok(())
+}
 
-    // --- Phase 2: full decode (dimensions are within budget) ---
-    let dyn_img = image::open(path)?;
+/// Convert an already-decoded [`image::DynamicImage`] (known to be
+/// `width`×`height`) into a linear-RGB `LinearRgbImage`.
+pub(crate) fn decode_from_dynamic(
+    dyn_img: image::DynamicImage,
+    width: u32,
+    height: u32,
+) -> Result<LinearRgbImage, IoError> {
     let rgb8 = dyn_img.into_rgb8();
     let bytes: Vec<u8> = rgb8.into_raw();
 

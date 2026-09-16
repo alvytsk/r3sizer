@@ -5,9 +5,13 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use r3sizer_core::SelectionMode;
-use r3sizer_io::{load_as_linear_with_limits, save_from_linear, DecodeLimits};
+use r3sizer_io::{
+    load_as_linear_with_limits, load_with_metadata, save_with_metadata, DecodeLimits,
+    MetadataLimits,
+};
 
 use crate::args::SweepArgs;
+use crate::metadata::write_metadata_warnings;
 use crate::run::{build_params, resolve_dimensions};
 
 /// Supported image extensions for sweep mode.
@@ -129,13 +133,26 @@ pub fn run_sweep(args: &SweepArgs) -> Result<()> {
         print!("  [{}/{}] {} ... ", i + 1, files.len(), file_path.display());
 
         match process_one(args, file_path) {
-            Ok(result) => {
+            Ok((result, metadata_report)) => {
                 println!(
                     "ok (s={:.4}, mode={:?}, {:.1}ms)",
                     result.selected_strength,
                     result.selection_mode,
                     result.total_us as f64 / 1000.0,
                 );
+                // A stderr write failure here is a genuine CLI-level error
+                // (existing anyhow `?` convention), not a processing
+                // failure of this file -- the save already succeeded, so
+                // it must not land in `errors`/`aggregate.failed`.
+                if let Some(report) = metadata_report {
+                    if let Some(ref out_path) = result.output {
+                        write_metadata_warnings(
+                            &mut std::io::stderr().lock(),
+                            Path::new(out_path),
+                            &report,
+                        )?;
+                    }
+                }
                 results.push(result);
             }
             Err(e) => {
@@ -219,30 +236,86 @@ fn find_images(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Process a single file and return the result summary.
-fn process_one(args: &SweepArgs, input_path: &Path) -> Result<FileResult> {
+/// A file's pixels, loaded either metadata-aware (when an output will
+/// actually be written) or pixel-only (no-output sweeps skip the extra
+/// metadata-extraction cost entirely).
+enum LoadedInput {
+    WithMetadata(r3sizer_io::LoadedImage),
+    PixelOnly(r3sizer_core::LinearRgbImage),
+}
+
+impl LoadedInput {
+    fn image(&self) -> &r3sizer_core::LinearRgbImage {
+        match self {
+            LoadedInput::WithMetadata(l) => &l.image,
+            LoadedInput::PixelOnly(img) => img,
+        }
+    }
+}
+
+/// Process a single file and return the result summary, plus the
+/// destination's metadata report when an output image was written.
+fn process_one(
+    args: &SweepArgs,
+    input_path: &Path,
+) -> Result<(FileResult, Option<r3sizer_io::MetadataReport>)> {
     let limits = DecodeLimits {
         max_pixels: args.pipeline.max_pixels,
         max_dimension: args.pipeline.max_dimension,
     };
-    let input = load_as_linear_with_limits(input_path, &limits)
-        .with_context(|| format!("failed to load: {}", input_path.display()))?;
+    let metadata_limits = MetadataLimits::default();
 
-    let (tw, th) = resolve_dimensions(&args.pipeline, input.width(), input.height())?;
+    // Metadata-aware loading only when out_dir is set (an output will
+    // actually be written); no-output sweeps stay on the cheaper
+    // pixel-only path.
+    let loaded = if args.out_dir.is_some() {
+        LoadedInput::WithMetadata(
+            load_with_metadata(input_path, &limits, &metadata_limits)
+                .with_context(|| format!("failed to load: {}", input_path.display()))?,
+        )
+    } else {
+        LoadedInput::PixelOnly(
+            load_as_linear_with_limits(input_path, &limits)
+                .with_context(|| format!("failed to load: {}", input_path.display()))?,
+        )
+    };
+
+    let (tw, th) = resolve_dimensions(
+        &args.pipeline,
+        loaded.image().width(),
+        loaded.image().height(),
+    )?;
     let params = build_params(&args.pipeline, tw, th);
 
-    let output =
-        r3sizer_core::process_auto_sharp_downscale(&input, &params).context("pipeline failed")?;
+    let output = r3sizer_core::process_auto_sharp_downscale(loaded.image(), &params)
+        .context("pipeline failed")?;
 
-    // Save output image if out_dir is set.
-    let output_path = if let Some(ref out_dir) = args.out_dir {
-        let stem = input_path.file_stem().unwrap_or_default();
-        let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
-        save_from_linear(&output.image, &out_file)
-            .with_context(|| format!("failed to save: {}", out_file.display()))?;
-        Some(out_file.display().to_string())
-    } else {
-        None
+    // Save output image if out_dir is set. Matched jointly on
+    // `(args.out_dir, &loaded)` rather than two independent `if`s on the
+    // same condition: `out_dir`'s presence and `loaded`'s variant are
+    // decided from the exact same `args.out_dir.is_some()` check above, so
+    // the two "impossible" combinations are guarded with `unreachable!()`
+    // instead of silently falling back to a pixel-only save that would
+    // skip the metadata merge and its warnings. If a future edit ever
+    // decouples the two checks, this fails loudly instead of quietly
+    // dropping metadata.
+    let mut metadata_report = None;
+    let output_path = match (args.out_dir.as_ref(), &loaded) {
+        (Some(out_dir), LoadedInput::WithMetadata(source)) => {
+            let stem = input_path.file_stem().unwrap_or_default();
+            let out_file = out_dir.join(format!("{}.png", stem.to_string_lossy()));
+            let report = save_with_metadata(&output.image, &out_file, source, &metadata_limits)
+                .with_context(|| format!("failed to save: {}", out_file.display()))?;
+            metadata_report = Some(report);
+            Some(out_file.display().to_string())
+        }
+        (None, LoadedInput::PixelOnly(_)) => None,
+        (Some(_), LoadedInput::PixelOnly(_)) => {
+            unreachable!("out_dir.is_some() implies metadata-aware loading was chosen above")
+        }
+        (None, LoadedInput::WithMetadata(_)) => {
+            unreachable!("out_dir.is_none() implies pixel-only loading was chosen above")
+        }
     };
 
     let diag = &output.diagnostics;
@@ -292,30 +365,33 @@ fn process_one(args: &SweepArgs, input_path: &Path) -> Result<FileResult> {
         .as_ref()
         .and_then(|cg| cg.effective_threshold_mean);
 
-    Ok(FileResult {
-        input: input_path.display().to_string(),
-        output: output_path,
-        selected_strength: diag.selected_strength,
-        selection_mode: diag.selection_mode.clone(),
-        fallback_reason: diag.fallback_reason,
-        measured_artifact_ratio: diag.measured_artifact_ratio,
-        measured_metric_value: diag.measured_metric_value,
-        fit_r_squared: diag.fit_quality.map(|q| q.r_squared),
-        monotonic: diag.robustness.map(|r| r.monotonic),
-        total_us: diag.timing.total_us,
-        gamut_excursion: ge,
-        halo_ringing: hr,
-        edge_overshoot: eo,
-        texture_flattening: tf,
-        composite_score: cs,
-        ringing_score,
-        envelope_scale,
-        edge_retention,
-        texture_retention,
-        effective_target_artifact_ratio: diag.effective_target_artifact_ratio,
-        chroma_clamped_fraction,
-        chroma_effective_threshold_mean,
-    })
+    Ok((
+        FileResult {
+            input: input_path.display().to_string(),
+            output: output_path,
+            selected_strength: diag.selected_strength,
+            selection_mode: diag.selection_mode.clone(),
+            fallback_reason: diag.fallback_reason,
+            measured_artifact_ratio: diag.measured_artifact_ratio,
+            measured_metric_value: diag.measured_metric_value,
+            fit_r_squared: diag.fit_quality.map(|q| q.r_squared),
+            monotonic: diag.robustness.map(|r| r.monotonic),
+            total_us: diag.timing.total_us,
+            gamut_excursion: ge,
+            halo_ringing: hr,
+            edge_overshoot: eo,
+            texture_flattening: tf,
+            composite_score: cs,
+            ringing_score,
+            envelope_scale,
+            edge_retention,
+            texture_retention,
+            effective_target_artifact_ratio: diag.effective_target_artifact_ratio,
+            chroma_clamped_fraction,
+            chroma_effective_threshold_mean,
+        },
+        metadata_report,
+    ))
 }
 
 fn percentile(sorted: &[f32], p: f32) -> f32 {

@@ -1,0 +1,36 @@
+[package]
+name                   = "r3sizer-metadata"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+description            = "Metadata extraction, reporting, and merging for image formats"
+readme                 = "README.md"
+keywords               = ["metadata", "exif", "xmp", "image"]
+categories             = ["multimedia::images"]
+
+[dependencies]
+serde       = { workspace = true }
+serde_bytes = "0.11"
+ts-rs       = { workspace = true, optional = true }
+crc32fast   = "1"
+flate2      = { version = "1", default-features = false, features = ["rust_backend"] }
+# default-features = false: keeps the optional `encoding` feature (non-UTF-8
+# autodetection via encoding_rs) off, so input is UTF-8 only. quick-xml never
+# fetches DTDs or resolves external entities over the network regardless of
+# features -- it's a pull parser, not a validating processor -- and doctype
+# events are rejected outright by xmp.rs before any DTD content is inspected.
+quick-xml   = { version = "0.38", default-features = false }
+img-parts = "0.4.0"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+exif        = { package = "kamadak-exif", version = "0.6" }
+image       = { workspace = true, features = ["jpeg", "png", "webp"] }
+
+[features]
+default  = []
+typegen  = ["dep:ts-rs"]

@@ -1,3 +1,4 @@
+import type { MetadataExportRequest, MetadataExportResponse } from "@/shared/lib";
 import {
   clear_cache,
   compute_probe_detail,
@@ -9,6 +10,7 @@ import {
   initSync,
   prepare_base,
   prepare_image,
+  preserve_metadata,
   process_from_probes,
   process_image,
   resolve_dense_strengths,
@@ -32,7 +34,8 @@ export interface WorkerRequest {
     | "ingest_begin"
     | "ingest_stripe"
     | "ingest_end"
-    | "ingest_abort";
+    | "ingest_abort"
+    | "metadata_export";
   module?: WebAssembly.Module;
   id?: number;
   rgbaData?: Uint8Array;
@@ -47,6 +50,7 @@ export interface WorkerRequest {
   targetWidth?: number;
   targetHeight?: number;
   rows?: number;
+  metadataRequest?: MetadataExportRequest;
 }
 
 export interface WorkerResponse {
@@ -61,7 +65,8 @@ export interface WorkerResponse {
     | "strengths"
     | "dense_result"
     | "cache_cleared"
-    | "ingest_result";
+    | "ingest_result"
+    | "metadata_exported";
   id?: number;
   stage?: string;
   result?: {
@@ -82,6 +87,7 @@ export interface WorkerResponse {
   strengthsJson?: string;
   denseResult?: string | null;
   ingest?: { width: number; height: number } | null;
+  metadataResponse?: MetadataExportResponse;
   error?: string;
 }
 
@@ -192,6 +198,25 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   if (msg.type === "ingest_abort") {
     // Fire-and-forget: drop partial ingest state.
     if (ready) ingest_abort();
+    return;
+  }
+
+  if (msg.type === "metadata_export") {
+    const { id } = msg;
+    try {
+      if (!ready) throw new Error("WASM not initialized");
+      const response = preserve_metadata(msg.metadataRequest!) as MetadataExportResponse;
+      (self as unknown as Worker).postMessage(
+        { type: "metadata_exported", id, metadataResponse: response } satisfies WorkerResponse,
+        [response.bytes.buffer as ArrayBuffer],
+      );
+    } catch (err) {
+      (self as unknown as Worker).postMessage({
+        type: "metadata_exported",
+        id,
+        error: err instanceof Error ? err.message : String(err),
+      } satisfies WorkerResponse);
+    }
     return;
   }
 

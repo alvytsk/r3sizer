@@ -43,7 +43,17 @@ import * as ingest from "./ingest";
 import * as wasm from "./wasm";
 
 function fakeBitmap(width: number, height: number): ImageBitmap {
-  return { width, height, close: () => {} } as unknown as ImageBitmap;
+  return { width, height, close: vi.fn() } as unknown as ImageBitmap;
+}
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function params(): AutoSharpParams {
@@ -149,6 +159,99 @@ describe("ProcessingClient", () => {
       expect(overalls[i]).toBeGreaterThanOrEqual(overalls[i - 1]);
     }
     expect(overalls.at(-1)).toBeCloseTo(1, 5);
+  });
+
+  it("captures the source file in the processing job", async () => {
+    const file = new File(["source A"], "a.jpg");
+    await client.decode(file);
+    const job = client.process(params());
+    expect(job.sourceFile).toBe(file);
+    await job.promise;
+  });
+
+  it("keeps the latest requested decode and closes discarded bitmaps", async () => {
+    for (const order of ["b-first", "a-first"] as const) {
+      const a = deferred<ImageBitmap>();
+      const b = deferred<ImageBitmap>();
+      const bitmapA = fakeBitmap(40, 30);
+      const bitmapB = fakeBitmap(40, 30);
+      vi.mocked(ingest.decodeToBitmap)
+        .mockReturnValueOnce(a.promise)
+        .mockReturnValueOnce(b.promise);
+      const fileA = new File(["a"], "a.jpg");
+      const fileB = new File(["b"], "b.jpg");
+      const decodeA = client.decode(fileA);
+      const decodeB = client.decode(fileB);
+      if (order === "b-first") {
+        b.resolve(bitmapB);
+        await decodeB;
+        a.resolve(bitmapA);
+        await expect(decodeA).rejects.toBeInstanceOf(CancelledError);
+      } else {
+        a.resolve(bitmapA);
+        await expect(decodeA).rejects.toBeInstanceOf(CancelledError);
+        b.resolve(bitmapB);
+        await decodeB;
+      }
+      expect(bitmapA.close).toHaveBeenCalled();
+      expect(bitmapB.close).not.toHaveBeenCalled();
+      const job = client.process(params());
+      expect(job.sourceFile).toBe(fileB);
+      await job.promise;
+    }
+  });
+
+  it("ignores a stale decode error", async () => {
+    const a = deferred<ImageBitmap>();
+    vi.mocked(ingest.decodeToBitmap)
+      .mockReturnValueOnce(a.promise)
+      .mockResolvedValueOnce(fakeBitmap(40, 30));
+    const decodeA = client.decode(new File(["a"], "a.jpg"));
+    const fileB = new File(["b"], "b.jpg");
+    await client.decode(fileB);
+    a.reject(new Error("decode failed"));
+    await expect(decodeA).rejects.toThrow();
+    expect(client.process(params()).sourceFile).toBe(fileB);
+  });
+
+  it("cancels the active job before replacing the decoded input", async () => {
+    const pending = deferred<never>();
+    vi.mocked(wasm.processImageParallel).mockReturnValueOnce(pending.promise);
+    const oldBitmap = fakeBitmap(40, 30);
+    vi.mocked(ingest.decodeToBitmap).mockResolvedValueOnce(oldBitmap);
+    await client.decode(new File(["a"], "a.jpg"));
+    const job = client.process(params());
+    const cancel = vi.spyOn(job, "cancel");
+    const next = client.decode(new File(["b"], "b.jpg"));
+    expect(cancel).toHaveBeenCalled();
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(oldBitmap.close).mock.invocationCallOrder[0],
+    );
+    await next;
+  });
+
+  it("settles a striped job cancelled by a new decode as CancelledError", async () => {
+    const stripe = deferred<void>();
+    vi.mocked(wasm.ingestStripe).mockReturnValueOnce(stripe.promise);
+    vi.mocked(ingest.extractStripes).mockImplementationOnce(async function* (bitmap) {
+      yield { rgba: new Uint8Array(8), rows: 1024 };
+      // Drawing a closed bitmap throws before the loop's cancellation check.
+      if (vi.mocked(bitmap.close).mock.calls.length > 0) {
+        throw new DOMException("The image source is detached", "InvalidStateError");
+      }
+      yield { rgba: new Uint8Array(8), rows: 1024 };
+    });
+    await client.decode(new File(["a"], "a.jpg")); // 8000x6000 -> striped
+    const job = client.process(params()); // 10x shrink -> striped job
+    await vi.waitFor(() => expect(wasm.ingestStripe).toHaveBeenCalled());
+
+    // Loading a new file cancels job A and closes its bitmap mid-ingest.
+    const next = client.decode(new File(["b"], "b.jpg"));
+    stripe.resolve();
+
+    await expect(job.promise).rejects.toBeInstanceOf(CancelledError);
+    expect(wasm.ingestAbortFireAndForget).toHaveBeenCalled();
+    await next;
   });
 
   it("reset terminates workers and the probe pool", async () => {

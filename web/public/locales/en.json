@@ -146,7 +146,31 @@
     "max": "Max",
     "high": "High",
     "std": "Std",
-    "low": "Low"
+    "low": "Low",
+    "preparing": "Preparing download\u2026",
+    "metadataPartial": "Download prepared. Some original metadata could not be retained.",
+    "metadataIssue": "{{category}}: {{reason}}",
+    "metadataIssueField": "{{category}} ({{field}}): {{reason}}",
+    "exportFailed": "Could not prepare the image download.",
+    "metadataCategory": {
+      "exif": "EXIF",
+      "xmp": "XMP",
+      "iptc": "IPTC",
+      "icc": "Color profile",
+      "text": "Text",
+      "thumbnail": "Thumbnail",
+      "maker_note": "Camera maker notes",
+      "density": "Pixel density",
+      "unknown": "Other metadata"
+    },
+    "metadataReason": {
+      "unsupported": "Unsupported",
+      "malformed": "Invalid metadata",
+      "removed_stale": "Removed because it no longer matches the image",
+      "unverified": "Preservation could not be verified",
+      "limit_exceeded": "Metadata size limit exceeded",
+      "merge_failed": "Metadata could not be added"
+    }
   },
   "status": {
     "ready": "Ready",

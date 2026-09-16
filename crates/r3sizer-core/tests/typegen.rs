@@ -23,6 +23,10 @@ use r3sizer_core::{
     ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams, SelectionMode,
     SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
 };
+use r3sizer_metadata::{
+    ColorAction, MetadataCategory, MetadataExportRequest, MetadataExportResponse, MetadataIssue,
+    MetadataIssueReason, MetadataReport, OrientationAction, OutputFacts,
+};
 
 #[test]
 fn export_typescript_bindings() {
@@ -30,7 +34,7 @@ fn export_typescript_bindings() {
     let cfg = Config::new().with_large_int("number");
 
     let header = "\
-// Auto-generated from r3sizer-core Rust types. DO NOT EDIT.
+// Auto-generated from r3sizer-core and r3sizer-metadata Rust types. DO NOT EDIT.
 //
 // Regenerate with:
 //   cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture
@@ -114,6 +118,16 @@ fn export_typescript_bindings() {
             Severity::decl(&cfg),
             ParamPatch::decl(&cfg),
             Recommendation::decl(&cfg),
+            // ── Metadata boundary types (r3sizer-metadata) ─────────────────
+            MetadataCategory::decl(&cfg),
+            MetadataIssueReason::decl(&cfg),
+            MetadataIssue::decl(&cfg),
+            MetadataReport::decl(&cfg),
+            OrientationAction::decl(&cfg),
+            ColorAction::decl(&cfg),
+            OutputFacts::decl(&cfg),
+            MetadataExportRequest::decl(&cfg),
+            MetadataExportResponse::decl(&cfg),
         ]);
         d
     };

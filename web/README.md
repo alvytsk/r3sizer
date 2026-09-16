@@ -1,7 +1,9 @@
 # r3sizer — web client
 
 React + TypeScript + Vite frontend for the r3sizer image-processing pipeline.
-Calls into the core algorithm via a WebAssembly module compiled from `crates/r3sizer-wasm`.
+Calls into the core algorithm via a WebAssembly module compiled from `crates/r3sizer-wasm`,
+which also links `crates/r3sizer-metadata` to preserve embedded image metadata
+(EXIF/XMP/IPTC/ICC/text/density) through exports — see [Metadata preservation](#metadata-preservation).
 
 ## Prerequisites
 
@@ -74,3 +76,29 @@ BuildKit cache mounts are used for the Cargo registry and npm cache, so incremen
 ```sh
 npm run lint
 ```
+
+## Metadata preservation
+
+Downloading a processed image preserves its embedded metadata (EXIF, XMP,
+IPTC, ICC, text, density) by default for JPEG/PNG/WebP — no companion files;
+metadata is embedded in the downloaded image itself. Each output stays bound
+to the source `File` it came from, so export always extracts metadata from
+the correct original.
+
+When metadata can't be fully carried over (unsupported source/destination
+combination, malformed metadata, an unverifiable color profile, limits
+exceeded), the download still succeeds and a visible, localized
+`role="status"` warning is shown — the export never silently drops metadata
+without telling you, and a worker/extraction failure falls back to the
+original encoded output rather than blocking the download. This is not a
+complete enumeration of every possible metadata field or loss case; see
+[`crates/r3sizer-metadata`](../crates/r3sizer-metadata/README.md) for the
+full capability/limit list, and
+[`docs/testing/metadata-export.md`](../docs/testing/metadata-export.md) for
+the browser verification recipe and observed results.
+
+Ingestion decodes images with `imageOrientation: "from-image"` (orientation
+already applied to the pixels shown/exported) and requests sRGB canvas
+contexts throughout; export reports `color: "unverified"` unless the canvas
+context's own reported color space actually confirms sRGB, rather than
+assuming it.

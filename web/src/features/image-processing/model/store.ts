@@ -36,7 +36,8 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
   error: null,
 
   process: async () => {
-    const { params, inputFile } = useImageStore.getState();
+    // Capture before awaiting the job; never read current input after it finishes.
+    const { params, inputFile, paramsVersion } = useImageStore.getState();
     if (!inputFile) {
       set({ error: "No image loaded" });
       return;
@@ -44,11 +45,16 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
 
     set({ isProcessing: true, progress: null, error: null });
 
+    let job: ProcessJob | null = null;
     try {
-      const job = processingClient.process(params);
+      job = processingClient.process(params);
       currentJob = job;
-      job.onProgress(({ stage, overall }) => set({ progress: { stage, overall } }));
+      job.onProgress(({ stage, overall }) => {
+        if (currentJob === job) set({ progress: { stage, overall } });
+      });
       const result = await job.promise;
+      // A newer job or a reset superseded this one.
+      if (currentJob !== job) return;
 
       useOutputStore.getState().setResult({
         imageData: result.imageData,
@@ -56,11 +62,13 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
         outputHeight: result.outputHeight,
         diagnostics: result.diagnostics,
         params,
-        paramsVersion: useImageStore.getState().paramsVersion,
+        paramsVersion,
+        sourceFile: job.sourceFile,
       });
 
       set({ isProcessing: false, progress: null });
     } catch (e) {
+      if (job && currentJob !== job) return;
       if (e instanceof CancelledError) {
         set({ isProcessing: false, progress: null });
       } else {
@@ -71,7 +79,7 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
         });
       }
     } finally {
-      currentJob = null;
+      if (currentJob === job) currentJob = null;
     }
   },
 
@@ -83,6 +91,7 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
 
   resetProcessing: () => {
     currentJob?.cancel();
+    currentJob = null;
     useOutputStore.getState().clearOutput();
     set({ isProcessing: false, progress: null, error: null });
   },

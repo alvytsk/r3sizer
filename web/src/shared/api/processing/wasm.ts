@@ -1,4 +1,4 @@
-import type { ProcessResult } from "@/shared/lib";
+import type { MetadataExportRequest, MetadataExportResponse, ProcessResult } from "@/shared/lib";
 import type { CancellationToken } from "./errors";
 import { CancelledError } from "./errors";
 import type { BaseData } from "./probe-pool";
@@ -122,6 +122,8 @@ function ensureWorker(): Promise<void> {
               cb.resolve(undefined);
             } else if (data.type === "cache_cleared") {
               cb.resolve(undefined);
+            } else if (data.type === "metadata_exported") {
+              cb.resolve(data.metadataResponse);
             }
           }
         };
@@ -463,6 +465,21 @@ export async function ingestEnd(): Promise<IngestDims> {
 /** Fire-and-forget: drop partial WASM ingest state (cancellation path). */
 export function ingestAbortFireAndForget(): void {
   worker?.postMessage({ type: "ingest_abort" } as WorkerRequest);
+}
+
+/**
+ * Merge source metadata into encoded output bytes in the main worker.
+ * Transfers (detaches) `request.source` and `request.encoded` buffers:
+ * pass fresh copies, never buffers the app still holds.
+ */
+export async function exportMetadata(
+  request: MetadataExportRequest,
+): Promise<MetadataExportResponse> {
+  await ensureWorker();
+  return callWorkerTransfer<MetadataExportResponse>(
+    { type: "metadata_export", metadataRequest: request },
+    [request.source.buffer as ArrayBuffer, request.encoded.buffer as ArrayBuffer],
+  );
 }
 
 /**
