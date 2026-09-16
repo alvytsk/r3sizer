@@ -276,7 +276,9 @@ pub fn luminance_from_linear_srgb(r: f32, g: f32, b: f32) -> f32 {
 /// Returns a `Vec<f32>` of length `width * height`.
 pub fn extract_luminance(img: &LinearRgbImage) -> Vec<f32> {
     img.pixels()
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|rgb| luminance_from_linear_srgb(rgb[0], rgb[1], rgb[2]))
         .collect()
 }

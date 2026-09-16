@@ -32,7 +32,9 @@ pub fn pixel_out_of_gamut_ratio(img: &LinearRgbImage) -> f32 {
         return 0.0;
     }
     let oog: u32 = pixels
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|rgb| {
             let bad = (rgb[0] < 0.0 || rgb[0] > 1.0)
                 | (rgb[1] < 0.0 || rgb[1] > 1.0)

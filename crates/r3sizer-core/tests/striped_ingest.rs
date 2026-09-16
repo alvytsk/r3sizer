@@ -27,7 +27,7 @@ fn synthetic_rgba(w: u32, h: u32) -> Vec<u8> {
 
 fn linear_from_rgba(rgba: &[u8], w: u32, h: u32) -> LinearRgbImage {
     let mut out = Vec::with_capacity((w * h * 3) as usize);
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         out.push(SRGB_U8_TO_LINEAR[px[0] as usize]);
         out.push(SRGB_U8_TO_LINEAR[px[1] as usize]);
         out.push(SRGB_U8_TO_LINEAR[px[2] as usize]);

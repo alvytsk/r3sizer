@@ -1543,8 +1543,10 @@ fn adaptive_sharpen_with_validation(
             let apply_at_scale = |scale: f32| -> LinearRgbImage {
                 let eff_strength = global_strength * scale;
                 let out: Vec<f32> = src_px
-                    .chunks_exact(3)
-                    .zip(blur_px.chunks_exact(3))
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .zip(blur_px.as_chunks::<3>().0.iter())
                     .zip(gain_data.iter())
                     .flat_map(|((s, b), &g)| {
                         let eff = eff_strength * g;
