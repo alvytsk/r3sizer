@@ -20,7 +20,7 @@ pub fn rgba_u8_to_linear(
     }
 
     let mut rgb = Vec::with_capacity(pixel_count * 3);
-    for chunk in data.chunks_exact(4) {
+    for chunk in data.as_chunks::<4>().0 {
         rgb.push(SRGB_U8_TO_LINEAR[chunk[0] as usize]);
         rgb.push(SRGB_U8_TO_LINEAR[chunk[1] as usize]);
         rgb.push(SRGB_U8_TO_LINEAR[chunk[2] as usize]);
@@ -37,7 +37,7 @@ pub fn linear_to_rgba_u8(img: &LinearRgbImage) -> Vec<u8> {
     let pixel_count = (img.width() as usize) * (img.height() as usize);
     let mut out = Vec::with_capacity(pixel_count * 4);
 
-    for chunk in img.pixels().chunks_exact(3) {
+    for chunk in img.pixels().as_chunks::<3>().0 {
         let r = (linear_to_srgb_fast(chunk[0]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
         let g = (linear_to_srgb_fast(chunk[1]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
         let b = (linear_to_srgb_fast(chunk[2]) * 255.0 + 0.5).clamp(0.0, 255.0) as u8;

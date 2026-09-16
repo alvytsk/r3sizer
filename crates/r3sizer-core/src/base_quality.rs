@@ -61,7 +61,9 @@ fn pixel_luma(r: f32, g: f32, b: f32) -> f32 {
 
 fn extract_luma(img: &LinearRgbImage) -> Vec<f32> {
     img.pixels()
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|rgb| pixel_luma(rgb[0], rgb[1], rgb[2]))
         .collect()
 }
@@ -307,7 +309,9 @@ mod tests {
         let h = 4;
         let luma: Vec<f32> = img
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| pixel_luma(rgb[0], rgb[1], rgb[2]))
             .collect();
         let score = compute_ringing_score(&luma, w, h);
@@ -323,7 +327,9 @@ mod tests {
         let h = 4;
         let luma: Vec<f32> = img
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| pixel_luma(rgb[0], rgb[1], rgb[2]))
             .collect();
         let score = compute_ringing_score(&luma, w, h);

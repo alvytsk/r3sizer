@@ -96,11 +96,11 @@ git diff --exit-code -- web/src/shared/lib/types/generated.ts
 wasm-pack test --node crates/r3sizer-wasm
 ```
 
-Check the declared minimum Rust version (`rust-version = "1.87"`):
+Check the declared minimum Rust version (`rust-version = "1.88"`):
 
 ```sh
-rustup toolchain install 1.87   # once
-cargo +1.87 check --workspace
+rustup toolchain install 1.88   # once
+cargo +1.88 check --workspace
 ```
 
 If this fails, either fix the code or raise `rust-version` and record that in

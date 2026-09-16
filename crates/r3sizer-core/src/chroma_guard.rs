@@ -368,7 +368,7 @@ pub fn evaluate_in_color_space(img: &LinearRgbImage, color_space: EvaluationColo
                 return 0.0;
             }
             let mut out = 0u32;
-            for pixel in data.chunks_exact(3) {
+            for pixel in data.as_chunks::<3>().0 {
                 let (l, a, b) = linear_rgb_to_lab_approx(pixel[0], pixel[1], pixel[2]);
                 if !(0.0..=100.0).contains(&l)
                     || !(-128.0..=128.0).contains(&a)

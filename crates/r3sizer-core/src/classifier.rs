@@ -287,7 +287,9 @@ pub fn classify(image: &LinearRgbImage, params: &ClassificationParams) -> Region
     // Pass 0: luminance extraction
     let luma: Vec<f32> = image
         .pixels()
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|rgb| luminance(rgb[0], rgb[1], rgb[2]))
         .collect();
 

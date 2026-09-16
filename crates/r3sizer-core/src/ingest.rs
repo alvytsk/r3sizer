@@ -160,7 +160,7 @@ impl StripedPreReducer {
             let y = self.next_row as usize + r;
             let (jy, wy0, wy1) = self.y_weights.spans[y];
             let row = &rgba[r * row_bytes..(r + 1) * row_bytes];
-            for (x, px) in row.chunks_exact(4).enumerate() {
+            for (x, px) in row.as_chunks::<4>().0.iter().enumerate() {
                 let rgb = [
                     SRGB_U8_TO_LINEAR[px[0] as usize],
                     SRGB_U8_TO_LINEAR[px[1] as usize],
@@ -473,7 +473,7 @@ mod tests {
             SRGB_U8_TO_LINEAR[64],
             SRGB_U8_TO_LINEAR[200],
         ];
-        for px in out.pixels().chunks_exact(3) {
+        for px in out.pixels().as_chunks::<3>().0 {
             for c in 0..3 {
                 assert!((px[c] - expected[c]).abs() < 1e-6);
             }
@@ -619,7 +619,7 @@ mod tests {
         // Reference: same quantized pixels, linearized identically, then the
         // staged path's bilinear pre-reduce.
         let mut linear = Vec::with_capacity((src.width * src.height * 3) as usize);
-        for px in rgba.chunks_exact(4) {
+        for px in rgba.as_chunks::<4>().0 {
             linear.push(SRGB_U8_TO_LINEAR[px[0] as usize]);
             linear.push(SRGB_U8_TO_LINEAR[px[1] as usize]);
             linear.push(SRGB_U8_TO_LINEAR[px[2] as usize]);

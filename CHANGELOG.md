@@ -9,6 +9,8 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-16
+
 ### Added
 
 #### CI / toolchain
@@ -122,6 +124,8 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ### Changed
 
+- **Minimum supported Rust version raised to 1.88** (was 1.87): the `image` 0.25.10
+  dependency requires it.
 - **Crate renamed:** `r3sizer-cli` → `r3sizer` so that `cargo install r3sizer`
   works naturally.  The produced binary name (`r3sizer`) is unchanged.
 - `README.md` CLI examples updated to use the new subcommand syntax
@@ -136,4 +140,6 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ---
 
-[Unreleased]: https://github.com/alvytsk/r3sizer/compare/HEAD...HEAD
+[Unreleased]: https://github.com/alvytsk/r3sizer/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/alvytsk/r3sizer/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/alvytsk/r3sizer/compare/v0.8.0...v0.9.0

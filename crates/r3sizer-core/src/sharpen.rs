@@ -416,8 +416,10 @@ pub fn adaptive_sharpen_rgb(
     let gain_data = gain_map.data();
 
     let out: Vec<f32> = src_px
-        .chunks_exact(3)
-        .zip(blur_px.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(blur_px.as_chunks::<3>().0.iter())
         .zip(gain_data.iter())
         .flat_map(|((s, b), &g)| {
             let eff = strength * g;
@@ -633,7 +635,9 @@ mod tests {
         let src = gradient(16, 16);
         let luma: Vec<f32> = src
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 1.0);
@@ -650,7 +654,9 @@ mod tests {
         let src = gradient(16, 16);
         let luma: Vec<f32> = src
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let gain_map = make_gain_map(16, 16, 0.0);
@@ -719,7 +725,9 @@ mod tests {
         let src = gradient(16, 16);
         let luma: Vec<f32> = src
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -754,7 +762,9 @@ mod tests {
         let src = gradient(16, 16);
         let luma: Vec<f32> = src
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
@@ -777,7 +787,9 @@ mod tests {
         let src = gradient(16, 16);
         let luma: Vec<f32> = src
             .pixels()
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|rgb| 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2])
             .collect();
         let kernel = gaussian_kernel(1.0);
