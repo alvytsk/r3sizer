@@ -7,6 +7,7 @@ This document describes the pipeline implemented in `r3sizer-core`.
 ## Stage overview
 
 ```
+0.   Metadata extraction         (r3sizer-metadata / extract)  -- no pixel decoding
 1.   Input decoding              (r3sizer-io / load.rs)
 1.5. Input color-space ingress   (color_space.rs)        -- experimental, optional
 2.   sRGB -> linear RGB          (color.rs)
@@ -33,7 +34,13 @@ This document describes the pipeline implemented in `r3sizer-core`.
 10.  Clamp + output              (pipeline.rs + color.rs)
 11.  Recommendations             (recommendations.rs)
 12.  Save                        (r3sizer-io / save.rs)
+12a. Metadata merge              (r3sizer-metadata / merge)    -- JPEG/PNG/WebP only
 ```
+
+Stages 0 and 12a carry embedded metadata from the source file to the output.
+They never touch pixels, and they never change the result of stages 1 to 11.
+A caller that does not want metadata simply uses `load_as_linear` and
+`save_from_linear` instead, and the pixel pipeline is identical.
 
 ---
 
@@ -43,6 +50,14 @@ This document describes the pipeline implemented in `r3sizer-core`.
 converts to `Rgb8`, normalises bytes to f32 [0, 1], and immediately applies
 the sRGB -> linear transform.  The returned `LinearRgbImage` is already in
 linear light.
+
+`r3sizer-io::load_with_metadata` is the additive variant. It decodes the same
+pixels and, in the same read, calls `r3sizer_metadata::extract` on the raw
+bytes. It returns a `LoadedImage` holding the `LinearRgbImage` plus the
+extracted metadata inventory. The extractor sniffs the container and scans the
+EXIF, XMP, IPTC, ICC, text, density, thumbnail, and MakerNote payloads without
+decoding image data. All scanning is bounded by `MetadataLimits`, so a hostile
+or corrupt file degrades to a reported issue rather than a panic or a hang.
 
 ---
 
@@ -298,12 +313,13 @@ output[i] = input[i] + amount * (input[i] - gaussian_blur(input, sigma)[i])
 
 ### Default probe strengths
 
-```
-[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]
-```
+The default is `ProbeConfig::TwoPass`, not a fixed list. The coarse pass places 7
+uniformly spaced probes over `[0.003, 1.0]`. The dense pass then adds 4 probes
+inside the bracket found by the coarse pass. Early stopping ends the coarse pass
+as soon as 3 or more probes bracket P0.
 
-Non-uniform, denser near zero where the crossing typically occurs.  Configurable
-via `ProbeConfig::Explicit` or `ProbeConfig::Range`.
+Configure a fixed grid with `ProbeConfig::Explicit`, or a linear grid with
+`ProbeConfig::Range`.
 
 ---
 
@@ -579,6 +595,58 @@ Stored in `AutoSharpDiagnostics::recommendations`.
 
 ---
 
+## Stage 12: Save and metadata preservation
+
+`r3sizer-io::save_from_linear` encodes the clamped sRGB image and writes it to
+disk. Format is inferred from the output extension.
+
+`r3sizer-io::save_with_metadata` is the additive variant. It encodes the same
+pixels, then calls `r3sizer_metadata::merge` to re-embed the source metadata
+into those encoded bytes before the write. It returns a `MetadataReport`.
+
+### What merge does
+
+The merge step receives an `OutputFacts` record describing the actual output:
+its dimensions, the orientation action applied, and the color action applied.
+It uses those facts to bound-correct the metadata it copies, so the output does
+not carry stale claims:
+
+- EXIF and XMP dimension fields are rewritten to the real output size.
+- The EXIF orientation tag is reconciled with the orientation already baked into
+  the pixels, so the image is not rotated twice by a viewer.
+- The color-space tag is corrected, or reported as unverified.
+
+### Scope
+
+| Aspect | Behaviour |
+|---|---|
+| Container support | JPEG, PNG, and WebP. Other formats process pixels normally and carry nothing over |
+| Preserved when verifiable | EXIF, XMP, IPTC, ICC, text chunks, pixel density |
+| Never preserved, by design | MakerNote payloads, embedded previews and thumbnails, extended XMP |
+| ICC profiles | Retained only when the destination's own declared profile can be verified to match the source's. Otherwise dropped and reported as unverified |
+| Sidecar files | None. Metadata is embedded in the output image itself |
+| Filesystem timestamps and permissions | Out of scope |
+
+Every skipped, corrected, or dropped field becomes a typed `MetadataIssue` on
+the `MetadataReport`, carrying a `category`, a `reason`, and an optional
+`field`. Nothing is dropped silently, and the report never claims completeness.
+
+### Where the report surfaces
+
+- **CLI**: on stderr only, one line per issue, as
+  `warning: <output path>: metadata <category>/<reason> (<field>)`. Issues never
+  reach stdout, `--diagnostics` JSON, or a sweep's `summary.json`.
+- **Web**: the WASM `preserve_metadata` export runs the same extract and merge
+  at the JS boundary, over already-encoded bytes. A download export shows a
+  localized warning when the report carries issues. A failed extract or merge
+  falls back to the original encoded blob rather than blocking the download.
+
+`r3sizer-core` never links metadata handling in a production build. Its only
+edge to `r3sizer-metadata` is a dev-only dependency behind the `typegen`
+feature, used to emit the metadata contract types into `generated.ts`.
+
+---
+
 ## Per-stage timing
 
 Every pipeline invocation records wall-clock microsecond timing via `StageTiming`:
@@ -686,21 +754,26 @@ Extended probing with a wider dense window and full diagnostics.
 
 | Parameter | Default |
 |---|---|
-| `probe_strengths` | `[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]` |
-| `target_artifact_ratio` | `0.001` (0.1%) |
+| `probe_strengths` | `TwoPass { coarse_count: 7, coarse_min: 0.003, coarse_max: 1.0, dense_count: 4, window_margin: 0.5 }` |
+| `target_artifact_ratio` | `0.003` (0.3%) |
 | `sharpen_sigma` | `1.0` |
 | `sharpen_mode` | `Lightness` |
 | `metric_mode` | `RelativeToBase` |
 | `artifact_metric` | `ChannelClippingRatio` |
+| `metric_weights` | `MetricWeights::default()` (1.0, 0.3, 0.3, 0.1) |
+| `selection_policy` | `GamutOnly` |
 | `fit_strategy` | `Cubic` |
 | `output_clamp` | `Clamp` |
-| `sharpen_strategy` | `Uniform` |
+| `sharpen_strategy` | `ContentAdaptive { gain_table: v03_default, max_backoff_iterations: 4, backoff_scale_factor: 0.8 }` |
 | `diagnostics_level` | `Summary` |
-| `experimental_sharpen_mode` | `Some(LumaPlusChromaGuard { max_chroma_shift: 0.10 })` (**on by default**) |
+| `experimental_sharpen_mode` | `Some(LumaPlusChromaGuard { max_chroma_shift: 0.25, chroma_region_factors: default, saturation_guard: default })` (**on by default**) |
 | `evaluator_config` | `Some(Heuristic)` (**on by default**) |
 | `input_color_space` | `None` (Srgb) |
 | `resize_strategy` | `None` (Lanczos3) |
 | `evaluation_color_space` | `None` (Rgb) |
+| `pipeline_mode` | `None` (resolve to `Balanced` via `resolved()`) |
 
-The last two rows (chroma guard and evaluator) changed in v0.5 — callers that need
-the minimal baseline should set both to `None` explicitly.
+`AutoSharpParams::default()` equals the **Photo** preset. Chroma guard and the
+evaluator are on by default since v0.5. Callers that need the minimal baseline
+must set `experimental_sharpen_mode` and `evaluator_config` to `None`
+explicitly, and set `sharpen_strategy` to `Uniform`.

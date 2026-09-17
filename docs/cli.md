@@ -140,7 +140,7 @@ r3sizer presets show photo
 | `--height` | `-H` | — | Target height (px) |
 | `--preserve-aspect-ratio` | `-p` | off | Compute missing dimension from input aspect ratio |
 | `--target-artifact-ratio` | | `0.003` | P0 threshold (fraction, not percent) |
-| `--preset` | | — | Named preset: `photo` (default), `precision` |
+| `--preset` | | — | Named preset. Stable: `photo` (default), `precision`. Legacy: `baseline`, `v3-adaptive`, `v5-full`, `v5-two-pass` |
 | `--diagnostics` | | — | Path to write JSON diagnostics (`process` only) |
 | `--diagnostics-level` | | `summary` | `summary` or `full` (per-probe breakdowns) |
 | `--output-format` | | `text` | `text` or `json` (`process` only) |
@@ -153,3 +153,5 @@ r3sizer presets show photo
 | `--selection-policy` | | `gamut-only` | `gamut-only`, `hybrid`, or `composite-only` |
 | `--enable-contrast-leveling` | | off | Enable contrast leveling stage (placeholder) |
 | `--mode` | | `balanced` | Performance-quality tradeoff: `fast`, `balanced`, `quality` |
+| `--max-pixels` | | `100000000` | Reject inputs whose width x height exceeds this count |
+| `--max-dimension` | | `16384` | Reject inputs whose width or height exceeds this value (px) |
