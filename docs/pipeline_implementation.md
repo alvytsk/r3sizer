@@ -4,6 +4,27 @@ Detailed walkthrough of the `process_auto_sharp_downscale` pipeline as implement
 
 ---
 
+## Scope: what is outside this pipeline
+
+`r3sizer-core` handles pixels only. Two concerns sit outside every stage below,
+at the caller's boundary:
+
+| Concern | Crate | Entry points |
+|---|---|---|
+| File decode and encode | `r3sizer-io` | `load_as_linear`, `save_from_linear` |
+| Embedded metadata | `r3sizer-metadata`, via `r3sizer-io` | `load_with_metadata`, `save_with_metadata` |
+
+Metadata extraction runs before Stage 1 and metadata merge runs after the final
+encode. Neither reads or writes a pixel, and neither changes any value this
+document describes. `r3sizer-core` does not link `r3sizer-metadata` in a
+production build. The only edge between them is a dev-only dependency behind the
+`typegen` feature, used to emit the metadata contract types into `generated.ts`.
+
+See [`algorithm.md`](algorithm.md) Stage 0 and Stage 12 for what the metadata
+path preserves, corrects, and reports.
+
+---
+
 ## Entry Point
 
 `crates/r3sizer-core/src/pipeline.rs` — `process_auto_sharp_downscale(input, params)`
@@ -11,6 +32,17 @@ Detailed walkthrough of the `process_auto_sharp_downscale` pipeline as implement
 The caller supplies a `LinearRgbImage` (already in linear RGB — the sRGB-to-linear conversion is the responsibility of `r3sizer-io` or the caller) and an `AutoSharpParams` struct.
 
 Returns `Result<ProcessOutput, CoreError>` where `ProcessOutput` contains the final image and a full `AutoSharpDiagnostics` record.
+
+This document walks the one-shot entry point stage by stage. The same stages run
+in the two-phase API used by the web UI and any interactive caller:
+
+- `prepare_base(input, params, on_stage)` runs Stages 2 to 4 (downscale, classify,
+  baseline) and caches them in a `PreparedBase`.
+- `process_from_prepared(prepared, params, on_stage)` runs Stages 5 to 11 (probe,
+  fit, solve, sharpen, output).
+
+`PreparedBase` carries a `BaseParamsKey` fingerprint. The cache is reused only
+when every base-affecting parameter still matches.
 
 ---
 
@@ -88,11 +120,12 @@ The implementation uses integer accumulation (`u32` sum of boolean masks) rather
 
 `params.probe_strengths.resolve()`
 
-`ProbeConfig` is either:
+`ProbeConfig` is one of:
 - `Range { min, max, count }` — linearly spaced values (requires count >= 4, min > 0, min < max)
 - `Explicit(Vec<f32>)` — user-supplied list (requires >= 4 values)
+- `TwoPass { coarse_count, coarse_min, coarse_max, dense_count, window_margin }` — coarse scan, then dense refinement around the bracketed crossing
 
-Result is always sorted ascending. Default: `[0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]` (7 probes, non-uniform, denser near zero where the threshold crossing typically occurs).
+Result is always sorted ascending. Default: `TwoPass { coarse_count: 7, coarse_min: 0.003, coarse_max: 1.0, dense_count: 4, window_margin: 0.5 }`. The coarse pass stops early once 3 or more probes bracket P0.
 
 ### 5b. Build Gaussian kernel
 
@@ -135,7 +168,7 @@ For each strength `s_i`:
    - `AbsoluteTotal`: `metric_value = p_total`
    - `RelativeToBase`: `metric_value = max(0, p_total - baseline)`
 
-4. **Breakdown** — `compute_metric_breakdown(&sharpened, artifact_metric)` returns a `MetricBreakdown` with per-component scores (v0.1: only `GamutExcursion` is populated; `HaloRinging`, `EdgeOvershoot`, `TextureFlattening` return 0.0). The `aggregate` field equals the scalar metric value.
+4. **Breakdown** — `compute_metric_breakdown(sharpened, original, luma_original, luma_sharpened, artifact_metric, weights)` returns a `MetricBreakdown` with all four component scores populated: `GamutExcursion`, `HaloRinging`, `EdgeOvershoot`, and `TextureFlattening`. The pipeline computes the breakdown per probe only when `selection_policy != GamutOnly`, and at final measurement under `Full` diagnostics. The default `GamutOnly` path skips it to keep probing fast. The `selection_score` field drives fitting; `composite_score` is diagnostic only.
 
 5. **Collect** — `ProbeSample { strength: s_i, artifact_ratio: p_total, metric_value, breakdown: Some(breakdown) }`
 
@@ -340,8 +373,9 @@ Assembles `AutoSharpDiagnostics` with:
 | Field | Source |
 |-------|--------|
 | `input_size` / `output_size` | Recorded at entry |
-| `sharpen_mode` / `sharpen_model` | From params |
+| `sharpen_mode` | From params |
 | `metric_mode` / `artifact_metric` | From params |
+| `selection_policy` | From params |
 | `target_artifact_ratio` | P0 from params |
 | `baseline_artifact_ratio` | Stage 4 measurement |
 | `probe_samples` | Stage 5 probe results (each with optional `MetricBreakdown`) |
@@ -377,15 +411,19 @@ All types defined in `crates/r3sizer-core/src/types.rs`.
 Default configuration:
 ```
 target: 800x600
-probes: [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]
-P0: 0.001 (0.1%)
+probes: TwoPass { coarse_count: 7, coarse_min: 0.003, coarse_max: 1.0,
+                  dense_count: 4, window_margin: 0.5 }
+P0: 0.003 (0.3%)
 sigma: 1.0
 fit: Cubic
 clamp: Clamp
 sharpen_mode: Lightness
-sharpen_model: PracticalUsm
+sharpen_strategy: ContentAdaptive
 metric_mode: RelativeToBase
 artifact_metric: ChannelClippingRatio
+selection_policy: GamutOnly
+experimental_sharpen_mode: LumaPlusChromaGuard (chroma guard on)
+evaluator_config: Heuristic
 contrast leveling: disabled
 ```
 
@@ -442,6 +480,8 @@ Timing overhead is negligible — only `Instant::now()` calls between existing s
 | Feature | Default | Effect |
 |---------|---------|--------|
 | `parallel` | yes | Enables `rayon` for parallel probe evaluation |
+| `formats` | yes | Enables the PNG/JPEG/GIF/BMP/TIFF/WebP decoders in the `image` crate |
+| `typegen` | no | Enables `ts-rs` derives and the TypeScript exporter test. Never enabled in production builds |
 
 Without `parallel`, probes run sequentially. The `probe_strengths` function uses `#[cfg(feature = "parallel")]` to switch between `par_iter` and `iter`.
 

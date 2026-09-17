@@ -55,7 +55,7 @@ what is an engineering approximation or placeholder.
 | **Contrast leveling order: before probing** | Order not confirmed | Architecture supports reordering |
 | **Lightness-based sharpening via `k = L'/L`** | Paper-supported — strong inference from paper context; all available evidence supports this formula | Upgrade to Confirmed once explicitly verified |
 | **RelativeToBase metric mode** | Engineering choice — isolates sharpening artifacts from resize artifacts; assumes additive independence | May not be how the paper defines P(s); replace with paper-exact metric once known |
-| **Probe strengths [0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0]** | Non-uniform, denser near zero where crossings typically occur | Adjust via `ProbeConfig` once paper values are known |
+| **TwoPass probe schedule (7 coarse over [0.003, 1.0], then 4 dense)** | Engineering choice — brackets the crossing, then refines it | Adjust via `ProbeConfig` once paper values are known |
 | **(0, 0) anchor in RelativeToBase fit** | Physically motivated: zero sharpening = zero added artifacts | Remove if paper uses a different fitting strategy |
 | **R² threshold = 0.85 for fit acceptance** | Engineering choice — balances false rejection of good fits vs. accepting poor ones | Tune based on empirical data across image corpus |
 | **Min pivot threshold = 1e-8 for condition check** | Engineering choice — well below the 1e-14 singularity threshold, catches ill-conditioned systems | Adjust if false positives occur on valid data |

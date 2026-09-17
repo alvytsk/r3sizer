@@ -223,12 +223,21 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, workflow, and PR expectation
 
 | Document | Description |
 |----------|-------------|
+| [`docs/architecture.md`](docs/architecture.md) | C4 views: context, containers, crates, runtime sequence, deployment |
 | [`docs/algorithm.md`](docs/algorithm.md) | Full pipeline description with all stages |
 | [`docs/pipeline_implementation.md`](docs/pipeline_implementation.md) | Detailed walkthrough with data flow and allocations |
 | [`docs/cli.md`](docs/cli.md) | Complete CLI flag reference |
 | [`docs/assumptions.md`](docs/assumptions.md) | Confirmed vs. engineering approximations |
 | [`docs/future_work.md`](docs/future_work.md) | Roadmap and next steps |
 | [`docs/testing/metadata-export.md`](docs/testing/metadata-export.md) | Metadata preservation verification recipe and observed results |
+| [`docs/lightness_linear_srgb_summary.md`](docs/lightness_linear_srgb_summary.md) | Why lightness lives in linear sRGB, and what that means for the pipeline |
+| [`docs/releasing.md`](docs/releasing.md) | Version bump, tag, and crates.io publish procedure |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history |
+
+Each crate also carries its own README: [`r3sizer-core`](crates/r3sizer-core/README.md),
+[`r3sizer-metadata`](crates/r3sizer-metadata/README.md),
+[`r3sizer-io`](crates/r3sizer-io/README.md),
+[`r3sizer`](crates/r3sizer/README.md), and the [web UI](web/README.md).
 
 ---
 

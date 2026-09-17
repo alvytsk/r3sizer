@@ -2,31 +2,66 @@
 
 ---
 
-## Recently completed (through v0.6)
+## Recently completed (through v0.10)
 
-The following items from the original roadmap are now implemented:
+The following items from the original roadmap are now implemented. Versions
+refer to the tagged workspace release that shipped them.
 
-- **Fit quality reporting** — `FitQuality` struct with R², residual sum of squares, max residual, min pivot.
-- **Solver robustness checks** — `RobustnessFlags` with monotonicity, quasi-monotonicity, R² threshold, condition number, LOO stability.
-- **Typed fallback reasons** — `FallbackReason` enum with 6 variants, priority-ordered.
-- **Per-stage timing** — `StageTiming` with microsecond wall-clock times for all pipeline stages.
-- **Composite metrics (v0.2)** — all four `MetricComponent` variants active: GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening. Configurable weights via `MetricWeights`.
-- **Selection policy (v0.2.1)** — `SelectionPolicy` enum: GamutOnly, Hybrid, CompositeOnly.
-- **Content-adaptive sharpening (v0.3)** — region classification (5 classes), per-pixel gain maps, adaptive backoff loop.
-- **Content-adaptive resize (v0.4)** — per-region kernel selection (Lanczos3, MitchellNetravali, CatmullRom, Gaussian).
-- **Chroma guard (v0.5)** — soft chroma clamping with context-aware thresholds, on by default.
-- **Quality evaluator (v0.5)** — heuristic feature extraction + advisory strength cap, on by default.
-- **Recommendations engine** — diagnostic-driven parameter suggestions (7 rules).
-- **Two-phase pipeline (v0.6)** — `prepare_base` / `process_from_prepared` split for interactive use. `PreparedBase` carries a `BaseParamsKey` fingerprint for safe cache reuse.
-- **Parallel probing in WASM (v0.6)** — probe worker pool (up to 6 workers), TwoPass two-round parallel probing, base data caching in workers.
-- **Two calibrated presets (v0.6)** — Photo (P0=0.003, range [0.003, 1.0]) and Precision (P0=0.001, range [0.003, 0.5]).
-- **CLI sweep mode** — batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
-- **Detail precomputation (v0.7)** — `D = input - blur(input)` computed once per probe phase; each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `compute_probe_detail` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
-- **Staged shrink (v0.7)** — for shrink ratios >= 3x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
-- **Pipeline modes (v0.7)** — `PipelineMode` enum (Fast / Balanced / Quality) controls probe budget, adaptive complexity, chroma guard, and evaluator. Applied via `AutoSharpParams::resolved()`.
-- **Early stopping (v0.7)** — coarse probing exits after 3+ probes when a P0 crossing bracket is found, saving remaining probes.
-- **fast_image_resize (v0.7)** — Lanczos3 downscaling via `fast_image_resize` crate with SSE4.1/AVX2 SIMD on x86-64 (~3.5x faster than `image` crate).
-- **Base quality fast path (v0.7)** — source-side Sobel/variance diagnostics skipped in non-Full diagnostics mode (~40x faster).
+### Diagnostics and robustness (v0.1 to v0.2)
+
+- **Fit quality reporting**: `FitQuality` struct with R2, residual sum of squares, max residual, min pivot.
+- **Solver robustness checks**: `RobustnessFlags` with monotonicity, quasi-monotonicity, R2 threshold, condition number, LOO stability.
+- **Typed fallback reasons**: `FallbackReason` enum with 6 variants, priority-ordered.
+- **Per-stage timing**: `StageTiming` with microsecond wall-clock times for all pipeline stages.
+- **Recommendations engine**: diagnostic-driven parameter suggestions (7 rules).
+- **Composite metrics (v0.2)**: all four `MetricComponent` variants active: GamutExcursion, HaloRinging, EdgeOvershoot, TextureFlattening. Configurable weights via `MetricWeights`.
+- **Selection policy (v0.2.1)**: `SelectionPolicy` enum: GamutOnly, Hybrid, CompositeOnly.
+
+### Adaptive processing (v0.3 to v0.5)
+
+- **Content-adaptive sharpening (v0.3)**: region classification (5 classes), per-pixel gain maps, adaptive backoff loop.
+- **Content-adaptive resize (v0.4)**: per-region kernel selection (Lanczos3, MitchellNetravali, CatmullRom, Gaussian).
+- **Chroma guard (v0.5)**: soft chroma clamping with context-aware thresholds, on by default.
+- **Quality evaluator (v0.5)**: heuristic feature extraction plus advisory strength cap, on by default.
+
+### Interactive pipeline (v0.6)
+
+- **Two-phase pipeline**: `prepare_base` / `process_from_prepared` split for interactive use. `PreparedBase` carries a `BaseParamsKey` fingerprint for safe cache reuse.
+- **Parallel probing in WASM**: probe worker pool (up to 6 workers), TwoPass two-round parallel probing, base data caching in workers.
+- **Two calibrated presets**: Photo (P0=0.003, range [0.003, 1.0]) and Precision (P0=0.001, range [0.003, 0.5]).
+- **CLI sweep mode**: batch processing with aggregate statistics (mean/median strength, fit success rate, selection mode histogram).
+
+### Speed (v0.7)
+
+- **Detail precomputation**: `D = input - blur(input)` computed once per probe phase. Each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `compute_probe_detail` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
+- **Staged shrink**: for shrink ratios >= 3x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
+- **Pipeline modes**: `PipelineMode` enum (Fast / Balanced / Quality) controls probe budget, adaptive complexity, chroma guard, and evaluator. Applied via `AutoSharpParams::resolved()`.
+- **Early stopping**: coarse probing exits after 3 or more probes once a P0 crossing bracket is found, saving the remaining probes.
+- **fast_image_resize**: Lanczos3 downscaling via the `fast_image_resize` crate with SSE4.1/AVX2 SIMD on x86-64 (~3.5x faster than the `image` crate).
+- **Base quality fast path**: source-side Sobel/variance diagnostics skipped in non-Full diagnostics mode (~40x faster).
+
+### Packaging and CLI structure (v0.8)
+
+- **Subcommand CLI**: `process`, `sweep`, `diff`, `corpus`, and `presets` replace the flat flag set. Shared pipeline flags live in `PipelineArgs` and flatten into `process` and `sweep`.
+- **Structured stdout**: `--output-format json` emits the diagnostics summary as JSON instead of text.
+- **CI workflows**: `ci.yml` runs fmt, clippy with `-D warnings`, workspace tests, `cargo doc` with `-D warnings`, and a `wasm-pack` build. `audit.yml` runs a weekly `cargo audit`.
+- **crates.io readiness**: the CLI crate was renamed from `r3sizer-cli` to `r3sizer`, and all crates carry publishable manifests.
+- **WASM binary size**: reduced to roughly 460 KB.
+
+### Large images and web architecture (v0.9)
+
+- **Striped ingest**: `StripedPreReducer` in `ingest.rs` accepts sequential full-width sRGB RGBA8 stripes and accumulates an area-weighted pre-reduce directly into the ~2x intermediate. Peak memory is bounded to one stripe plus the intermediate instead of the full source, which makes 100 MP inputs tractable in the browser. `compute_intermediate_size` shares the staged-shrink math with `resize.rs`, so a striped ingest lands on the same intermediate dimensions as the monolithic path. `validate_striped_shrink` rejects shrink ratios below 3x, where the pre-reduce would be meaningless.
+- **sRGB LUT moved into core**: the u8 to linear lookup table now lives in `color.rs` and is shared by the WASM and native paths.
+- **Core review fixes**: `Normalize` clamp no longer brightens in-gamut images, `Explicit` probe values are validated as positive and distinct, aliased adaptive resize kernels are deduplicated, probing time is included in `total_us`, externally supplied probe samples are sorted defensively, the solver fallback ranking is NaN-safe via `total_cmp`, per-probe breakdowns are computed for composite policies, and the evaluator strength cap is recorded as an advisory selection stage.
+- **Web architecture**: the UI migrated to Feature-Sliced Design v2.1 with public-API barrels, swapped ESLint for Biome plus Steiger, slimmed its dependencies, and lazy-loads heavy chunks.
+
+### Metadata preservation and theming (v0.10)
+
+- **`r3sizer-metadata` crate**: a fifth workspace member with no pixel decoding and no filesystem access. `extract` inventories JPEG/PNG/WebP metadata and `merge` re-embeds it into already-encoded output, correcting dimensions, orientation, and the color-space tag against `OutputFacts`. Every skipped, corrected, or dropped field surfaces as a typed `MetadataIssue`.
+- **CLI and web preservation**: `r3sizer-io` gained `load_with_metadata` / `save_with_metadata`, the CLI reports issues on stderr, and the web export path runs `preserveEncodedMetadata` and shows a localized warning.
+- **Bounded parsing**: `MetadataLimits` caps source size, payload size, total metadata, record count, EXIF entry count, IFD count, and XMP nesting depth. Anything past a limit degrades to a reported issue, never a panic or a hang.
+- **Web fallback fix**: a large image with a modest downscale ratio now falls back to the monolithic path instead of attempting striped ingest.
+- **Gruvbox theme**: theme tokens, Manrope for Cyrillic coverage, and simplified English and Russian welcome copy.
 
 ---
 
@@ -37,8 +72,9 @@ Replace `sharpen::unsharp_mask` once the paper-exact kernel formula is identifie
 The module boundary is clean: change only `sharpen.rs`.
 
 ### Exact downscale kernel
-Replace `imageops::resize` in `resize.rs` with the confirmed resampling strategy.
-No other module changes required.
+Replace the `fast_image_resize` Lanczos3 call in `resize.rs`, and the
+`image::imageops::resize` calls in `resize_strategy.rs`, with the confirmed
+resampling strategy. No other module changes required.
 
 ### Exact artifact metric
 Two metrics are now implemented (`ChannelClippingRatio` and `PixelOutOfGamutRatio`).
@@ -61,7 +97,8 @@ strengths (e.g. take the median or minimum).
 
 ### Probe count and range tuning
 Once paper values are known, update the `AutoSharpParams::default()` constants
-in `types.rs`.  Current defaults are non-uniform, denser near zero.
+in `types.rs`. The current default is a `TwoPass` schedule: 7 coarse probes over
+[0.003, 1.0], then 4 dense probes inside the bracketed crossing.
 
 ### CompositeOnly selection policy
 `CompositeOnly` is currently treated as Hybrid. Future work:
@@ -138,4 +175,9 @@ parallel probing via Web Worker pool, and two-phase caching for interactive use.
 ## Documentation
 
 - Add `#[doc = ...]` examples to the public API in `lib.rs`.
-- Publish `r3sizer-core` on crates.io once the API stabilises.
+- Backfill `CHANGELOG.md` for the releases before 0.10.0. The history currently
+  lives only in git tags.
+- Add a README for `r3sizer-wasm`. The other four crates each have one.
+- Publish `r3sizer-metadata` on crates.io. The first publish claims the name.
+  See [`releasing.md`](releasing.md) for the procedure and the current
+  published versions.
