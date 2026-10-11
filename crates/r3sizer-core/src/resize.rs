@@ -51,9 +51,11 @@ pub fn downscale_with_info(
     let shrink_y = src.height() as f64 / target.height as f64;
     let max_shrink = shrink_x.max(shrink_y);
 
-    if max_shrink >= STAGED_SHRINK_THRESHOLD {
+    // Below 4× the pre-reduce factor floors to 1, so the "intermediate" is the
+    // source itself — a full-size no-op pass that cost ~20× the real resize.
+    let inter = crate::ingest::compute_intermediate_size(src.size(), target);
+    if max_shrink >= STAGED_SHRINK_THRESHOLD && inter != src.size() {
         // Two-stage: fast bilinear pre-reduce to ~2× target, then Lanczos3.
-        let inter = crate::ingest::compute_intermediate_size(src.size(), target);
         let pre = fir_resize(
             src,
             inter.width,
@@ -265,6 +267,24 @@ mod tests {
         assert_eq!(out.width(), 80);
         assert_eq!(out.height(), 60);
         assert!(staged, "5× ratio should trigger staged shrink");
+    }
+
+    #[test]
+    fn ratio_below_4x_skips_identity_pre_reduce() {
+        // 3× floors the pre-reduce factor to 1 (intermediate == source), so
+        // staging would only add a wasted full-size pass.
+        let src = gradient_image(300, 150);
+        let (out, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 100,
+                height: 50,
+            },
+        )
+        .unwrap();
+        assert_eq!(out.width(), 100);
+        assert_eq!(out.height(), 50);
+        assert!(!staged, "3× ratio has no real pre-reduce to stage");
     }
 
     #[test]

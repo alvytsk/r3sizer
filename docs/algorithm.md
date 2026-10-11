@@ -12,7 +12,7 @@ This document describes the pipeline implemented in `r3sizer-core`.
 1.5. Input color-space ingress   (color_space.rs)        -- experimental, optional
 2.   sRGB -> linear RGB          (color.rs)
 2a.  Resize (staged shrink)      (resize.rs / resize_strategy.rs)
-       -- bilinear pre-reduce when ratio >= 3x, then Lanczos3
+       -- bilinear pre-reduce when ratio >= 4x, then Lanczos3
 2.5. Region classification       (classifier.rs)         -- ContentAdaptive only
 3.   Contrast leveling           (contrast.rs)           -- optional
 4.   Baseline measurement        (metrics/)
@@ -97,14 +97,14 @@ filtering are physically correct.
 (SIMD-accelerated on x86-64).  The function operates on the raw f32 linear
 pixel buffer.  No clamping is applied; the output remains in linear f32.
 
-**Staged shrink:** for shrink ratios >= 3x (max of X and Y axes), a two-stage
+**Staged shrink:** for shrink ratios >= 4x (max of X and Y axes), a two-stage
 path is used.  A fast bilinear pre-reduce brings the image to approximately 2x
 the target dimensions, then a final Lanczos3 pass produces the output.  This
 follows the same principle as libvips' `gap` parameter: the bilinear pass
 cheaply removes the bulk of the high-frequency energy that would otherwise
 alias through the Lanczos kernel, while the final Lanczos3 pass preserves
-edge sharpness at the target scale.  For ratios below 3x, a single Lanczos3
-pass is used directly.  The diagnostic field `used_staged_shrink` records
+edge sharpness at the target scale.  For ratios below 4x the pre-reduce factor
+(`floor(ratio / 2)`) is 1, so a single Lanczos3 pass is used directly.  The diagnostic field `used_staged_shrink` records
 which path was taken.
 
 **Note:** The specific resampling kernel used in the original paper is not

@@ -21,7 +21,7 @@ use crate::{
     contrast::{apply_contrast_leveling, ContrastLevelingParams},
     fit::{check_monotonicity, fit_cubic, fit_cubic_with_quality},
     metrics::channel_clipping_ratio,
-    sharpen::{make_kernel, unsharp_mask_single_channel_with_kernel, unsharp_mask_with_kernel},
+    sharpen::make_kernel,
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
     CoreError, DiagnosticsLevel, EvaluatorCapDiagnostics, FallbackReason, FitStatus, FitStrategy,
@@ -29,11 +29,6 @@ use crate::{
     ProbeSample, ProcessOutput, RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode,
     SharpenStrategy, StageTiming,
 };
-
-/// Pipeline-internal result of a sharpening step.
-struct SharpenResult {
-    image: LinearRgbImage,
-}
 
 // ---------------------------------------------------------------------------
 // Base params fingerprint — tracks which params affect PreparedBase
@@ -385,18 +380,25 @@ pub fn process_from_prepared(
 ///
 /// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
 /// (useful for TwoPass parallel probing where JS resolved the dense window).
+///
+/// `detail` is the [`compute_probe_detail`] output for these same params, if
+/// the caller still has it; the final sharpen then skips its own blur.  A
+/// buffer of the wrong length for the sharpen mode is ignored and recomputed.
+#[allow(clippy::too_many_arguments)]
 pub fn process_from_prepared_with_probes(
     prepared: &PreparedBase,
     params: &AutoSharpParams,
     probe_samples: Vec<ProbeSample>,
     probing_us: u64,
     pass_diagnostics: Option<ProbePassDiagnostics>,
+    detail: Option<Vec<f32>>,
     on_stage: &dyn Fn(&str),
 ) -> Result<ProcessOutput, CoreError> {
     let probe_result = ProbeResult {
         samples: probe_samples,
         pass_diagnostics,
         probing_us,
+        detail,
     };
     finish_pipeline(prepared, params, probe_result, on_stage)
 }
@@ -488,6 +490,7 @@ pub fn run_probes_standalone(
 ) -> Result<Vec<ProbeSample>, CoreError> {
     let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
     let kernel = make_kernel(params.sharpen_sigma)?;
+    let detail = compute_detail(&base, Some(base_luminance), params.sharpen_mode, &kernel);
     probe_strengths(
         strengths,
         &base,
@@ -496,7 +499,7 @@ pub fn run_probes_standalone(
         params.metric_mode,
         params.artifact_metric,
         baseline_artifact_ratio,
-        &kernel,
+        &detail,
         None,
         params.needs_probe_breakdown(),
         params.metric_weights,
@@ -587,6 +590,8 @@ struct ProbeResult {
     samples: Vec<ProbeSample>,
     pass_diagnostics: Option<ProbePassDiagnostics>,
     probing_us: u64,
+    /// Detail signal the probes used, reused by the final sharpen.
+    detail: Option<Vec<f32>>,
 }
 
 /// Run the probing phase against a PreparedBase.
@@ -611,6 +616,7 @@ fn run_probes_for_prepared(
 
     on_stage("probing");
     let t0 = Instant::now();
+    let detail = compute_detail(base, base_luminance, params.sharpen_mode, &kernel);
     let (samples, pass_diagnostics) = match &params.probe_strengths {
         ProbeConfig::TwoPass {
             coarse_count,
@@ -631,7 +637,7 @@ fn run_probes_for_prepared(
             params.metric_mode,
             params.artifact_metric,
             baseline_artifact_ratio,
-            &kernel,
+            &detail,
             metric_override,
             params.needs_probe_breakdown(),
             params.metric_weights,
@@ -646,7 +652,7 @@ fn run_probes_for_prepared(
                 params.metric_mode,
                 params.artifact_metric,
                 baseline_artifact_ratio,
-                &kernel,
+                &detail,
                 metric_override,
                 params.needs_probe_breakdown(),
                 params.metric_weights,
@@ -660,6 +666,7 @@ fn run_probes_for_prepared(
         samples,
         pass_diagnostics,
         probing_us,
+        detail: Some(detail),
     })
 }
 
@@ -736,6 +743,7 @@ fn finish_pipeline(
         samples: mut probe_samples,
         pass_diagnostics: probe_pass_diagnostics,
         probing_us,
+        detail,
     } = probe_result;
 
     // Samples may arrive unsorted (externally-collected parallel probes).
@@ -880,18 +888,27 @@ fn finish_pipeline(
     // --- Final sharpening ---
     on_stage("sharpening");
     let t0 = Instant::now();
+    let px = base.width() as usize * base.height() as usize;
+    let detail_len = match params.sharpen_mode {
+        SharpenMode::Lightness => px,
+        SharpenMode::Rgb => px * 3,
+    };
+    let detail = match detail {
+        Some(d) if d.len() == detail_len => d,
+        _ => compute_detail(base, base_luminance, params.sharpen_mode, &kernel),
+    };
     let _chroma_guard_diag;
     let (mut final_image, adaptive_validation, adaptive_validation_us) =
         match (&params.sharpen_strategy, &prepared.gain_map) {
             (SharpenStrategy::Uniform, _) | (_, None) => {
-                let result = sharpen_image(
+                let image = sharpen_image(
                     base,
                     base_luminance,
                     params.sharpen_mode,
                     selected_strength,
-                    &kernel,
-                )?;
-                (result.image, None, None)
+                    &detail,
+                );
+                (image, None, None)
             }
             (
                 SharpenStrategy::ContentAdaptive {
@@ -912,7 +929,7 @@ fn finish_pipeline(
                     params.sharpen_mode,
                     selected_strength,
                     gm,
-                    params.sharpen_sigma,
+                    &detail,
                     effective_p0,
                     params.artifact_metric,
                     params.metric_mode,
@@ -1147,38 +1164,53 @@ pub fn process_auto_sharp_downscale_with_progress(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Apply sharpening to the base image using the configured mode, model, and a pre-built kernel.
-///
-/// Returns `SharpenResult` with the sharpened image and its luminance channel.
-/// In lightness mode, luminance is the already-computed sharpened luma (no extra allocation).
-/// In RGB mode, luminance is extracted from the result (one `Vec<f32>` per call).
+/// Detail signal `D = input - blur(input)` for the sharpen mode: W×H floats
+/// for Lightness, W×H×3 for RGB.  Independent of strength, so one blur serves
+/// both probing and the final sharpen.
+fn compute_detail(
+    base: &LinearRgbImage,
+    base_luminance: Option<&[f32]>,
+    mode: SharpenMode,
+    kernel: &[f32],
+) -> Vec<f32> {
+    match mode {
+        SharpenMode::Lightness => {
+            let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
+            crate::sharpen::compute_detail_single_channel(
+                lum,
+                base.width() as usize,
+                base.height() as usize,
+                kernel,
+            )
+        }
+        SharpenMode::Rgb => crate::sharpen::compute_detail_rgb(base, kernel),
+    }
+}
+
+/// Apply uniform sharpening from a precomputed detail signal — the same
+/// `input + amount × D` the probes measured.
 fn sharpen_image(
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
     mode: SharpenMode,
     amount: f32,
-    kernel: &[f32],
-) -> Result<SharpenResult, CoreError> {
-    let image = match mode {
-        SharpenMode::Rgb => unsharp_mask_with_kernel(base, amount, kernel),
+    detail: &[f32],
+) -> LinearRgbImage {
+    match mode {
+        SharpenMode::Rgb => crate::sharpen::apply_detail_rgb(base, detail, amount),
         SharpenMode::Lightness => {
             let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
-            let w = base.width() as usize;
-            let h = base.height() as usize;
-            let sharpened_l = unsharp_mask_single_channel_with_kernel(lum, w, h, amount, kernel);
+            let sharpened_l = crate::sharpen::apply_detail_single_channel(lum, detail, amount);
             color::reconstruct_rgb_from_lightness_with_luma(base, &sharpened_l, Some(lum))
         }
-    };
-    Ok(SharpenResult { image })
+    }
 }
 
 /// Run all probe strengths and collect `ProbeSample`s.
 ///
-/// **Optimisation:** the Gaussian blur (the dominant cost) is computed once to
-/// derive a detail signal `D = input - blur(input)`.  Each probe then applies
-/// `out = input + s × D` — a trivial multiply-add — instead of recomputing the
-/// full separable blur for every strength.  This collapses probe cost from
-/// `N × (blur + apply)` to `1 × blur + N × apply`.
+/// Each probe applies `out = input + s × D` from the precomputed detail
+/// signal (see [`compute_detail`]) — a trivial multiply-add — instead of
+/// recomputing the separable blur for every strength.
 #[allow(clippy::too_many_arguments)]
 fn probe_strengths(
     strengths: &[f32],
@@ -1188,29 +1220,18 @@ fn probe_strengths(
     metric_mode: MetricMode,
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
-    kernel: &[f32],
+    detail: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
     need_breakdown: bool,
     metric_weights: MetricWeights,
 ) -> Result<Vec<ProbeSample>, CoreError> {
-    use crate::sharpen;
-
     let w = base.width() as usize;
     let h = base.height() as usize;
-
-    // One blur — the expensive part. Mode-dependent detail computation.
-    let detail = match sharpen_mode {
-        SharpenMode::Lightness => {
-            let lum = base_luminance.expect("base_luminance must be provided for Lightness mode");
-            sharpen::compute_detail_single_channel(lum, w, h, kernel)
-        }
-        SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
-    };
 
     let ctx = ProbeContext {
         base,
         base_luminance,
-        detail: &detail,
+        detail,
         sharpen_mode,
         artifact_metric,
         baseline_artifact_ratio,
@@ -1455,7 +1476,7 @@ fn adaptive_backoff_loop(
 
 /// Adaptive sharpen with validation and backoff loop.
 ///
-/// Computes detail buffers once, then applies adaptive sharpening. If the
+/// Applies adaptive sharpening from the precomputed `detail` signal. If the
 /// result exceeds the artifact budget P0, iteratively reduces the global scale
 /// factor until budget is met or max iterations reached.
 ///
@@ -1467,7 +1488,7 @@ fn adaptive_sharpen_with_validation(
     sharpen_mode: SharpenMode,
     global_strength: f32,
     gain_map: &crate::GainMap,
-    sigma: f32,
+    detail: &[f32],
     target_p0: f32,
     artifact_metric: ArtifactMetric,
     metric_mode: MetricMode,
@@ -1500,20 +1521,10 @@ fn adaptive_sharpen_with_validation(
     match sharpen_mode {
         SharpenMode::Lightness => {
             let luma = base_luminance.expect("luminance required for lightness mode");
-            let kernel = make_kernel(sigma)?;
-            let w = base.width() as usize;
-            let h = base.height() as usize;
-            let blurred = crate::sharpen::gaussian_blur_single_channel(luma, w, h, &kernel);
-            let detail: Vec<f32> = luma
-                .iter()
-                .zip(blurred.iter())
-                .map(|(&l, &b)| l - b)
-                .collect();
-
             let apply_at_scale = |scale: f32| -> LinearRgbImage {
                 let sharpened_l = crate::sharpen::apply_adaptive_lightness_from_detail(
                     luma,
-                    &detail,
+                    detail,
                     global_strength * scale,
                     gain_map,
                 );
@@ -1534,10 +1545,7 @@ fn adaptive_sharpen_with_validation(
         }
 
         SharpenMode::Rgb => {
-            let kernel = make_kernel(sigma)?;
-            let blurred = crate::sharpen::gaussian_blur(base, &kernel);
             let src_px = base.pixels();
-            let blur_px = blurred.pixels();
             let gain_data = gain_map.data();
 
             let apply_at_scale = |scale: f32| -> LinearRgbImage {
@@ -1546,15 +1554,11 @@ fn adaptive_sharpen_with_validation(
                     .as_chunks::<3>()
                     .0
                     .iter()
-                    .zip(blur_px.as_chunks::<3>().0.iter())
+                    .zip(detail.as_chunks::<3>().0.iter())
                     .zip(gain_data.iter())
-                    .flat_map(|((s, b), &g)| {
+                    .flat_map(|((s, d), &g)| {
                         let eff = eff_strength * g;
-                        [
-                            s[0] + eff * (s[0] - b[0]),
-                            s[1] + eff * (s[1] - b[1]),
-                            s[2] + eff * (s[2] - b[2]),
-                        ]
+                        [s[0] + eff * d[0], s[1] + eff * d[1], s[2] + eff * d[2]]
                     })
                     .collect();
                 LinearRgbImage::new(base.width(), base.height(), out).unwrap()
@@ -1678,28 +1682,12 @@ fn run_two_pass_probing(
     metric_mode: MetricMode,
     artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
-    kernel: &[f32],
+    detail: &[f32],
     metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
     need_breakdown: bool,
     metric_weights: MetricWeights,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
-    use crate::sharpen;
-
     let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
-
-    // Precompute detail once — shared by coarse and dense phases.
-    let detail = match sharpen_mode {
-        SharpenMode::Lightness => {
-            let lum = base_luminance.expect("base_luminance required for Lightness mode");
-            sharpen::compute_detail_single_channel(
-                lum,
-                base.width() as usize,
-                base.height() as usize,
-                kernel,
-            )
-        }
-        SharpenMode::Rgb => sharpen::compute_detail_rgb(base, kernel),
-    };
 
     // Scratch buffers and context reused across all coarse + dense probes.
     let w = base.width() as usize;
@@ -1707,7 +1695,7 @@ fn run_two_pass_probing(
     let ctx = ProbeContext {
         base,
         base_luminance,
-        detail: &detail,
+        detail,
         sharpen_mode,
         artifact_metric,
         baseline_artifact_ratio,
