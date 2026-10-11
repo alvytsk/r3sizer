@@ -14,7 +14,7 @@ categories             = ["multimedia::images"]
 
 [features]
 default     = ["parallel", "formats"]
-parallel    = ["rayon", "image/rayon"]
+parallel    = ["rayon", "image/rayon", "fast_image_resize/rayon"]
 formats     = ["image/png", "image/jpeg", "image/gif", "image/bmp", "image/tiff", "image/webp"]
 typegen     = ["ts-rs"]
 

@@ -27,6 +27,16 @@ thread_local! {
     static CACHED_BASE: RefCell<Option<r3sizer_core::PreparedBase>> = const { RefCell::new(None) };
     static CACHED_INGEST: RefCell<Option<StripedPreReducer>> = const { RefCell::new(None) };
     static CACHED_INGEST_DIAG: RefCell<Option<IngestDiagnostics>> = const { RefCell::new(None) };
+    /// Last `compute_probe_detail` output, keyed by the params it depends on,
+    /// so `process_from_probes` can skip a second blur. Cleared with the base.
+    static CACHED_DETAIL: RefCell<Option<(DetailKey, Vec<f32>)>> = const { RefCell::new(None) };
+}
+
+/// Params the detail signal depends on (beyond the cached base itself).
+type DetailKey = (u32, r3sizer_core::SharpenMode);
+
+fn detail_key(params: &AutoSharpParams) -> DetailKey {
+    (params.sharpen_sigma.to_bits(), params.sharpen_mode)
 }
 
 /// Pre-convert sRGB RGBA pixels to linear RGB and cache the result.
@@ -77,6 +87,7 @@ pub fn prepare_base(
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     CACHED_BASE.with(|c| *c.borrow_mut() = Some(prepared));
+    CACHED_DETAIL.with(|c| *c.borrow_mut() = None);
     CACHED_INPUT.with(|c| *c.borrow_mut() = Some(input));
 
     post_progress("base_ready");
@@ -88,6 +99,7 @@ pub fn prepare_base(
 pub fn clear_cache() {
     CACHED_INPUT.with(|c| *c.borrow_mut() = None);
     CACHED_BASE.with(|c| *c.borrow_mut() = None);
+    CACHED_DETAIL.with(|c| *c.borrow_mut() = None);
     CACHED_INGEST.with(|c| *c.borrow_mut() = None);
     CACHED_INGEST_DIAG.with(|c| *c.borrow_mut() = None);
 }
@@ -123,6 +135,7 @@ pub fn ingest_begin(
     // A new striped image invalidates everything cached for the previous one.
     CACHED_INPUT.with(|c| *c.borrow_mut() = None);
     CACHED_BASE.with(|c| *c.borrow_mut() = None);
+    CACHED_DETAIL.with(|c| *c.borrow_mut() = None);
     CACHED_INGEST_DIAG.with(|c| *c.borrow_mut() = None);
     CACHED_INGEST.with(|c| *c.borrow_mut() = Some(reducer));
 
@@ -442,7 +455,9 @@ pub fn compute_probe_detail(params_json: &str) -> Result<js_sys::Float32Array, J
             &params,
         )
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(js_sys::Float32Array::from(detail.as_slice()))
+        let array = js_sys::Float32Array::from(detail.as_slice());
+        CACHED_DETAIL.with(|c| *c.borrow_mut() = Some((detail_key(&params), detail)));
+        Ok(array)
     })
 }
 
@@ -514,12 +529,19 @@ pub fn process_from_probes(
         .as_ref()
         .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
 
+    let key = detail_key(&params);
+    let detail = CACHED_DETAIL.with(|c| match c.borrow_mut().take() {
+        Some((k, d)) if k == key => Some(d),
+        _ => None,
+    });
+
     let output = r3sizer_core::process_from_prepared_with_probes(
         prepared,
         &params,
         probe_samples,
         probing_us as u64,
         pass_diagnostics,
+        detail,
         &post_progress,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;

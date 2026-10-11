@@ -34,7 +34,7 @@ refer to the tagged workspace release that shipped them.
 ### Speed (v0.7)
 
 - **Detail precomputation**: `D = input - blur(input)` computed once per probe phase. Each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `compute_probe_detail` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
-- **Staged shrink**: for shrink ratios >= 3x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
+- **Staged shrink**: for shrink ratios >= 4x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
 - **Pipeline modes**: `PipelineMode` enum (Fast / Balanced / Quality) controls probe budget, adaptive complexity, chroma guard, and evaluator. Applied via `AutoSharpParams::resolved()`.
 - **Early stopping**: coarse probing exits after 3 or more probes once a P0 crossing bracket is found, saving the remaining probes.
 - **fast_image_resize**: Lanczos3 downscaling via the `fast_image_resize` crate with SSE4.1/AVX2 SIMD on x86-64 (~3.5x faster than the `image` crate).
@@ -123,12 +123,12 @@ Probes run in parallel via `rayon::par_iter` (native) or a Web Worker pool (WASM
 Blur computed once per probe phase, not per probe. Workers receive precomputed detail.
 
 ### ~~Staged shrink~~ (done)
-Bilinear pre-reduce for large shrink ratios (>= 3x).
+Bilinear pre-reduce for large shrink ratios (>= 4x).
 
 ### SIMD for Gaussian blur
 `sharpen::gaussian_blur` and `gaussian_blur_single_channel` are hand-rolled
 separable passes on flat `&[f32]`.  After detail precomputation, the blur runs
-only once per probe phase (not per probe), so the ROI is reduced — but for
+only once per run (shared by probes and the final sharpen), so the ROI is reduced — but for
 large images it remains the single most expensive operation.  Candidates:
 explicit SIMD via `std::simd` (once stabilised), or delegation to
 `fast_image_resize`'s internal blur if exposed.

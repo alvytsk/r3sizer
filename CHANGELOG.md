@@ -9,6 +9,20 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ## [Unreleased]
 
+### Fixed
+- Downscales between 3× and 4× (e.g. 4K→720p) no longer run a full-size
+  no-op bilinear "pre-reduce" pass before Lanczos3; resize is ~20× faster
+  at those ratios.
+
+### Changed
+- Native resize is multithreaded (`fast_image_resize/rayon` under the
+  `parallel` feature).
+- The final sharpen reuses the probes' detail signal instead of re-blurring,
+  in both the native pipeline and the WASM parallel path.
+  `process_from_prepared_with_probes` takes an optional `detail` argument.
+- The WASM build enables SIMD128 (~19% faster pipeline). Requires Chrome 91+,
+  Firefox 89+, Safari 16.4+.
+
 ## [0.10.0] - 2026-09-16
 
 ### Added
