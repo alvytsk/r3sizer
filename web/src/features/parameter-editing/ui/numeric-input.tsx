@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Input } from "@/shared/ui/input";
 
 export function NumericInput({
@@ -31,9 +32,15 @@ export function NumericInput({
     setDraft(null);
   }, [draft, clamp, onCommit]);
 
+  // Nudge from the visible text and drop the draft, otherwise the focused
+  // field keeps showing (and later re-commits) the stale draft.
   const nudge = useCallback(
-    (dir: 1 | -1) => onCommit(clamp(value + step * dir)),
-    [value, step, clamp, onCommit],
+    (dir: 1 | -1) => {
+      const typed = draft === null ? NaN : parseInt(draft, 10);
+      onCommit(clamp((Number.isNaN(typed) ? value : typed) + step * dir));
+      setDraft(null);
+    },
+    [draft, value, step, clamp, onCommit],
   );
 
   const stopRepeat = useCallback(() => {
@@ -101,7 +108,8 @@ export function NumericInput({
             commit();
             (e.target as HTMLInputElement).blur();
           } else if (e.key === "Escape") {
-            setDraft(null);
+            // Flush first: blur fires synchronously and would commit the stale draft.
+            flushSync(() => setDraft(null));
             (e.target as HTMLInputElement).blur();
           }
         }}
