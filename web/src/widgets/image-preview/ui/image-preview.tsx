@@ -165,6 +165,7 @@ function ComparisonSlider({
             <div className="w-px h-full bg-white/80" />
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-background/80 border border-white/50 flex items-center justify-center backdrop-blur-sm">
               <svg
+                aria-hidden="true"
                 width="14"
                 height="14"
                 viewBox="0 0 14 14"

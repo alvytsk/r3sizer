@@ -38,12 +38,14 @@ export function JsonViewer({ data }: { data: unknown }) {
     <div className="space-y-2">
       <div className="flex gap-1.5">
         <button
+          type="button"
           onClick={handleCopy}
           className="text-[11px] font-mono px-2 py-0.5 rounded border border-border/40 bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
         >
           {copied ? "Copied!" : "Copy"}
         </button>
         <button
+          type="button"
           onClick={handleDownload}
           className="text-[11px] font-mono px-2 py-0.5 rounded border border-border/40 bg-muted hover:bg-muted/80 text-muted-foreground transition-colors"
         >
@@ -52,6 +54,7 @@ export function JsonViewer({ data }: { data: unknown }) {
       </div>
       <pre
         className="text-[11px] leading-[1.6] font-mono bg-[#0d1117] text-[#c9d1d9] p-3 rounded-md border border-border/20 overflow-auto max-h-[450px] selection:bg-chart-2/20"
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: highlightJson escapes &, < and > before adding spans
         dangerouslySetInnerHTML={{ __html: highlightJson(json) }}
       />
     </div>

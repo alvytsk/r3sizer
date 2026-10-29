@@ -127,6 +127,7 @@ export function DownloadButton() {
         <div className="hidden lg:flex rounded-md border border-border/40 overflow-hidden">
           {(["jpeg", "png", "webp"] as const).map((fmt) => (
             <button
+              type="button"
               key={fmt}
               onClick={() => setFormat(fmt)}
               className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
@@ -145,6 +146,7 @@ export function DownloadButton() {
             <div className="flex rounded-md border border-border/40 overflow-hidden">
               {qualityPresets.map((preset) => (
                 <button
+                  type="button"
                   key={preset.value}
                   onClick={() => setQuality(preset.value)}
                   className={`px-2.5 py-1 text-[11px] font-mono font-medium transition-colors ${
