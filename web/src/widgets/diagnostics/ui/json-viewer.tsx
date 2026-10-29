@@ -1,8 +1,11 @@
 import { useCallback, useState } from "react";
 
-/** Simple JSON syntax highlighter — no external deps. */
-function highlightJson(json: string): string {
+/** Simple JSON syntax highlighter — no external deps. Output is used as innerHTML. */
+export function highlightJson(json: string): string {
   return json
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
     .replace(/("(?:\\.|[^"\\])*")\s*:/g, '<span class="text-chart-2">$1</span>:')
     .replace(/:\s*("(?:\\.|[^"\\])*")/g, ': <span class="text-primary">$1</span>')
     .replace(/:\s*(-?\d+\.?\d*(?:e[+-]?\d+)?)/gi, ': <span class="text-chart-3">$1</span>')
