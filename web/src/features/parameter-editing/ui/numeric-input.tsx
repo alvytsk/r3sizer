@@ -66,7 +66,7 @@ export function NumericInput({
   );
 
   const chevron = (
-    <svg width="8" height="5" viewBox="0 0 8 5" fill="none">
+    <svg width="8" height="5" viewBox="0 0 8 5" fill="none" aria-hidden="true">
       <path
         d="M1 1.5L4 3.5L7 1.5"
         stroke="currentColor"

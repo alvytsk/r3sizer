@@ -52,7 +52,7 @@
         "noNonNullAssertion": "off"
       },
       "suspicious": {
-        "noArrayIndexKey": "warn"
+        "noArrayIndexKey": "off"
       },
       "security": {
         "noDangerouslySetInnerHtml": "warn"

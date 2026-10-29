@@ -1,7 +1,13 @@
 /** Inline crosshair logo mark derived from favicon.svg (no background rect). */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <svg
+      viewBox="0 0 32 32"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
       <rect
         x="6"
         y="6"

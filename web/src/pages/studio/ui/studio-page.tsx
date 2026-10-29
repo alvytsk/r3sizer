@@ -81,14 +81,20 @@ export default function App() {
       <div className="flex-1 flex overflow-hidden">
         {/* Mobile backdrop — params */}
         {inputFile && sidebarOpen && (
-          <div
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={t("sidebar.collapsePanel")}
             className="fixed inset-0 z-30 bg-black/50 lg:hidden"
             onClick={() => setSidebarOpen(false)}
           />
         )}
         {/* Mobile backdrop — diagnostics */}
         {inputFile && diagOpen && (
-          <div
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={t("sidebar.collapsePanel")}
             className="fixed inset-0 z-30 bg-black/50 lg:hidden"
             onClick={() => setDiagOpen(false)}
           />
@@ -110,6 +116,7 @@ export default function App() {
             <div className="w-full lg:w-[300px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
+                  type="button"
                   onClick={() => setSidebarOpen(!sidebarOpen)}
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
                   title={sidebarOpen ? t("sidebar.collapsePanel") : t("sidebar.showParameters")}
@@ -196,6 +203,7 @@ export default function App() {
             <div className="w-full lg:w-[420px] h-full flex flex-col">
               <div className="sticky top-0 z-10 flex items-center gap-2 px-2.5 pt-3 pb-2 bg-card border-b border-border/30">
                 <button
+                  type="button"
                   onClick={() => setDiagOpen(!diagOpen)}
                   className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-accent transition-colors flex-shrink-0"
                   title={diagOpen ? t("sidebar.collapsePanel") : t("sidebar.showDiagnostics")}

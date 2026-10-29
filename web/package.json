@@ -8,7 +8,7 @@
     "typegen": "cargo test -p r3sizer-core --features typegen export_typescript_bindings -- --nocapture",
     "dev": "vite",
     "build": "npm run build:wasm && tsc -b && vite build && cp dist/index.html dist/404.html",
-    "lint": "biome check .",
+    "lint": "biome check --error-on-warnings .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "fsd": "steiger ./src",

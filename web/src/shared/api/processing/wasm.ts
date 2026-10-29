@@ -21,6 +21,7 @@ const WORKER_TIMEOUT = 30_000;
 
 const pending = new Map<
   number,
+  // biome-ignore lint/suspicious/noExplicitAny: one map holds resolvers for every request's result type
   { resolve: (r: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 >();
 

@@ -1,5 +1,5 @@
 import { Upload } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useImageStore } from "@/entities/images";
 
@@ -8,7 +8,6 @@ const ACCEPTED = ".png,.jpg,.jpeg,.bmp,.webp,.gif,.tiff";
 export function ImageUpload() {
   const { t } = useTranslation();
   const setInput = useImageStore((s) => s.setInput);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const handleFile = useCallback(
@@ -37,9 +36,11 @@ export function ImageUpload() {
   );
 
   return (
-    <div
+    // biome-ignore lint/a11y/noNoninteractiveElementInteractions: drag-and-drop is a mouse shortcut; the nested file input is the keyboard path
+    <label
       className={`
-        relative cursor-pointer rounded-lg border border-dashed transition-colors duration-200
+        relative block cursor-pointer rounded-lg border border-dashed transition-colors duration-200
+        focus-within:ring-2 focus-within:ring-primary/60
         ${
           isDragging
             ? "border-primary bg-primary/5 glow-amber"
@@ -52,7 +53,6 @@ export function ImageUpload() {
       }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={onDrop}
-      onClick={() => inputRef.current?.click()}
     >
       <div className="flex flex-col items-center justify-center py-14 px-6 gap-3">
         <div
@@ -68,7 +68,7 @@ export function ImageUpload() {
           <p className="text-[11px] font-mono text-muted-foreground/60">{t("upload.formats")}</p>
         </div>
       </div>
-      <input ref={inputRef} type="file" accept={ACCEPTED} className="hidden" onChange={onChange} />
-    </div>
+      <input type="file" accept={ACCEPTED} className="sr-only" onChange={onChange} />
+    </label>
   );
 }

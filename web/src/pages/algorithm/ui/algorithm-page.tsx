@@ -134,6 +134,7 @@ function renderTex(tex: string, displayMode = false) {
 }
 
 function InlineMath({ tex }: { tex: string }) {
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX output from hardcoded TeX strings
   return <span dangerouslySetInnerHTML={{ __html: renderTex(tex) }} />;
 }
 
@@ -142,6 +143,7 @@ function MathBlock({ tex }: { tex: string }) {
     <div className="my-4 rounded-lg bg-surface border border-border/40 overflow-x-auto flex">
       <div className="w-1 flex-shrink-0 rounded-l-lg bg-primary/30" />
       <div className="px-5 py-3.5 min-w-0">
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX output from hardcoded TeX strings */}
         <div dangerouslySetInnerHTML={{ __html: renderTex(tex, true) }} />
       </div>
     </div>
@@ -173,7 +175,7 @@ function HeroCurve() {
       xmlns="http://www.w3.org/2000/svg"
       className="absolute inset-0 w-full h-full"
       preserveAspectRatio="xMidYMid slice"
-      aria-hidden
+      aria-hidden="true"
     >
       {/* Subtle grid for depth */}
       {[100, 180, 260, 340].map((y) => (
