@@ -63,14 +63,54 @@ fn print_timing(label: &str, timing: &StageTiming) {
     fmt("TOTAL", total);
 }
 
+fn median<T: Copy + Ord>(mut values: [T; 3]) -> T {
+    values.sort_unstable();
+    values[1]
+}
+
+fn median_timing(timings: [StageTiming; 3]) -> StageTiming {
+    StageTiming {
+        resize_us: median(timings.map(|t| t.resize_us)),
+        contrast_us: median(timings.map(|t| t.contrast_us)),
+        baseline_us: median(timings.map(|t| t.baseline_us)),
+        probing_us: median(timings.map(|t| t.probing_us)),
+        fit_us: median(timings.map(|t| t.fit_us)),
+        robustness_us: median(timings.map(|t| t.robustness_us)),
+        final_sharpen_us: median(timings.map(|t| t.final_sharpen_us)),
+        clamp_us: median(timings.map(|t| t.clamp_us)),
+        total_us: median(timings.map(|t| t.total_us)),
+        classification_us: median(timings.map(|t| t.classification_us)),
+        adaptive_validation_us: median(timings.map(|t| t.adaptive_validation_us)),
+        ingress_us: median(timings.map(|t| t.ingress_us)),
+        evaluator_us: median(timings.map(|t| t.evaluator_us)),
+        base_quality_us: median(timings.map(|t| t.base_quality_us)),
+    }
+}
+
+fn check_stage_medians() {
+    let samples = [(100, 90, Some(2)), (200, 5, Some(10)), (300, 40, Some(5))].map(
+        |(total_us, resize_us, classification_us)| StageTiming {
+            total_us,
+            resize_us,
+            classification_us,
+            ..Default::default()
+        },
+    );
+    let result = median_timing(samples);
+    assert_eq!(result.resize_us, 40);
+    assert_eq!(result.total_us, 200);
+    assert_eq!(result.classification_us, Some(5));
+    assert_eq!(result.ingress_us, None);
+}
+
 fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
     // Warmup
     let _ = process_auto_sharp_downscale(src, params);
 
     // Timed run with two-phase split to identify gaps
-    let mut timings = Vec::new();
+    let mut timings = [StageTiming::default(); 3];
     let mut phase_timings = Vec::new();
-    for _ in 0..3 {
+    for timing in &mut timings {
         let t_prep_start = std::time::Instant::now();
         let prepared = prepare_base(src, params, &|_| {}).unwrap();
         let prep_wall_us = t_prep_start.elapsed().as_micros() as u64;
@@ -79,7 +119,7 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
         let result = process_from_prepared(&prepared, params, &|_| {}).unwrap();
         let proc_wall_us = t_proc_start.elapsed().as_micros() as u64;
 
-        timings.push(result.diagnostics.timing);
+        *timing = result.diagnostics.timing;
         phase_timings.push((prep_wall_us, proc_wall_us));
     }
 
@@ -88,7 +128,7 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
     indices.sort_by_key(|&i| timings[i].total_us);
     let median = indices[1];
 
-    print_timing(label, &timings[median]);
+    print_timing(label, &median_timing(timings));
 
     let (prep_wall, proc_wall) = phase_timings[median];
     let timing = &timings[median];
@@ -111,7 +151,7 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
     let prep_gap = prep_wall.saturating_sub(timed_in_prepare);
     let proc_gap = proc_wall.saturating_sub(timed_in_process);
 
-    println!("    --- Phase breakdown ---");
+    println!("    --- Phase breakdown (single median-total run) ---");
     println!(
         "    prepare_base wall:    {:>8} µs  (timed: {} µs, gap: {} µs)",
         prep_wall, timed_in_prepare, prep_gap
@@ -123,7 +163,8 @@ fn run_scenario(label: &str, src: &LinearRgbImage, params: &AutoSharpParams) {
 }
 
 fn main() {
-    println!("=== End-to-end pipeline profiling ===\n");
+    check_stage_medians();
+    println!("=== End-to-end pipeline profiling (independent stage medians) ===\n");
 
     // Scenario 1: 1080p → 540p (2× downscale), all modes
     {

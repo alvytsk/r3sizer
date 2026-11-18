@@ -11,8 +11,21 @@
 /// linear light before calling [`downscale`].
 use fast_image_resize as fir;
 use fir::pixels::F32x3;
+use fir::ImageView;
+use std::cell::RefCell;
 
 use crate::{CoreError, ImageSize, LinearRgbImage};
+
+#[derive(Default)]
+struct ResizeCache {
+    resizer: fir::Resizer,
+    dst: Option<fir::images::TypedImage<'static, F32x3>>,
+}
+
+thread_local! {
+    // Retain scratch at its high-water size and the current destination until thread exit.
+    static RESIZE_CACHE: RefCell<ResizeCache> = RefCell::new(ResizeCache::default());
+}
 
 /// Minimum shrink ratio (max of X and Y) that triggers the two-stage path.
 pub(crate) const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
@@ -95,19 +108,35 @@ pub(crate) fn fir_resize(
     let src_image = fir::images::TypedImageRef::<F32x3>::new(src.width(), src.height(), src_pixels)
         .map_err(|e| CoreError::InvalidParams(format!("fir source image: {e}")))?;
 
-    let mut dst_image = fir::images::TypedImage::<F32x3>::new(dst_w, dst_h);
+    RESIZE_CACHE.with(|cache| {
+        // Rayon may run another resize on this thread while this one waits for work.
+        let mut borrowed = cache.try_borrow_mut().ok();
+        let mut temporary;
+        let cache = match borrowed.as_deref_mut() {
+            Some(cache) => cache,
+            None => {
+                temporary = ResizeCache::default();
+                &mut temporary
+            }
+        };
+        let ResizeCache { resizer, dst } = cache;
+        if dst
+            .as_ref()
+            .is_some_and(|image| image.width() != dst_w || image.height() != dst_h)
+        {
+            *dst = None;
+        }
+        let dst = dst.get_or_insert_with(|| fir::images::TypedImage::new(dst_w, dst_h));
+        resizer
+            .resize_typed(
+                &src_image,
+                dst,
+                Some(&fir::ResizeOptions::new().resize_alg(alg)),
+            )
+            .map_err(|e| CoreError::InvalidParams(format!("fir resize: {e}")))?;
 
-    let mut resizer = fir::Resizer::new();
-    resizer
-        .resize_typed(
-            &src_image,
-            &mut dst_image,
-            Some(&fir::ResizeOptions::new().resize_alg(alg)),
-        )
-        .map_err(|e| CoreError::InvalidParams(format!("fir resize: {e}")))?;
-
-    let dst_floats = f32x3_slice_to_vec(dst_image.pixels());
-    LinearRgbImage::new(dst_w, dst_h, dst_floats)
+        LinearRgbImage::new(dst_w, dst_h, f32x3_slice_to_vec(dst.pixels()))
+    })
 }
 
 /// View `&[f32]` (length divisible by 3) as `&[F32x3]` without copying.
@@ -148,6 +177,156 @@ mod tests {
             }
         }
         LinearRgbImage::new(w, h, data).unwrap()
+    }
+
+    fn fresh_resize(src: &LinearRgbImage, w: u32, h: u32, alg: fir::ResizeAlg) -> Vec<f32> {
+        let src_view = fir::images::TypedImageRef::<F32x3>::new(
+            src.width(),
+            src.height(),
+            f32_slice_as_f32x3(src.pixels()),
+        )
+        .unwrap();
+        let mut dst = fir::images::TypedImage::<F32x3>::new(w, h);
+        fir::Resizer::new()
+            .resize_typed(
+                &src_view,
+                &mut dst,
+                &fir::ResizeOptions::new().resize_alg(alg),
+            )
+            .unwrap();
+        f32x3_slice_to_vec(dst.pixels())
+    }
+
+    #[test]
+    fn repeated_resizes_match_fresh_buffers_after_content_size_and_filter_changes() {
+        let mut src = gradient_image(80, 60);
+        let lanczos = fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3);
+        let bilinear = fir::ResizeAlg::Convolution(fir::FilterType::Bilinear);
+        let first = downscale(
+            &src,
+            ImageSize {
+                width: 40,
+                height: 30,
+            },
+        )
+        .unwrap();
+        let expected_first = fresh_resize(&src, 40, 30, lanczos);
+        for (w, h, alg) in [(40, 30, lanczos), (20, 15, bilinear), (40, 30, lanczos)] {
+            for value in src.pixels_mut() {
+                *value = 1.0 - *value;
+            }
+            for _ in 0..2 {
+                let expected = fresh_resize(&src, w, h, alg);
+                let actual = fir_resize(&src, w, h, alg).unwrap();
+                assert_eq!(actual.pixels().len(), expected.len());
+                assert!(actual
+                    .pixels()
+                    .iter()
+                    .zip(&expected)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()));
+            }
+        }
+        assert_eq!(first.pixels(), expected_first);
+
+        let pre = LinearRgbImage::new(40, 30, fresh_resize(&src, 40, 30, bilinear)).unwrap();
+        let expected = fresh_resize(&pre, 20, 15, lanczos);
+        for _ in 0..2 {
+            let (actual, staged) = downscale_with_info(
+                &src,
+                ImageSize {
+                    width: 20,
+                    height: 15,
+                },
+            )
+            .unwrap();
+            assert!(staged);
+            assert_eq!(actual.pixels(), expected);
+        }
+    }
+
+    #[test]
+    fn concurrent_callers_produce_independent_results() {
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                std::thread::spawn(move || {
+                    let src = gradient_image(80 + i * 2, 60);
+                    let expected = fresh_resize(
+                        &src,
+                        40,
+                        30,
+                        fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
+                    );
+                    for _ in 0..3 {
+                        let out = downscale(
+                            &src,
+                            ImageSize {
+                                width: 40,
+                                height: 30,
+                            },
+                        )
+                        .unwrap();
+                        assert_eq!(out.pixels(), expected);
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn rayon_callers_can_resize_while_waiting_for_nested_work() {
+        use rayon::prelude::*;
+        let src = gradient_image(512, 512);
+        let expected = fresh_resize(
+            &src,
+            256,
+            256,
+            fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
+        );
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap()
+            .install(|| {
+                (0..64).into_par_iter().for_each(|_| {
+                    let actual = downscale(
+                        &src,
+                        ImageSize {
+                            width: 256,
+                            height: 256,
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(actual.pixels(), expected);
+                });
+            });
+    }
+
+    #[test]
+    fn busy_cache_uses_temporary_buffers() {
+        let src = gradient_image(80, 60);
+        let expected = fresh_resize(
+            &src,
+            40,
+            30,
+            fir::ResizeAlg::Convolution(fir::FilterType::Lanczos3),
+        );
+        RESIZE_CACHE.with(|cache| {
+            // Reproduce the borrow held by a resize suspended on nested Rayon work.
+            let _busy = cache.borrow_mut();
+            let actual = downscale(
+                &src,
+                ImageSize {
+                    width: 40,
+                    height: 30,
+                },
+            )
+            .unwrap();
+            assert_eq!(actual.pixels(), expected);
+        });
     }
 
     #[test]
