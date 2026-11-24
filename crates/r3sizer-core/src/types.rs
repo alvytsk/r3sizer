@@ -569,7 +569,9 @@ pub struct AutoSharpParams {
     /// Performance-quality tradeoff.  Not applied automatically: call
     /// [`AutoSharpParams::resolved`] before pipeline entry to fold this mode's
     /// overrides into the speed-sensitive fields (as the CLI and WASM callers
-    /// do).  [`AutoSharpParams::validate`] does not modify params.
+    /// do).  [`AutoSharpParams::validate`] rejects params whose mode is still
+    /// set, so forgetting `.resolved()` fails loudly instead of dropping the
+    /// mode silently.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pipeline_mode: Option<PipelineMode>,
 }
@@ -672,6 +674,16 @@ impl AutoSharpParams {
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.
     pub fn validate(&self) -> Result<(), CoreError> {
+        if self.pipeline_mode.is_some() {
+            // An unresolved mode would be silently ignored downstream; every
+            // production caller resolves before entry, so this only fires
+            // when the caller forgot.
+            return Err(CoreError::InvalidParams(
+                "pipeline_mode is set but was never resolved; call \
+                 AutoSharpParams::resolved() before pipeline entry"
+                    .into(),
+            ));
+        }
         if self.target_width == 0 || self.target_height == 0 {
             return Err(CoreError::InvalidParams(
                 "target dimensions must be non-zero".into(),
@@ -689,6 +701,7 @@ impl AutoSharpParams {
         }
         if let SharpenStrategy::ContentAdaptive {
             backoff_scale_factor,
+            gain_table,
             ..
         } = &self.sharpen_strategy
         {
@@ -697,6 +710,7 @@ impl AutoSharpParams {
                     "backoff_scale_factor must be in (0.0, 1.0)".into(),
                 ));
             }
+            gain_table.validate()?;
         }
         match &self.probe_strengths {
             ProbeConfig::TwoPass {
@@ -734,6 +748,21 @@ impl AutoSharpParams {
             }
             _ => {
                 self.probe_strengths.resolve()?;
+            }
+        }
+        if let Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift,
+            saturation_guard,
+            ..
+        }) = &self.experimental_sharpen_mode
+        {
+            if !max_chroma_shift.is_finite() || *max_chroma_shift < 0.0 {
+                return Err(CoreError::InvalidParams(
+                    "max_chroma_shift must be finite and >= 0".into(),
+                ));
+            }
+            if let Some(guard) = saturation_guard {
+                guard.validate()?;
             }
         }
         Ok(())
@@ -1013,10 +1042,15 @@ impl GainMap {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct GainTable {
+    /// Gain for flat regions. Must be in `[0.25, 4.0]` (hard validation bound).
     pub flat: f32,
+    /// Gain for textured regions. Must be in `[0.25, 4.0]` (hard validation bound).
     pub textured: f32,
+    /// Gain for strong-edge regions. Must be in `[0.25, 4.0]` (hard validation bound).
     pub strong_edge: f32,
+    /// Gain for microtexture regions. Must be in `[0.25, 4.0]` (hard validation bound).
     pub microtexture: f32,
+    /// Gain for the risky-halo zone. Must be in `[0.25, 4.0]` (hard validation bound).
     pub risky_halo_zone: f32,
 }
 
@@ -1026,15 +1060,19 @@ impl GainTable {
     const MIN_GAIN: f32 = Self::MIN_GAIN_VALUE;
     const MAX_GAIN: f32 = 4.0;
 
-    /// Construct with validation: all values must be in `[0.25, 4.0]`.
-    pub fn new(
-        flat: f32,
-        textured: f32,
-        strong_edge: f32,
-        microtexture: f32,
-        risky_halo_zone: f32,
-    ) -> Result<Self, CoreError> {
-        let vals = [flat, textured, strong_edge, microtexture, risky_halo_zone];
+    /// Validate that all values are within the hard bounds `[0.25, 4.0]`.
+    ///
+    /// Shared by [`GainTable::new`] and [`AutoSharpParams::validate`] (the
+    /// latter covers struct-literal and deserialization routes that bypass
+    /// the constructor).
+    pub fn validate(&self) -> Result<(), CoreError> {
+        let vals = [
+            self.flat,
+            self.textured,
+            self.strong_edge,
+            self.microtexture,
+            self.risky_halo_zone,
+        ];
         for &v in &vals {
             if !(Self::MIN_GAIN..=Self::MAX_GAIN).contains(&v) {
                 return Err(CoreError::InvalidParams(format!(
@@ -1044,13 +1082,26 @@ impl GainTable {
                 )));
             }
         }
-        Ok(Self {
+        Ok(())
+    }
+
+    /// Construct with validation: all values must be in `[0.25, 4.0]`.
+    pub fn new(
+        flat: f32,
+        textured: f32,
+        strong_edge: f32,
+        microtexture: f32,
+        risky_halo_zone: f32,
+    ) -> Result<Self, CoreError> {
+        let table = Self {
             flat,
             textured,
             strong_edge,
             microtexture,
             risky_halo_zone,
-        })
+        };
+        table.validate()?;
+        Ok(table)
     }
 
     /// Canonical v0.3 preset. Range `[0.70, 1.10]`.
@@ -1576,6 +1627,7 @@ pub enum ExperimentalSharpenMode {
     LumaPlusChromaGuard {
         /// Maximum allowed chroma shift as a fraction of original chroma magnitude.
         /// Values above this trigger soft clamping. Default: 0.10 (10%).
+        /// Must be finite and >= 0.
         max_chroma_shift: f32,
         /// Per-region-class multipliers for `max_chroma_shift`.
         /// Only effective when the pipeline also produces a region map
@@ -1637,8 +1689,10 @@ impl Default for ChromaRegionFactors {
 #[cfg_attr(feature = "typegen", derive(TS))]
 pub struct SaturationGuardParams {
     /// Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+    /// Must be in (0, 1).
     pub min_scale: f32,
     /// Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+    /// Must be positive and finite.
     pub gamma: f32,
 }
 
@@ -1648,6 +1702,25 @@ impl Default for SaturationGuardParams {
             min_scale: 0.6,
             gamma: 1.5,
         }
+    }
+}
+
+impl SaturationGuardParams {
+    /// Validate hard bounds: `gamma` must be positive and finite, `min_scale`
+    /// must be in `(0, 1)` — `min_scale >= 1` would *loosen* the threshold
+    /// for saturated pixels, inverting the documented intent.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        if self.gamma <= 0.0 || !self.gamma.is_finite() {
+            return Err(CoreError::InvalidParams(
+                "saturation_guard.gamma must be positive and finite".into(),
+            ));
+        }
+        if self.min_scale <= 0.0 || self.min_scale >= 1.0 || !self.min_scale.is_finite() {
+            return Err(CoreError::InvalidParams(
+                "saturation_guard.min_scale must be in (0, 1)".into(),
+            ));
+        }
+        Ok(())
     }
 }
 

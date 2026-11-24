@@ -37,7 +37,27 @@ export type ImageSize = { width: number, height: number, };
 
 export type MetricWeights = { gamut_excursion: number, halo_ringing: number, edge_overshoot: number, texture_flattening: number, };
 
-export type GainTable = { flat: number, textured: number, strong_edge: number, microtexture: number, risky_halo_zone: number, };
+export type GainTable = { 
+/**
+ * Gain for flat regions. Must be in `[0.25, 4.0]` (hard validation bound).
+ */
+flat: number, 
+/**
+ * Gain for textured regions. Must be in `[0.25, 4.0]` (hard validation bound).
+ */
+textured: number, 
+/**
+ * Gain for strong-edge regions. Must be in `[0.25, 4.0]` (hard validation bound).
+ */
+strong_edge: number, 
+/**
+ * Gain for microtexture regions. Must be in `[0.25, 4.0]` (hard validation bound).
+ */
+microtexture: number, 
+/**
+ * Gain for the risky-halo zone. Must be in `[0.25, 4.0]` (hard validation bound).
+ */
+risky_halo_zone: number, };
 
 export type ClassificationParams = { gradient_low_threshold: number, gradient_high_threshold: number, variance_low_threshold: number, variance_high_threshold: number, variance_window: number, };
 
@@ -147,7 +167,9 @@ evaluator_config?: EvaluatorConfig | null,
  * Performance-quality tradeoff.  Not applied automatically: call
  * [`AutoSharpParams::resolved`] before pipeline entry to fold this mode's
  * overrides into the speed-sensitive fields (as the CLI and WASM callers
- * do).  [`AutoSharpParams::validate`] does not modify params.
+ * do).  [`AutoSharpParams::validate`] rejects params whose mode is still
+ * set, so forgetting `.resolved()` fails loudly instead of dropping the
+ * mode silently.
  */
 pipeline_mode?: PipelineMode | null, };
 
@@ -465,10 +487,12 @@ export type ChromaRegionFactors = { flat: number, textured: number, strong_edge:
 export type SaturationGuardParams = { 
 /**
  * Minimum scale factor applied to fully-saturated pixels. Default: 0.6.
+ * Must be in (0, 1).
  */
 min_scale: number, 
 /**
  * Gamma exponent controlling the saturation→scale curve. Default: 1.5.
+ * Must be positive and finite.
  */
 gamma: number, };
 
@@ -476,6 +500,7 @@ export type ExperimentalSharpenMode = { "luma_plus_chroma_guard": {
 /**
  * Maximum allowed chroma shift as a fraction of original chroma magnitude.
  * Values above this trigger soft clamping. Default: 0.10 (10%).
+ * Must be finite and >= 0.
  */
 max_chroma_shift: number, 
 /**
