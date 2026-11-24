@@ -25,11 +25,13 @@ export const DEFAULT_STRIPED_INGEST_THRESHOLD_PIXELS = 24_000_000;
 
 /**
  * Minimum shrink ratio (max of the two axes) the striped ingest path accepts.
- * Below this the pre-reduce to ~2x target is meaningless and core rejects it
- * (`validate_striped_shrink`). Mirrors core's `STAGED_SHRINK_THRESHOLD`. A
- * large image with a modest downscale falls back to the monolithic path.
+ * Below 4.0 the pre-reduce factor floors to 1, so the "intermediate" would be
+ * the source itself and the ingest a full-size identity pass; core rejects it
+ * (`validate_striped_shrink`, which mirrors the staged-shrink guard in
+ * `resize.rs`). A large image with a modest downscale falls back to the
+ * monolithic path.
  */
-export const STRIPED_INGEST_MIN_SHRINK = 3.0;
+export const STRIPED_INGEST_MIN_SHRINK = 4.0;
 
 export interface DecodedInput {
   /** Original source dimensions. */

@@ -107,12 +107,19 @@ describe("ProcessingClient", () => {
     expect(sent.diagnostics_level).toBe("summary");
   });
 
-  it("falls back to the monolithic path when a large image has a modest downscale", async () => {
-    // 8000x6000 (48MP) is classified striped at decode, but target 4000x3000
-    // is only a 2x shrink — below the 3.0 striped-ingest threshold, so the
-    // striped ingest would reject it. The job must run monolithic instead.
+  it.each([
+    ["2x", 4000, 3000],
+    ["3x", 2667, 2000],
+    ["3.5x", 2286, 1714],
+    ["3.99x", 2005, 1504],
+  ] as const)("falls back to the monolithic path at a %s shrink of a large image", async (_ratio, targetWidth, targetHeight) => {
+    // 8000x6000 (48MP) is classified striped at decode, but below a 4x
+    // shrink the pre-reduce factor floors to 1: the striped ingest would be
+    // an identity pass over the whole source and core rejects it. The job
+    // must run monolithic instead.
     await client.decode(new File([], "big.jpg"));
-    await client.process({ ...params(), target_width: 4000, target_height: 3000 }).promise;
+    await client.process({ ...params(), target_width: targetWidth, target_height: targetHeight })
+      .promise;
     expect(wasm.ingestBegin).not.toHaveBeenCalled();
     expect(wasm.processImageParallel).toHaveBeenCalledWith(
       expect.objectContaining({ length: 8000 * 6000 * 4 }),
@@ -121,6 +128,13 @@ describe("ProcessingClient", () => {
       expect.any(String),
       expect.anything(),
     );
+  });
+
+  it("runs the striped ingest at exactly 4x", async () => {
+    // The first ratio with a real pre-reduce: the striped path must still take it.
+    await client.decode(new File([], "big.jpg"));
+    await client.process({ ...params(), target_width: 2000, target_height: 1500 }).promise;
+    expect(wasm.ingestBegin).toHaveBeenCalledWith(8000, 6000, 2000, 1500);
   });
 
   it("uses the monolithic path for small images", async () => {
