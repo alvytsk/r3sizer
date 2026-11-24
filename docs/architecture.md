@@ -172,7 +172,7 @@ sequenceDiagram
     User->>UI: Drop an image file
     UI->>UI: createImageBitmap, orientation from-image,<br/>sRGB canvas context
 
-    alt Over 24 MP and shrink ratio at least 3x
+    alt Over 24 MP and shrink ratio at least 4x
         UI->>MW: ingest_begin, then ingest_stripe per stripe
         MW->>MW: StripedPreReducer accumulates into<br/>the 2x intermediate
         UI->>MW: ingest_end

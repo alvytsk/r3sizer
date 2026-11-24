@@ -438,7 +438,7 @@ base_resize_quality?: BaseResizeQuality | null,
 effective_target_artifact_ratio: number, 
 /**
  * Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
- * Active for shrink ratios above ~3×.
+ * Active for shrink ratios of 4× and above.
  */
 used_staged_shrink?: boolean, ingest?: IngestDiagnostics | null, };
 

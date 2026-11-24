@@ -14,15 +14,22 @@ use fir::pixels::F32x3;
 
 use crate::{CoreError, ImageSize, LinearRgbImage};
 
-/// Minimum shrink ratio (max of X and Y) that triggers the two-stage path.
+/// Lower bound of the shrink-ratio window in which the two-stage path can
+/// engage. Necessary but not sufficient: the pre-reduce to ~2x the target
+/// only does real work when [`crate::ingest::compute_intermediate_size`]
+/// returns something smaller than the source. Its factor is
+/// `floor(max_shrink / 2)`, so the two-stage path really starts at a 4x
+/// shrink; from this threshold up to 4x the factor floors to 1 and staging
+/// is skipped.
 pub(crate) const STAGED_SHRINK_THRESHOLD: f64 = 3.0;
 
 /// Downscale `src` to `target` size using Lanczos3 resampling.
 ///
-/// For shrink ratios above `STAGED_SHRINK_THRESHOLD` a two-stage path is
-/// used: a fast bilinear pre-reduce brings the image to ~2× the target, then a
-/// final Lanczos3 pass produces the output.  This follows the same principle as
-/// libvips' `gap` parameter.
+/// For shrink ratios of 4x and above a two-stage path is used: a fast bilinear
+/// pre-reduce brings the image to ~2× the target, then a final Lanczos3 pass
+/// produces the output.  This follows the same principle as libvips' `gap`
+/// parameter.  Below 4x the pre-reduce would not shrink the image, so those
+/// ratios go single-stage.
 ///
 /// Returns a clone-sized result; `src` is not mutated.
 /// Returns `Err` if `target` has a zero dimension.

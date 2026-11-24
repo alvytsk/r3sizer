@@ -1396,7 +1396,7 @@ pub struct AutoSharpDiagnostics {
 
     // --- Performance optimisation flags ---
     /// Whether the two-stage shrink path was used (pre-reduce + Lanczos3).
-    /// Active for shrink ratios above ~3×.
+    /// Active for shrink ratios of 4× and above.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub used_staged_shrink: bool,
 

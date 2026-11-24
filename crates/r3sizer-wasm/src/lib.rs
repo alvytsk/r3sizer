@@ -108,9 +108,10 @@ pub fn clear_cache() {
 // Striped ingest — streaming row-stripe input for very large images
 // ---------------------------------------------------------------------------
 
-/// Begin a striped ingest for a large image. Validates the shrink ratio
-/// (>= 3x), computes the intermediate size, and invalidates all caches from
-/// the previous image. Returns `{ width, height }` of the intermediate.
+/// Begin a striped ingest for a large image. Validates that the shrink ratio
+/// gives a real pre-reduce (>= 4x), computes the intermediate size, and
+/// invalidates all caches from the previous image. Returns `{ width, height }`
+/// of the intermediate.
 #[wasm_bindgen]
 pub fn ingest_begin(
     src_w: u32,
