@@ -837,13 +837,15 @@ fn finish_pipeline(
     let fit_us = t0.elapsed().as_micros() as u64;
 
     // --- LOO stability ---
+    // Only a polynomial root is comparable to the refits' roots; a selected
+    // sample strength (direct search, R² redirect, root out of range) is not.
     on_stage("robustness");
     let t0 = Instant::now();
-    let (loo_stable, max_loo_root_change) = if fit_coefficients.is_some() {
+    let loo = if matches!(solve_result.selection_mode, SelectionMode::PolynomialRoot) {
         let primary_s = solve_result.selected_strength as f64;
         loo_stability(&fit_data, p0, s_min, s_max, primary_s)
     } else {
-        (true, 0.0)
+        LooStability::NOT_RUN
     };
     let robustness_us = t0.elapsed().as_micros() as u64;
 
@@ -854,8 +856,9 @@ fn finish_pipeline(
         quasi_monotonic,
         r_squared_ok,
         well_conditioned,
-        loo_stable,
-        max_loo_root_change,
+        loo_stable: loo.stable,
+        max_loo_root_change: loo.max_root_change,
+        loo_coverage: loo.coverage,
     });
 
     let budget_reachable_baseline = match params.metric_mode {
@@ -876,7 +879,6 @@ fn finish_pipeline(
         budget_reachable_baseline,
         monotonic,
         r_squared_ok,
-        loo_stable,
         params.fit_strategy,
         &solve_result.crossing_status,
     );
@@ -1293,27 +1295,55 @@ fn compute_metric_value(p_total: f32, baseline: f32, mode: MetricMode) -> f32 {
 // Leave-one-out stability check
 // ---------------------------------------------------------------------------
 
+/// Outcome of the leave-one-out root stability check.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LooStability {
+    /// Every refit produced an in-range root and none moved beyond the
+    /// stability threshold.
+    stable: bool,
+    /// Largest relative change among the refits that produced an in-range root.
+    max_root_change: f64,
+    /// Fraction of refits that produced an in-range root.
+    coverage: f64,
+}
+
+impl LooStability {
+    /// Reported when the check does not run: nothing counts against the fit.
+    const NOT_RUN: Self = Self {
+        stable: true,
+        max_root_change: 0.0,
+        coverage: 1.0,
+    };
+}
+
 /// Refit the cubic N times (dropping one data point each time), re-solve for
-/// the root, and report the maximum relative change vs the primary root.
+/// the root, and report how far the root moves relative to `primary_s`, the
+/// in-range root of the full fit.
 ///
-/// Returns `(stable, max_relative_change)`.  `stable` is true when
-/// `max_relative_change < LOO_THRESHOLD`.
+/// A refit that cannot be fitted, or whose root leaves `[s_min, s_max]`, does
+/// not show where the root moves — which is not evidence that it stays put.
+/// Such refits lower [`LooStability::coverage`] and fail the check instead of
+/// being skipped as maximally stable.
+///
+/// Returns [`LooStability::NOT_RUN`] for fewer than 5 points (a refit needs 4).
 fn loo_stability(
     fit_data: &[(f64, f64)],
     p0: f64,
     s_min: f64,
     s_max: f64,
     primary_s: f64,
-) -> (bool, f64) {
+) -> LooStability {
     const LOO_THRESHOLD: f64 = 0.25; // 25% relative change
 
-    if fit_data.len() < 5 {
+    let n = fit_data.len();
+    if n < 5 {
         // Not enough data for meaningful LOO (need >=4 after dropping one).
-        return (true, 0.0);
+        return LooStability::NOT_RUN;
     }
 
+    let mut in_range = 0usize;
     let mut max_change = 0.0f64;
-    for skip in 0..fit_data.len() {
+    for skip in 0..n {
         let subset: Vec<(f64, f64)> = fit_data
             .iter()
             .enumerate()
@@ -1321,6 +1351,7 @@ fn loo_stability(
             .map(|(_, &v)| v)
             .collect();
 
+        // A refit that fails here leaves `in_range` untouched on purpose.
         if let Ok(poly) = fit_cubic(&subset) {
             // Find the largest root in range for this refit.
             if let Ok(result) = find_sharpness_with_policy(
@@ -1332,6 +1363,7 @@ fn loo_stability(
                 crate::SelectionPolicy::GamutOnly, // LOO only checks polynomial root stability
             ) {
                 if matches!(result.selection_mode, SelectionMode::PolynomialRoot) {
+                    in_range += 1;
                     let loo_s = result.selected_strength as f64;
                     let change = if primary_s.abs() > 1e-10 {
                         ((loo_s - primary_s) / primary_s).abs()
@@ -1346,7 +1378,11 @@ fn loo_stability(
         }
     }
 
-    (max_change < LOO_THRESHOLD, max_change)
+    LooStability {
+        stable: in_range == n && max_change < LOO_THRESHOLD,
+        max_root_change: max_change,
+        coverage: in_range as f64 / n as f64,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1356,14 +1392,15 @@ fn loo_stability(
 /// Determine why the pipeline used a fallback instead of the polynomial root.
 ///
 /// Returns `None` when `selection_mode == PolynomialRoot` (no fallback).
-#[allow(clippy::too_many_arguments)]
+///
+/// `FallbackReason::FitUnstable` is never returned: the leave-one-out check
+/// runs only for a polynomial root, which takes the early return above.
 fn determine_fallback_reason(
     selection_mode: &SelectionMode,
     fit_status: &FitStatus,
     budget_reachable_baseline: bool,
     monotonic: bool,
     r_squared_ok: bool,
-    loo_stable: bool,
     fit_strategy: FitStrategy,
     crossing_status: &crate::CrossingStatus,
 ) -> Option<FallbackReason> {
@@ -1386,9 +1423,6 @@ fn determine_fallback_reason(
     }
     if !monotonic {
         return Some(FallbackReason::MetricNonMonotonic);
-    }
-    if !loo_stable {
-        return Some(FallbackReason::FitUnstable);
     }
     if matches!(crossing_status, crate::CrossingStatus::NotFoundInRange) {
         return Some(FallbackReason::RootOutOfRange);
@@ -2010,5 +2044,181 @@ mod tests {
         )
         .unwrap();
         assert!(hybrid.iter().all(|s| s.breakdown.is_some()));
+    }
+
+    // -----------------------------------------------------------------------
+    // LOO stability
+    // -----------------------------------------------------------------------
+
+    /// Six probes on `y = 0.001·s²` — a quadratic, so every leave-one-out
+    /// refit reproduces it exactly.
+    fn quadratic_points() -> Vec<(f64, f64)> {
+        [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+            .iter()
+            .map(|&s| (s, 0.001 * s * s))
+            .collect()
+    }
+
+    /// The primary root the way the pipeline derives it: the largest in-range
+    /// root of the full fit.
+    fn primary_root(data: &[(f64, f64)], p0: f64, s_min: f64, s_max: f64) -> f64 {
+        use crate::SelectionPolicy;
+
+        let poly = fit_cubic(data).unwrap();
+        let result =
+            find_sharpness_with_policy(&poly, p0, s_min, s_max, &[], SelectionPolicy::GamutOnly)
+                .unwrap();
+        assert_eq!(
+            result.selection_mode,
+            SelectionMode::PolynomialRoot,
+            "test data must have an in-range root"
+        );
+        result.selected_strength as f64
+    }
+
+    #[test]
+    fn loo_stable_fit_reports_small_change() {
+        // A quartic perturbation keeps the data off any exact cubic, so the
+        // refits disagree slightly: every root stays within 0.3% of the
+        // primary (independent least-squares check).
+        let data: Vec<(f64, f64)> = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+            .iter()
+            .map(|&s: &f64| (s, 0.001 * s * s + 0.0001 * s.powi(4)))
+            .collect();
+        let (s_min, s_max, p0) = (0.0, 3.0, 0.004);
+        let primary_s = primary_root(&data, p0, s_min, s_max);
+
+        let loo = loo_stability(&data, p0, s_min, s_max, primary_s);
+
+        assert!(loo.stable);
+        assert!(
+            (loo.max_root_change - 0.0025).abs() < 5e-4,
+            "max_root_change = {}",
+            loo.max_root_change
+        );
+    }
+
+    #[test]
+    fn loo_influential_point_is_unstable() {
+        // One probe at 3x its trend value drags the full-fit root from √2 to
+        // ≈2.05.  The refits land between ≈1.09 (dropping the s = 0.5 probe)
+        // and √2 (dropping the influential one) — up to 47% away.
+        let mut data = quadratic_points();
+        data[5].1 = 0.03;
+        let (s_min, s_max, p0) = (0.0, 3.0, 0.002);
+        let primary_s = primary_root(&data, p0, s_min, s_max);
+
+        let loo = loo_stability(&data, p0, s_min, s_max, primary_s);
+
+        assert!(!loo.stable);
+        assert!(
+            loo.max_root_change > 0.25,
+            "max_root_change = {}",
+            loo.max_root_change
+        );
+    }
+
+    #[test]
+    fn loo_near_zero_primary_uses_absolute_change() {
+        // Refits of exact quadratic data all root at √(0.004 / 0.001) = 2.
+        // With a primary of 0 the relative form would divide by zero; the
+        // absolute form reports the 2.0 shift instead.
+        let data = quadratic_points();
+
+        let loo = loo_stability(&data, 0.004, 0.0, 3.0, 0.0);
+
+        assert!(!loo.stable);
+        assert!(
+            (loo.max_root_change - 2.0).abs() < 1e-6,
+            "max_root_change = {}",
+            loo.max_root_change
+        );
+    }
+
+    #[test]
+    fn loo_with_fewer_than_five_points_is_not_run() {
+        let data = quadratic_points()[..4].to_vec();
+
+        let loo = loo_stability(&data, 0.004, 0.0, 1.5, 2.0);
+
+        assert_eq!(
+            loo,
+            LooStability {
+                stable: true,
+                max_root_change: 0.0,
+                coverage: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn loo_refit_root_leaving_range_is_unstable() {
+        // Five probes lie on y = 0.001·s² and P0 = 0.010, so the refit that
+        // drops the raised top probe is that exact quadratic and roots at
+        // √10 ≈ 3.162 — outside the probed range [0, 3]. Every other refit
+        // stays within 4% of the primary root, so the escaped root is the
+        // only evidence of instability and must not be skipped.
+        let mut data = quadratic_points();
+        data[5].1 = 0.02;
+        let (s_min, s_max, p0) = (0.0, 3.0, 0.010);
+        let primary_s = primary_root(&data, p0, s_min, s_max);
+
+        let loo = loo_stability(&data, p0, s_min, s_max, primary_s);
+
+        assert!(
+            !loo.stable,
+            "a refit root that leaves the range must count against stability (max_root_change = {})",
+            loo.max_root_change
+        );
+        assert!(
+            loo.max_root_change < 0.25,
+            "max_root_change = {}",
+            loo.max_root_change
+        );
+    }
+
+    #[test]
+    fn loo_unfittable_refit_is_unstable() {
+        // Every refit leaves four points on at most two distinct strengths —
+        // a singular fit, so no refit says where the root moves.  That is not
+        // evidence that the root stays put.
+        let data = vec![
+            (1.0, 0.001),
+            (2.0, 0.004),
+            (2.0, 0.004),
+            (2.0, 0.004),
+            (2.0, 0.004),
+        ];
+
+        let loo = loo_stability(&data, 0.004, 0.0, 3.0, 2.0);
+
+        assert!(
+            !loo.stable,
+            "an unfittable refit must count against stability (max_root_change = {})",
+            loo.max_root_change
+        );
+    }
+
+    #[test]
+    fn loo_reports_coverage_of_in_range_roots() {
+        // In the escaping-root data exactly one of six refits loses its root.
+        let mut data = quadratic_points();
+        data[5].1 = 0.02;
+        let (s_min, s_max, p0) = (0.0, 3.0, 0.010);
+        let primary_s = primary_root(&data, p0, s_min, s_max);
+
+        let loo = loo_stability(&data, p0, s_min, s_max, primary_s);
+
+        assert!(
+            (loo.coverage - 5.0 / 6.0).abs() < 1e-9,
+            "coverage = {}",
+            loo.coverage
+        );
+
+        // Full coverage when every refit roots in range.
+        let data = quadratic_points();
+        let primary_s = primary_root(&data, 0.002, 0.0, 3.0);
+        let loo = loo_stability(&data, 0.002, 0.0, 3.0, primary_s);
+        assert_eq!(loo.coverage, 1.0);
     }
 }

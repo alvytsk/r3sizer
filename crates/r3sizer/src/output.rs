@@ -131,6 +131,10 @@ pub fn print_summary(diag: &AutoSharpDiagnostics) {
             if r.loo_stable { "yes" } else { "no" }
         );
         println!("  Max LOO root change       : {:.4}", r.max_loo_root_change);
+        println!(
+            "  LOO coverage              : {:.0}%",
+            r.loo_coverage * 100.0
+        );
     }
 
     // Timing

@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import type { AutoSharpDiagnostics } from "@/shared/lib";
+import type { AutoSharpDiagnostics, RobustnessFlags } from "@/shared/lib";
 
 export type ChipVariant = "ok" | "warn" | "error" | "neutral";
 
@@ -35,6 +35,15 @@ export interface DiagnosisEntry {
   detail: string;
   /** Raw enum value shown as a small tag after the human headline. */
   tag?: string;
+}
+
+/**
+ * Percent of leave-one-out refits that produced an in-range root, when some
+ * refit did not; `null` when every refit did.  A failed check with incomplete
+ * coverage is about a root leaving the probed range, not about its shift.
+ */
+export function incompleteLooCoverage(r: RobustnessFlags): number | null {
+  return r.loo_coverage < 1 ? Math.round(r.loo_coverage * 100) : null;
 }
 
 export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): DiagnosisEntry[] {
@@ -118,7 +127,14 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
   }
 
   if (d.robustness) {
-    const { monotonic, quasi_monotonic, r_squared_ok, well_conditioned, loo_stable } = d.robustness;
+    const {
+      monotonic,
+      quasi_monotonic,
+      r_squared_ok,
+      well_conditioned,
+      loo_stable,
+      max_loo_root_change,
+    } = d.robustness;
 
     if (!quasi_monotonic) {
       entries.push({
@@ -153,13 +169,22 @@ export function buildDiagnosis(d: AutoSharpDiagnostics, t: TFunction): Diagnosis
     }
 
     if (!loo_stable) {
-      entries.push({
-        severity: "warn",
-        headline: t("diagnostics.robustness.looUnstable", {
-          value: d.robustness.max_loo_root_change.toFixed(3),
-        }),
-        detail: t("diagnostics.robustness.looUnstableDetail"),
-      });
+      const coverage = incompleteLooCoverage(d.robustness);
+      entries.push(
+        coverage === null
+          ? {
+              severity: "warn" as const,
+              headline: t("diagnostics.robustness.looUnstable", {
+                value: max_loo_root_change.toFixed(3),
+              }),
+              detail: t("diagnostics.robustness.looUnstableDetail"),
+            }
+          : {
+              severity: "warn" as const,
+              headline: t("diagnostics.robustness.looOutOfRange", { value: coverage }),
+              detail: t("diagnostics.robustness.looOutOfRangeDetail"),
+            },
+      );
     }
   }
 

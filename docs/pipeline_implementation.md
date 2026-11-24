@@ -251,15 +251,25 @@ After solving, `FitQuality` is computed:
 
 ### LOO stability check
 
-After a successful fit and solve, the pipeline performs leave-one-out cross-validation:
+When the selection is a polynomial root, the pipeline performs leave-one-out
+cross-validation on the fit:
 
-1. For each of N probe samples, refit the cubic dropping that sample
-2. Re-solve for the root using the leave-one-out polynomial
-3. Record `|s*_full - s*_drop_i| / s*_full`
-4. `max_loo_root_change` = maximum across all N drops
-5. `loo_stable = max_loo_root_change < 0.5`
+1. For each of N fitted points (probe samples plus the `(0, 0)` anchor in
+   relative-to-base mode), refit the cubic dropping that point
+2. Re-solve for the largest root in `[s_min, s_max]` using the leave-one-out polynomial
+3. Record `|s*_full - s*_drop_i| / s*_full` for the refits that produced such a root
+4. `max_loo_root_change` = maximum of those records
+5. `loo_coverage` = (refits with an in-range root) / N
+6. `loo_stable = loo_coverage == 1.0 && max_loo_root_change < 0.25`
 
-If `!loo_stable`, the pipeline falls back to direct search with `FallbackReason::FitUnstable`.
+A refit that cannot be fitted, or whose root leaves the probed range, lowers
+`loo_coverage` instead of being skipped.  For a sample-based selection (direct
+search, R² redirect, out-of-range root) the check does not run and reports
+`loo_stable = true`, `max_loo_root_change = 0.0`, `loo_coverage = 1.0`.  An
+unreachable budget still applies the polynomial root, so there the check runs.
+
+`loo_stable` is diagnostic only: it never changes the selection, so
+`FallbackReason::FitUnstable` is not emitted by the current pipeline.
 
 N=7 refits of a 4x4 system is negligible cost (~100μs total).
 
@@ -273,8 +283,9 @@ N=7 refits of a 4x4 system is negligible cost (~100μs total).
 | `quasi_monotonic` | `check_monotonicity` | ≤ 1 inversion |
 | `r_squared_ok` | `FitQuality` | R² > 0.85 |
 | `well_conditioned` | `FitQuality` | min_pivot > 1e-8 |
-| `loo_stable` | LOO cross-validation | max change < 0.5 |
+| `loo_stable` | LOO cross-validation | coverage == 1.0 and max change < 0.25 |
 | `max_loo_root_change` | LOO cross-validation | raw value |
+| `loo_coverage` | LOO cross-validation | raw fraction |
 
 ### Fallback reason determination
 
@@ -284,8 +295,9 @@ When the pipeline does not use the polynomial root, `determine_fallback_reason` 
 2. `DirectSearchConfigured` — `FitStrategy::DirectSearch`
 3. `FitFailed` — polynomial fit returned an error
 4. `MetricNonMonotonic` — probe data not monotonically increasing
-5. `FitUnstable` — LOO cross-validation shows unstable root
-6. `RootOutOfRange` — fit succeeded but no root in [s_min, s_max]
+5. `RootOutOfRange` — fit succeeded but no root in [s_min, s_max]
+
+`FitUnstable` is no longer mapped (see "LOO stability check" above).
 
 ---
 

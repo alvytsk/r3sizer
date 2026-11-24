@@ -278,7 +278,9 @@
       "illConditioned": "Robustness: ill-conditioned Vandermonde matrix",
       "illConditionedDetail": "The min_pivot of the Vandermonde system is near zero. Probe strengths may be too close together or too sparse, causing numerical instability in the polynomial solve.",
       "looUnstable": "Robustness: LOO unstable (Δs* = {{value}})",
-      "looUnstableDetail": "Leave-one-out cross-validation shows that removing any single probe shifts the root estimate significantly. The selected strength is sensitive to measurement noise."
+      "looUnstableDetail": "Leave-one-out cross-validation shows that removing any single probe shifts the root estimate significantly. The selected strength is sensitive to measurement noise.",
+      "looOutOfRange": "Robustness: LOO unstable (root in range: {{value}}% of refits)",
+      "looOutOfRangeDetail": "Dropping a single probe pushes the root out of the probed range, or makes the refit unsolvable. The selected strength depends on individual probes; widen the probe range or add probes."
     },
     "fitTab": {
       "quality": "Quality",
@@ -307,7 +309,8 @@
       "quasiMonotonic": "Multiple inversions in P(s) — cubic model is unreliable for this data.",
       "rSquaredOk": "R² < 0.85 — add more probes or widen the probe range.",
       "wellConditioned": "min_pivot ≤ 1e-8 — probe spacings cause numerical instability in the solve.",
-      "looStable": "Removing any single probe shifts s* significantly — result is noise-sensitive."
+      "looStable": "Removing any single probe shifts s* significantly — result is noise-sensitive.",
+      "looCoverage": "{{value}}% of leave-one-out refits produced an in-range root — dropping a probe pushes s* out of the probed range."
     }
   },
   "advice": {
@@ -329,6 +332,7 @@
     "poorFitBody": "R² = {{value}} is below 0.85. The cubic model doesn't closely match probe data. Try adding more probe points or widening the probe range for a better fit.",
     "noiseSensitive": "Result is noise-sensitive",
     "noiseSensitiveBody": "Leave-one-out analysis shows the selected strength shifts significantly when any single probe is removed. Adding more probe samples will stabilize the result.",
+    "noiseSensitiveCoverageBody": "Leave-one-out analysis shows that removing a probe pushes the root out of the probed range. Widening the probe range or adding probes will stabilize the result.",
     "highHaloRisk": "High halo-risk content",
     "highHaloRiskBody": "{{value}}% of the image is in the halo risk zone (strong edges next to flat areas). Consider Content Adaptive strategy with reduced strong_edge gain, or lower sigma.",
     "mostlyFlat": "Mostly flat image",

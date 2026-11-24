@@ -799,10 +799,19 @@ pub struct RobustnessFlags {
     pub r_squared_ok: bool,
     /// Fit matrix is well-conditioned (min_pivot > threshold).
     pub well_conditioned: bool,
-    /// Leave-one-out root is stable (max relative change < threshold).
+    /// Leave-one-out root is stable: every refit produced an in-range root
+    /// (`loo_coverage == 1.0`) and the largest relative change is below the
+    /// threshold (0.25).
     pub loo_stable: bool,
-    /// Largest relative change in s* across leave-one-out refits.
+    /// Largest relative change in s* across the leave-one-out refits that
+    /// produced an in-range root.  Stays finite even when coverage is
+    /// incomplete, so it cannot explain a failed check on its own.
     pub max_loo_root_change: f64,
+    /// Fraction of leave-one-out refits that produced an in-range polynomial
+    /// root, in `[0, 1]`.  A refit that cannot be fitted, or whose root leaves
+    /// the probed range, counts against it.  `1.0` when the check does not
+    /// run: no fit, fewer than 5 points, or a sample-based selection.
+    pub loo_coverage: f64,
 }
 
 /// Why the pipeline fell back from polynomial root to sample-based selection.
@@ -813,6 +822,8 @@ pub enum FallbackReason {
     /// Cubic fit failed numerically (singular matrix, insufficient data).
     FitFailed,
     /// Fit succeeded but leave-one-out check showed instability.
+    /// Not emitted by the current pipeline: the check runs only for a
+    /// `PolynomialRoot` selection, which records no fallback reason.
     FitUnstable,
     /// Polynomial root exists but falls outside the probed interval.
     RootOutOfRange,

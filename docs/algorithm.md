@@ -433,14 +433,32 @@ are stored in `diagnostics.robustness` as `RobustnessFlags`:
 
 ### Leave-one-out (LOO) stability
 
-The pipeline refits the cubic N times, each time dropping one probe sample,
-re-solves for the root, and measures the maximum relative change in s*:
+The check runs only when the selected strength **is** a polynomial root.  The
+refits' roots are polynomial roots, so they are only comparable to a polynomial
+root: after the R² gate redirects to direct search, or when the root falls
+outside the probed range, the selection is a sample strength and there is
+nothing to compare against.  (An unreachable budget relabels the reported
+`selection_mode` as `BudgetUnreachable` but still applies the polynomial root,
+so there the check does run.)
+
+The pipeline refits the cubic N times, each time dropping one point of the fit
+(a probe sample, or the `(0, 0)` anchor in relative-to-base mode), re-solves
+for the largest root in `[s_min, s_max]`, and measures the relative change:
 
 ```
-max_loo_root_change = max_i |s*_full - s*_drop_i| / s*_full
+change_i            = |s*_full - s*_drop_i| / s*_full   (refits with an in-range root)
+max_loo_root_change = max_i change_i
+loo_coverage        = (refits with an in-range root) / N
 ```
 
-`loo_stable = true` when `max_loo_root_change < 0.25` (25% relative shift).
+A refit that cannot be fitted, or whose root leaves `[s_min, s_max]`, shows
+that the root depends on the dropped point.  It lowers `loo_coverage` instead
+of being skipped, so it cannot pass as maximally stable.
+
+`loo_stable = true` when `loo_coverage == 1.0` and `max_loo_root_change < 0.25`
+(25% relative shift).  When the check does not run — no fit, fewer than 5
+points, or a non-polynomial selection — the flags report `loo_stable = true`,
+`max_loo_root_change = 0.0` and `loo_coverage = 1.0`.
 N=7 refits of a 4x4 system is negligible cost.
 
 ### Derived flags
@@ -452,9 +470,12 @@ N=7 refits of a 4x4 system is negligible cost.
 
 ### Impact on solver
 
-If robustness checks indicate unreliable fitting (non-monotonic data or LOO
-instability), the pipeline falls back to direct search and records the appropriate
-`FallbackReason` (see below).
+The R² check is the only one that changes the selection: below 0.85 it
+discards a polynomial root in favour of direct search and records
+`FallbackReason::FitPoorQuality`.  The other checks are reported in
+`RobustnessFlags` only — an unstable LOO root keeps its selection — and name
+the reason when the root was not used (see below).  `FitUnstable` is therefore
+not emitted while LOO runs only for a `PolynomialRoot` selection.
 
 ---
 
@@ -469,7 +490,7 @@ a typed `FallbackReason` is recorded in `diagnostics.fallback_reason`:
 | `DirectSearchConfigured` | `FitStrategy::DirectSearch` selected by caller |
 | `FitFailed` | Polynomial fit returned an error |
 | `MetricNonMonotonic` | Probe data is not monotonically increasing |
-| `FitUnstable` | LOO cross-validation shows unstable root |
+| `FitUnstable` | LOO cross-validation shows unstable root — never emitted, see "Impact on solver" |
 | `RootOutOfRange` | Fit succeeded but no root in [s_min, s_max] |
 
 Priority order: first matching reason wins (listed in evaluation order above).

@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { incompleteLooCoverage } from "@/entities/diagnostics";
 import { useImageStore } from "@/entities/images";
 import type {
   AutoSharpDiagnostics,
@@ -99,7 +100,10 @@ function buildAdvice(d: AutoSharpDiagnostics, t: TFunction): Advice[] {
     advice.push({
       icon: "\u2248",
       title: t("advice.noiseSensitive"),
-      body: t("advice.noiseSensitiveBody"),
+      body:
+        incompleteLooCoverage(d.robustness) === null
+          ? t("advice.noiseSensitiveBody")
+          : t("advice.noiseSensitiveCoverageBody"),
       kind: "tip",
     });
   }

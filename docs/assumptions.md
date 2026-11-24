@@ -59,7 +59,7 @@ what is an engineering approximation or placeholder.
 | **(0, 0) anchor in RelativeToBase fit** | Physically motivated: zero sharpening = zero added artifacts | Remove if paper uses a different fitting strategy |
 | **R² threshold = 0.85 for fit acceptance** | Engineering choice — balances false rejection of good fits vs. accepting poor ones | Tune based on empirical data across image corpus |
 | **Min pivot threshold = 1e-8 for condition check** | Engineering choice — well below the 1e-14 singularity threshold, catches ill-conditioned systems | Adjust if false positives occur on valid data |
-| **LOO stability threshold = 0.5 (50% relative root change)** | Engineering choice — allows moderate sensitivity while catching catastrophic instability | Tune based on sweep-mode analysis of real images |
+| **LOO stability threshold = 0.25 (25% relative root change)** | Engineering choice — allows moderate sensitivity while catching catastrophic instability | Tune based on sweep-mode analysis of real images |
 | **Composite metric weights** | Engineering choice — `MetricWeights` defaults (1.0, 0.3, 0.3, 0.1) are tuned heuristically, not from paper | Tune via sweep-mode analysis across diverse image corpora |
 
 ---
