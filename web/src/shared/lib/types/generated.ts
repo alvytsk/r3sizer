@@ -211,13 +211,24 @@ r_squared_ok: boolean,
  */
 well_conditioned: boolean, 
 /**
- * Leave-one-out root is stable (max relative change < threshold).
+ * Leave-one-out root is stable: every refit produced an in-range root
+ * (`loo_coverage == 1.0`) and the largest relative change is below the
+ * threshold (0.25).
  */
 loo_stable: boolean, 
 /**
- * Largest relative change in s* across leave-one-out refits.
+ * Largest relative change in s* across the leave-one-out refits that
+ * produced an in-range root.  Stays finite even when coverage is
+ * incomplete, so it cannot explain a failed check on its own.
  */
-max_loo_root_change: number, };
+max_loo_root_change: number, 
+/**
+ * Fraction of leave-one-out refits that produced an in-range polynomial
+ * root, in `[0, 1]`.  A refit that cannot be fitted, or whose root leaves
+ * the probed range, counts against it.  `1.0` when the check does not
+ * run: no fit, fewer than 5 points, or a sample-based selection.
+ */
+loo_coverage: number, };
 
 export type FitStatus = { "status": "success" } | { "status": "failed", reason: string, } | { "status": "skipped" };
 

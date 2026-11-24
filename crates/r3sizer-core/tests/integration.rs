@@ -1,8 +1,9 @@
 use r3sizer_core::{
-    process_auto_sharp_downscale, AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics,
-    AutoSharpParams, ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus,
-    DiagnosticsLevel, ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize,
-    KernelTable, LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig,
+    prepare_base, process_auto_sharp_downscale, process_from_prepared_with_probes,
+    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
+    ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, DiagnosticsLevel,
+    ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable,
+    LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig, ProbeSample,
     ResizeKernel, ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode,
     SharpenStrategy,
 };
@@ -395,6 +396,216 @@ fn robustness_flags_present() {
         assert!(r.quasi_monotonic);
     }
     assert!(r.max_loo_root_change.is_finite());
+}
+
+// ---------------------------------------------------------------------------
+// LOO stability
+// ---------------------------------------------------------------------------
+
+/// Run the solve stages on hand-supplied probe samples.
+fn solve_with_probes(
+    src: &LinearRgbImage,
+    params: &AutoSharpParams,
+    samples: &[(f32, f32)],
+) -> AutoSharpDiagnostics {
+    let prepared = prepare_base(src, params, &|_| {}).unwrap();
+    let samples = samples
+        .iter()
+        .map(|&(strength, metric_value)| ProbeSample {
+            strength,
+            artifact_ratio: metric_value,
+            metric_value,
+            breakdown: None,
+        })
+        .collect();
+    process_from_prepared_with_probes(&prepared, params, samples, 0, None, None, &|_| {})
+        .unwrap()
+        .diagnostics
+}
+
+/// A solid image has no resize ringing, so `envelope_scale == 1.0` and the
+/// solver's `effective_p0` is exactly `target_artifact_ratio`.
+fn solid() -> LinearRgbImage {
+    solid_image(64, 64, 0.25)
+}
+
+#[test]
+fn loo_coverage_explains_unstable_root_that_barely_moves() {
+    // Five probes lie on y = 0.0005·s² and the top one is raised to 0.02.
+    // Dropping the top probe refits that exact quadratic, whose root
+    // √(P0 / 0.0005) ≥ 3.6 lies beyond the probed range [0, 3] for every
+    // resize envelope.  The other refits stay within 7% of the selected root,
+    // so `max_loo_root_change` alone cannot show why the check fails.
+    // The default params use the relative-to-base metric, so the fit is
+    // anchored at the origin: seven refits for six samples.
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        target_artifact_ratio: 0.010,
+        ..AutoSharpParams::default()
+    };
+    let samples = [
+        (0.5, 0.000125),
+        (1.0, 0.0005),
+        (1.5, 0.001125),
+        (2.0, 0.002),
+        (2.5, 0.003125),
+        (3.0, 0.02),
+    ];
+    let d = solve_with_probes(&solid(), &params, &samples);
+
+    // The polynomial root is what got selected, so the check ran on it.
+    assert_eq!(d.selection_mode, SelectionMode::PolynomialRoot);
+    let r = d.robustness.expect("robustness should be present");
+    assert!(!r.loo_stable, "escaped refit root must fail the check");
+    assert!(
+        r.max_loo_root_change < 0.25,
+        "max_loo_root_change = {}",
+        r.max_loo_root_change
+    );
+    assert!(
+        (r.loo_coverage - 6.0 / 7.0).abs() < 1e-9,
+        "loo_coverage = {}",
+        r.loo_coverage
+    );
+}
+
+#[test]
+fn loo_stable_root_reports_full_coverage() {
+    // A quartic perturbation keeps the data off any exact cubic; every refit
+    // root stays within 0.6% of the selected one.
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        target_artifact_ratio: 0.004,
+        ..AutoSharpParams::default()
+    };
+    let samples = [
+        (0.5, 0.00025625),
+        (1.0, 0.0011),
+        (1.5, 0.00275625),
+        (2.0, 0.0056),
+        (2.5, 0.01015625),
+        (3.0, 0.0171),
+    ];
+    let d = solve_with_probes(&solid(), &params, &samples);
+
+    assert_eq!(d.selection_mode, SelectionMode::PolynomialRoot);
+    let r = d.robustness.expect("robustness should be present");
+    assert!(r.loo_stable);
+    assert_eq!(r.loo_coverage, 1.0);
+}
+
+#[test]
+fn loo_is_not_run_for_direct_search() {
+    // No polynomial root is selected, so there is nothing to cross-validate.
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        fit_strategy: FitStrategy::DirectSearch,
+        ..AutoSharpParams::default()
+    };
+    let samples = [
+        (0.5, 0.000125),
+        (1.0, 0.0005),
+        (1.5, 0.001125),
+        (2.0, 0.002),
+        (2.5, 0.003125),
+        (3.0, 0.02),
+    ];
+    let d = solve_with_probes(&solid(), &params, &samples);
+
+    assert_eq!(d.selection_mode, SelectionMode::BestSampleWithinBudget);
+    let r = d.robustness.expect("robustness should be present");
+    assert!(r.loo_stable);
+    assert_eq!(r.max_loo_root_change, 0.0);
+    assert_eq!(r.loo_coverage, 1.0);
+}
+
+#[test]
+fn loo_still_checks_an_applied_root_when_the_budget_is_unreachable() {
+    // Absolute-total mode with the baseline above P0: the reported selection
+    // becomes `BudgetUnreachable`, but the polynomial root is still the
+    // strength that gets applied, so it is still what the refits compare
+    // against.  Same construction as the escape case, scaled down under P0.
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        target_artifact_ratio: 1e-9,
+        metric_mode: MetricMode::AbsoluteTotal,
+        ..AutoSharpParams::default()
+    };
+    let samples = [
+        (0.5, 1.25e-11),
+        (1.0, 5e-11),
+        (1.5, 1.125e-10),
+        (2.0, 2e-10),
+        (2.5, 3.125e-10),
+        (3.0, 1e-8),
+    ];
+    // A hard black/white edge rings outside the gamut when resized, so the
+    // baseline artifact ratio is far above P0.
+    let step = {
+        let mut data = Vec::with_capacity(64 * 64 * 3);
+        for _ in 0..64 {
+            for x in 0..64 {
+                let v = if x < 32 { 0.0 } else { 1.0 };
+                data.extend_from_slice(&[v, v, v]);
+            }
+        }
+        LinearRgbImage::new(64, 64, data).unwrap()
+    };
+    let d = solve_with_probes(&step, &params, &samples);
+
+    assert_eq!(d.selection_mode, SelectionMode::BudgetUnreachable);
+    let r = d.robustness.expect("robustness should be present");
+    assert!(
+        !r.loo_stable,
+        "the applied polynomial root must still be cross-validated"
+    );
+    assert!(
+        (r.loo_coverage - 5.0 / 6.0).abs() < 1e-9,
+        "loo_coverage = {}",
+        r.loo_coverage
+    );
+}
+
+#[test]
+fn loo_is_not_run_when_r2_gate_redirects_to_direct_search() {
+    // Alternating probes fit their cubic poorly (R² ≈ 0.82 < 0.85).  The gate
+    // discards the polynomial root (≈1.7) and selects the largest sample
+    // within budget instead.  LOO refits are polynomial roots, so comparing
+    // them against a sample-based strength measures nothing — it must not be
+    // reported as instability of a root that was never used.
+    let params = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        target_artifact_ratio: 0.005,
+        ..AutoSharpParams::default()
+    };
+    let samples = [
+        (0.5, 0.00025),
+        (1.0, 0.0045),
+        (1.5, 0.00225),
+        (2.0, 0.008),
+        (2.5, 0.00625),
+        (3.0, 0.009),
+    ];
+    let d = solve_with_probes(&solid(), &params, &samples);
+
+    // The gate redirected the selection...
+    assert!(d.fit_quality.expect("fit_quality").r_squared < 0.85);
+    assert_eq!(d.selection_mode, SelectionMode::BestSampleWithinBudget);
+    assert_eq!(d.fallback_reason, Some(FallbackReason::FitPoorQuality));
+
+    // ...so no refit was compared against the sample-based strength.
+    let r = d.robustness.expect("robustness should be present");
+    assert!(r.loo_stable, "spurious instability for an unused root");
+    assert_eq!(
+        r.max_loo_root_change, 0.0,
+        "polynomial roots were compared against a sample-based strength"
+    );
+    assert_eq!(r.loo_coverage, 1.0);
 }
 
 // ---------------------------------------------------------------------------

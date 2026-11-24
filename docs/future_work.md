@@ -106,7 +106,7 @@ in `types.rs`. The current default is a `TwoPass` schedule: 7 coarse probes over
 2. Sweep-based comparison of GamutOnly vs Hybrid vs CompositeOnly on a diverse corpus.
 
 ### Robustness threshold tuning
-Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.5) are engineering
+Current thresholds (R² > 0.85, min_pivot > 1e-8, LOO change < 0.25) are engineering
 choices.  Use sweep mode across diverse image corpora to validate and tune.
 
 ---

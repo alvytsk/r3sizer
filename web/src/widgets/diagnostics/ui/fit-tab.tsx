@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { ChipVariant } from "@/entities/diagnostics";
+import { type ChipVariant, incompleteLooCoverage } from "@/entities/diagnostics";
 import type { AutoSharpDiagnostics, RobustnessFlags } from "@/shared/lib";
 import { StatusChip } from "./shared";
 
@@ -146,12 +146,17 @@ function RobustnessGrid({ robustness }: { robustness: RobustnessFlags }) {
     },
   ];
 
+  const looCoverage = incompleteLooCoverage(robustness);
+
   const ROBUSTNESS_FAIL_HINTS: Record<RobCheckKey, string> = {
     monotonic: t("diagnostics.robustnessHints.monotonic"),
     quasi_monotonic: t("diagnostics.robustnessHints.quasiMonotonic"),
     r_squared_ok: t("diagnostics.robustnessHints.rSquaredOk"),
     well_conditioned: t("diagnostics.robustnessHints.wellConditioned"),
-    loo_stable: t("diagnostics.robustnessHints.looStable"),
+    loo_stable:
+      looCoverage === null
+        ? t("diagnostics.robustnessHints.looStable")
+        : t("diagnostics.robustnessHints.looCoverage", { value: looCoverage }),
   };
 
   const failedKeys = ROBUSTNESS_CHECKS.filter(({ key }) => !robustness[key]).map(({ key }) => key);
