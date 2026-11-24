@@ -1139,6 +1139,101 @@ fn two_pass_validation_rejects_bad_params() {
     assert!(p.validate().is_err());
 }
 
+#[test]
+fn validation_enforces_gain_table_bounds() {
+    let base = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        ..AutoSharpParams::default()
+    };
+
+    let adaptive_with_gain = |flat: f32| AutoSharpParams {
+        sharpen_strategy: SharpenStrategy::ContentAdaptive {
+            classification: ClassificationParams::default(),
+            gain_table: GainTable {
+                flat,
+                ..GainTable::v03_default()
+            },
+            max_backoff_iterations: 4,
+            backoff_scale_factor: 0.8,
+        },
+        ..base.clone()
+    };
+
+    // Documented hard bounds are inclusive.
+    assert!(adaptive_with_gain(GainTable::MIN_GAIN_VALUE)
+        .validate()
+        .is_ok());
+    assert!(adaptive_with_gain(4.0).validate().is_ok());
+
+    // Out of bounds (struct literal route, bypassing GainTable::new).
+    assert!(adaptive_with_gain(50.0).validate().is_err());
+    assert!(adaptive_with_gain(0.1).validate().is_err());
+    assert!(adaptive_with_gain(f32::NAN).validate().is_err());
+    assert!(adaptive_with_gain(f32::INFINITY).validate().is_err());
+
+    // serde route: deserialization bypasses GainTable::new, so validate()
+    // must catch what the constructor no longer guards.
+    let p = adaptive_with_gain(50.0);
+    let json = serde_json::to_string(&p).unwrap();
+    let round_tripped: AutoSharpParams = serde_json::from_str(&json).unwrap();
+    assert!(round_tripped.validate().is_err());
+}
+
+#[test]
+fn validation_enforces_saturation_guard_bounds() {
+    let base = AutoSharpParams {
+        target_width: 16,
+        target_height: 16,
+        ..AutoSharpParams::default()
+    };
+
+    let with_guard = |min_scale: f32, gamma: f32| AutoSharpParams {
+        experimental_sharpen_mode: Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+            max_chroma_shift: 0.25,
+            chroma_region_factors: None,
+            saturation_guard: Some(SaturationGuardParams { min_scale, gamma }),
+        }),
+        ..base.clone()
+    };
+
+    // Documented defaults are valid; min_scale may approach but not reach 1.0.
+    assert!(with_guard(0.6, 1.5).validate().is_ok());
+    assert!(with_guard(0.999, 0.25).validate().is_ok());
+
+    // gamma must be positive and finite (gamma <= 0 makes sat^gamma 0/inf/nan).
+    assert!(with_guard(0.6, 0.0).validate().is_err());
+    assert!(with_guard(0.6, -1.0).validate().is_err());
+    assert!(with_guard(0.6, f32::NAN).validate().is_err());
+    assert!(with_guard(0.6, f32::INFINITY).validate().is_err());
+
+    // min_scale must be in (0, 1): <= 0 disables the guard, >= 1 *loosens*
+    // the threshold for saturated pixels (inverted vs documented intent).
+    assert!(with_guard(0.0, 1.5).validate().is_err());
+    assert!(with_guard(-0.1, 1.5).validate().is_err());
+    assert!(with_guard(1.0, 1.5).validate().is_err());
+    assert!(with_guard(1.5, 1.5).validate().is_err());
+    assert!(with_guard(f32::NAN, 1.5).validate().is_err());
+}
+
+#[test]
+fn validation_rejects_unresolved_pipeline_mode() {
+    let p = AutoSharpParams {
+        pipeline_mode: Some(PipelineMode::Fast),
+        ..AutoSharpParams::photo(16, 16)
+    };
+
+    // An unresolved mode would be silently ignored by the pipeline; the
+    // entry-point validation must make that loud instead.
+    assert!(p.validate().is_err());
+
+    // resolved() folds the mode and clears the field, so the resolved
+    // params pass.
+    let resolved = p.resolved();
+    assert!(resolved.pipeline_mode.is_none());
+    assert!(resolved.validate().is_ok());
+}
+
 // ---------------------------------------------------------------------------
 // Step 4 -- Base resize quality tests
 // ---------------------------------------------------------------------------
