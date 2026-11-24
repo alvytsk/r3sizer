@@ -360,7 +360,7 @@ mod tests {
             ImageSize {
                 width: 3000,
                 height: 2000,
-            }, // ratio 2.0 < 3.0
+            }, // ratio 2.0 < 4.0: no real pre-reduce
         )
         .unwrap_err();
         assert!(matches!(

@@ -17,7 +17,9 @@ This project is pre-1.0 — breaking changes may occur in any release.
   pre-reduce factor floors to 1, so the "pre-reduce" was an identity pass over
   a full-size accumulator; `validate_striped_shrink` now applies the same guard
   as the staged resize path, and the web client sends those jobs down the
-  monolithic path like smaller downscales.
+  monolithic path like smaller downscales. `StripedPreReducer::new` likewise
+  rejects an intermediate equal to the source, where it used to allocate that
+  accumulator.
 
 ### Changed
 - Native resize is multithreaded (`fast_image_resize/rayon` under the

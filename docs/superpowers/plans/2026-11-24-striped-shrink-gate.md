@@ -23,7 +23,7 @@
 
 ## What This Fix Does Not Do
 
-It does not lower peak memory for 3–4× jobs. Static accounting from the code (not measured in a browser): the wasm heap peaks at 16 B/px on both routes — monolithic holds a transient RGBA copy (`passArray8ToWasm0`, 4) plus the linear image (12); the identity ingest held `acc` (12) plus `weight` (4). Monolithic additionally holds the RGBA buffer on the main thread and a structured-clone copy in the worker (4 B/px each), where the ingest held only stripes. What changes: the gate and its docs become truthful, the pointless accumulate pass and `weight` buffer go away, and 3–4× large images behave like today's 1–3× range (full-size `OffscreenCanvas` in `bitmapToRgba`, which is not chunk-width-limited like `extractStripes`).
+It does not lower peak memory for 3–4× jobs. Static accounting from the code (not measured in a browser): the process-wide peak rises by about 8 B/px, all of it in JS heaps rather than in wasm. The wasm heap peaks at 16 B/px on both routes — monolithic holds a transient RGBA copy (`passArray8ToWasm0`, 4) plus the linear image (12); the identity ingest held `acc` (12) plus `weight` (4). Monolithic additionally holds the RGBA buffer on the main thread and a structured-clone copy in the worker (4 B/px each), where the ingest held only stripes. What changes: the gate and its docs become truthful, the pointless accumulate pass and `weight` buffer go away, and 3–4× large images behave like today's 1–3× range (full-size `OffscreenCanvas` in `bitmapToRgba`, which is not chunk-width-limited like `extractStripes`).
 
 ## Review Focus
 
