@@ -27,9 +27,14 @@ pub fn compute_intermediate_size(src: ImageSize, target: ImageSize) -> ImageSize
     }
 }
 
-/// Check that an image qualifies for striped ingest: the shrink ratio must
-/// be >= the staged-shrink threshold (3.0), otherwise the pre-reduce to
-/// ~2x target is meaningless and the caller should use the monolithic path.
+/// Check that an image qualifies for striped ingest: the staged pre-reduce
+/// must be a real reduction, i.e. [`compute_intermediate_size`] must return
+/// something smaller than the source. That needs a shrink ratio of at least
+/// 4.0 — the same condition as the staged path in
+/// [`crate::resize::downscale_with_info`]. From 3.0 up to 4.0 the pre-reduce
+/// factor floors to 1, the intermediate is the source itself, and the ingest
+/// would degrade into a full-size identity accumulate; the caller should use
+/// the monolithic path instead.
 pub fn validate_striped_shrink(src: ImageSize, target: ImageSize) -> Result<(), CoreError> {
     if src.width == 0 || src.height == 0 || target.width == 0 || target.height == 0 {
         return Err(CoreError::EmptyImage);
@@ -37,7 +42,10 @@ pub fn validate_striped_shrink(src: ImageSize, target: ImageSize) -> Result<(), 
     let shrink_x = src.width as f64 / target.width as f64;
     let shrink_y = src.height as f64 / target.height as f64;
     let max_shrink = shrink_x.max(shrink_y);
-    if max_shrink < crate::resize::STAGED_SHRINK_THRESHOLD {
+    // Same guard as the staged path in `resize::downscale_with_info`.
+    if max_shrink < crate::resize::STAGED_SHRINK_THRESHOLD
+        || compute_intermediate_size(src, target) == src
+    {
         return Err(CoreError::TargetTooCloseForStripedIngest { ratio: max_shrink });
     }
     Ok(())
@@ -105,6 +113,12 @@ impl StripedPreReducer {
             return Err(CoreError::InvalidParams(format!(
                 "intermediate {}x{} exceeds source {}x{}",
                 intermediate.width, intermediate.height, src.width, src.height
+            )));
+        }
+        if intermediate == src {
+            return Err(CoreError::InvalidParams(format!(
+                "intermediate {}x{} equals the source: the pre-reduce would not reduce the image",
+                intermediate.width, intermediate.height
             )));
         }
         let n = intermediate.width as usize * intermediate.height as usize;
@@ -298,6 +312,45 @@ mod tests {
     }
 
     #[test]
+    fn intermediate_size_steps_at_exactly_4x() {
+        // The pre-reduce factor is floor(max_shrink / 2): it first reaches 2
+        // at a 4x shrink. This is the cliff both staged gates key on.
+        // 4000x3000 -> 1001x752 is 3.996x on both axes at most.
+        assert_eq!(
+            compute_intermediate_size(
+                ImageSize {
+                    width: 4000,
+                    height: 3000
+                },
+                ImageSize {
+                    width: 1001,
+                    height: 752
+                },
+            ),
+            ImageSize {
+                width: 4000,
+                height: 3000
+            }
+        );
+        assert_eq!(
+            compute_intermediate_size(
+                ImageSize {
+                    width: 4000,
+                    height: 3000
+                },
+                ImageSize {
+                    width: 1000,
+                    height: 750
+                },
+            ),
+            ImageSize {
+                width: 2000,
+                height: 1500
+            }
+        );
+    }
+
+    #[test]
     fn validate_rejects_small_shrink_ratio() {
         let err = validate_striped_shrink(
             ImageSize {
@@ -317,9 +370,10 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_ratio_at_threshold() {
-        // ratio exactly 3.0 is allowed (matches the staged-shrink branch: >= 3.0).
-        validate_striped_shrink(
+    fn validate_rejects_ratio_exactly_3x() {
+        // 3.0 clears the bare threshold, but the staged path skips it too (the
+        // pre-reduce would be an identity pass), so the striped gate must agree.
+        let err = validate_striped_shrink(
             ImageSize {
                 width: 6000,
                 height: 4000,
@@ -327,6 +381,86 @@ mod tests {
             ImageSize {
                 width: 2000,
                 height: 4000,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CoreError::TargetTooCloseForStripedIngest { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_ratio_between_3x_and_4x() {
+        // 6000x4000 -> 1714x1143 is a 3.5x shrink. It clears the 3.0 threshold,
+        // but the pre-reduce factor floors to 1, so the "intermediate" is the
+        // source and the ingest would be a full-size identity accumulate.
+        let err = validate_striped_shrink(
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 1714,
+                height: 1143,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CoreError::TargetTooCloseForStripedIngest { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_ratio_just_below_4x() {
+        // Both axes stay under 4x: 3.997x and 3.996x.
+        let err = validate_striped_shrink(
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 1501,
+                height: 1001,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            CoreError::TargetTooCloseForStripedIngest { .. }
+        ));
+    }
+
+    #[test]
+    fn validate_accepts_ratio_exactly_4x() {
+        // The first ratio with a real pre-reduce (factor 2): the staged path
+        // engages here, so striped ingest must too.
+        validate_striped_shrink(
+            ImageSize {
+                width: 6000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 1500,
+                height: 1000,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_accepts_target_that_shrinks_only_one_axis() {
+        // 4000x4000 -> 4000x1000 leaves x at 1:1, but the intermediate is
+        // 4000x2000 — half the rows — so the ingest still bounds memory.
+        validate_striped_shrink(
+            ImageSize {
+                width: 4000,
+                height: 4000,
+            },
+            ImageSize {
+                width: 4000,
+                height: 1000,
             },
         )
         .unwrap();
@@ -392,6 +526,55 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CoreError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn new_rejects_intermediate_equal_to_source() {
+        // Callers that skip `validate_striped_shrink` must not be able to
+        // allocate a full-size identity accumulator.
+        let err = StripedPreReducer::new(
+            ImageSize {
+                width: 64,
+                height: 64,
+            },
+            ImageSize {
+                width: 64,
+                height: 64,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, CoreError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn identity_axis_still_reduces() {
+        // 4x4 -> 4x2: x maps 1:1, y halves. Only a fully identity intermediate
+        // is useless; one unreduced axis is legitimate.
+        let src = ImageSize {
+            width: 4,
+            height: 4,
+        };
+        let rgba = rgba_from_fn(4, 4, |x, y| ((x * 60) as u8, (y * 60) as u8, 0));
+        let out = reduce_whole(
+            src,
+            ImageSize {
+                width: 4,
+                height: 2,
+            },
+            &rgba,
+        );
+        assert_eq!((out.width(), out.height()), (4, 2));
+        for y in 0..2usize {
+            for x in 0..4usize {
+                let i = (y * 4 + x) * 3;
+                let rows = [
+                    SRGB_U8_TO_LINEAR[(2 * y) * 60],
+                    SRGB_U8_TO_LINEAR[(2 * y + 1) * 60],
+                ];
+                assert!((out.pixels()[i] - SRGB_U8_TO_LINEAR[x * 60]).abs() < 1e-6);
+                assert!((out.pixels()[i + 1] - (rows[0] + rows[1]) / 2.0).abs() < 1e-6);
+            }
+        }
     }
 
     #[test]
