@@ -5,21 +5,22 @@
 
 use r3sizer_core::color::SRGB_U8_TO_LINEAR;
 use r3sizer_core::{
-    compute_intermediate_size, process_auto_sharp_downscale, AutoSharpParams, ImageSize,
-    LinearRgbImage, StripedPreReducer,
+    compute_intermediate_size, process_auto_sharp_downscale, validate_striped_shrink,
+    AutoSharpParams, ImageSize, LinearRgbImage, ProcessOutput, StripedPreReducer,
 };
 
-/// Gradient + checker detail so probing has artifacts to measure.
+/// Moderate-contrast checker (96px cells, 80/175). The resize stays in gamut
+/// on its own and sharpening pushes edge overshoot out of it, so the artifact
+/// ratio crosses its budget at an interior strength — one the two paths can
+/// genuinely disagree about. Smoother content never leaves the budget (both
+/// paths pick the largest probe); a full-contrast checker is over budget
+/// before any sharpening (both pick the smallest).
 fn synthetic_rgba(w: u32, h: u32) -> Vec<u8> {
     let mut data = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let base = (x * 200 / w.max(1)) as u8;
-            let checker = if (x / 3 + y / 3) % 2 == 0 { 55 } else { 0 };
-            let r = base.saturating_add(checker);
-            let g = 200u8.saturating_sub(base);
-            let b = (y * 200 / h.max(1)) as u8;
-            data.extend_from_slice(&[r, g, b, 255]);
+            let v = if (x / 96 + y / 96) % 2 == 0 { 175 } else { 80 };
+            data.extend_from_slice(&[v, v, v, 255]);
         }
     }
     data
@@ -35,18 +36,17 @@ fn linear_from_rgba(rgba: &[u8], w: u32, h: u32) -> LinearRgbImage {
     LinearRgbImage::new(w, h, out).unwrap()
 }
 
-#[test]
-fn striped_ingest_selects_similar_strength_to_monolithic() {
+/// Gate, reducer and pipeline together, in the order `ingest_begin` uses them.
+fn assert_striped_matches_monolithic(target: ImageSize) {
     let (w, h) = (2400u32, 1600u32);
     let rgba = synthetic_rgba(w, h);
     let src = ImageSize {
         width: w,
         height: h,
     };
-    let target = ImageSize {
-        width: 400,
-        height: 267,
-    }; // ratio 6 -> staged path
+
+    // The gate `ingest_begin` applies before building the reducer.
+    validate_striped_shrink(src, target).unwrap();
 
     let params = AutoSharpParams {
         target_width: target.width,
@@ -77,8 +77,46 @@ fn striped_ingest_selects_similar_strength_to_monolithic() {
 
     let s_mono = mono.diagnostics.selected_strength;
     let s_striped = striped.diagnostics.selected_strength;
+
+    // A parity claim is only meaningful if both paths selected an interior
+    // strength: at either end of the probe range they are clamped, not fitted.
+    for (name, out) in [("monolithic", &mono), ("striped", &striped)] {
+        let (min, max) = probe_strength_range(out);
+        let s = out.diagnostics.selected_strength;
+        assert!(
+            min < s && s < max,
+            "{name} selected s*={s} at the edge of the probe range [{min}, {max}]: \
+             the fixture does not cross the artifact budget, so parity is vacuous"
+        );
+    }
+
     assert!(
         (s_striped - s_mono).abs() <= 0.3,
         "selected strength diverged: monolithic={s_mono}, striped={s_striped}"
     );
+}
+
+/// Smallest and largest probed strength.
+fn probe_strength_range(out: &ProcessOutput) -> (f32, f32) {
+    let mut strengths = out.diagnostics.probe_samples.iter().map(|p| p.strength);
+    let first = strengths.next().expect("probe samples recorded");
+    strengths.fold((first, first), |(min, max), s| (min.min(s), max.max(s)))
+}
+
+#[test]
+fn striped_ingest_selects_similar_strength_to_monolithic() {
+    assert_striped_matches_monolithic(ImageSize {
+        width: 400,
+        height: 267,
+    }); // ratio 6
+}
+
+#[test]
+fn striped_ingest_just_above_the_4x_gate_matches_monolithic() {
+    // 2400x1600 -> 533x355 is ~4.5x: the window the old 3.0 gate let through
+    // and no test covered, just past the 4.0x boundary.
+    assert_striped_matches_monolithic(ImageSize {
+        width: 533,
+        height: 355,
+    });
 }

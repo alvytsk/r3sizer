@@ -288,6 +288,24 @@ mod tests {
     }
 
     #[test]
+    fn ratio_exactly_4x_uses_staged_shrink() {
+        // The other side of the cliff: at 4x the pre-reduce factor first
+        // reaches 2, so staging engages.
+        let src = gradient_image(400, 300);
+        let (out, staged) = downscale_with_info(
+            &src,
+            ImageSize {
+                width: 100,
+                height: 75,
+            },
+        )
+        .unwrap();
+        assert_eq!(out.width(), 100);
+        assert_eq!(out.height(), 75);
+        assert!(staged, "4× ratio should trigger staged shrink");
+    }
+
+    #[test]
     fn staged_shrink_output_stays_in_range() {
         let src = gradient_image(640, 480);
         let (out, staged) = downscale_with_info(
