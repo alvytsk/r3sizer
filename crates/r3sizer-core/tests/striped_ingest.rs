@@ -6,15 +6,16 @@
 use r3sizer_core::color::SRGB_U8_TO_LINEAR;
 use r3sizer_core::{
     compute_intermediate_size, process_auto_sharp_downscale, validate_striped_shrink,
-    AutoSharpParams, ImageSize, LinearRgbImage, ProcessOutput, StripedPreReducer,
+    AutoSharpParams, ImageSize, LinearRgbImage, SelectionMode, StripedPreReducer,
 };
 
 /// Moderate-contrast checker (96px cells, 80/175). The resize stays in gamut
 /// on its own and sharpening pushes edge overshoot out of it, so the artifact
-/// ratio crosses its budget at an interior strength — one the two paths can
-/// genuinely disagree about. Smoother content never leaves the budget (both
-/// paths pick the largest probe); a full-contrast checker is over budget
-/// before any sharpening (both pick the smallest).
+/// ratio crosses its budget well inside the probe range and the solver fits a
+/// root — the value the two paths can genuinely disagree about. Smoother
+/// content never leaves the budget (both paths pick the largest probe); a
+/// full-contrast checker is over budget before any sharpening (both pick the
+/// smallest).
 fn synthetic_rgba(w: u32, h: u32) -> Vec<u8> {
     let mut data = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
@@ -48,9 +49,12 @@ fn assert_striped_matches_monolithic(target: ImageSize) {
     // The gate `ingest_begin` applies before building the reducer.
     validate_striped_shrink(src, target).unwrap();
 
+    // Compare the solver's output. The heuristic evaluator's cap depends only
+    // on base edge density and would stand in for the fit on both paths.
     let params = AutoSharpParams {
         target_width: target.width,
         target_height: target.height,
+        evaluator_config: None,
         ..Default::default()
     };
 
@@ -78,15 +82,18 @@ fn assert_striped_matches_monolithic(target: ImageSize) {
     let s_mono = mono.diagnostics.selected_strength;
     let s_striped = striped.diagnostics.selected_strength;
 
-    // A parity claim is only meaningful if both paths selected an interior
-    // strength: at either end of the probe range they are clamped, not fitted.
-    for (name, out) in [("monolithic", &mono), ("striped", &striped)] {
-        let (min, max) = probe_strength_range(out);
-        let s = out.diagnostics.selected_strength;
+    // A parity claim is only meaningful if both paths selected a fitted root:
+    // a fallback pick is clamped to a probe, and the heuristic evaluator's cap
+    // is a function of base edge density, not of the probes.
+    for (name, d) in [
+        ("monolithic", &mono.diagnostics),
+        ("striped", &striped.diagnostics),
+    ] {
         assert!(
-            min < s && s < max,
-            "{name} selected s*={s} at the edge of the probe range [{min}, {max}]: \
-             the fixture does not cross the artifact budget, so parity is vacuous"
+            matches!(d.selection_mode, SelectionMode::PolynomialRoot) && d.evaluator_cap.is_none(),
+            "{name} did not select a fitted root: mode={:?}, evaluator_cap={:?}",
+            d.selection_mode,
+            d.evaluator_cap
         );
     }
 
@@ -94,13 +101,6 @@ fn assert_striped_matches_monolithic(target: ImageSize) {
         (s_striped - s_mono).abs() <= 0.3,
         "selected strength diverged: monolithic={s_mono}, striped={s_striped}"
     );
-}
-
-/// Smallest and largest probed strength.
-fn probe_strength_range(out: &ProcessOutput) -> (f32, f32) {
-    let mut strengths = out.diagnostics.probe_samples.iter().map(|p| p.strength);
-    let first = strengths.next().expect("probe samples recorded");
-    strengths.fold((first, first), |(min, max), s| (min.min(s), max.max(s)))
 }
 
 #[test]
