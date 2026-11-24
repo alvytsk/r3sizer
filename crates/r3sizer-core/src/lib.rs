@@ -77,7 +77,7 @@ pub enum CoreError {
     #[error("empty image: width or height is zero")]
     EmptyImage,
 
-    #[error("target too close to source for large-image mode (shrink ratio {ratio:.2} < 3.0)")]
+    #[error("target too close to source for large-image mode (shrink ratio {ratio:.2}; the pre-reduce needs 4.0x or more)")]
     TargetTooCloseForStripedIngest { ratio: f64 },
 
     #[error(

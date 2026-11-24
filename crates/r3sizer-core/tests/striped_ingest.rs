@@ -5,21 +5,23 @@
 
 use r3sizer_core::color::SRGB_U8_TO_LINEAR;
 use r3sizer_core::{
-    compute_intermediate_size, process_auto_sharp_downscale, AutoSharpParams, ImageSize,
-    LinearRgbImage, StripedPreReducer,
+    compute_intermediate_size, process_auto_sharp_downscale, validate_striped_shrink,
+    AutoSharpParams, ImageSize, LinearRgbImage, SelectionMode, StripedPreReducer,
 };
 
-/// Gradient + checker detail so probing has artifacts to measure.
+/// Moderate-contrast checker (96px cells, 80/175). The resize stays in gamut
+/// on its own and sharpening pushes edge overshoot out of it, so the artifact
+/// ratio crosses its budget well inside the probe range and the solver fits a
+/// root — the value the two paths can genuinely disagree about. Smoother
+/// content never leaves the budget (both paths pick the largest probe); a
+/// full-contrast checker is over budget before any sharpening (both pick the
+/// smallest).
 fn synthetic_rgba(w: u32, h: u32) -> Vec<u8> {
     let mut data = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
-            let base = (x * 200 / w.max(1)) as u8;
-            let checker = if (x / 3 + y / 3) % 2 == 0 { 55 } else { 0 };
-            let r = base.saturating_add(checker);
-            let g = 200u8.saturating_sub(base);
-            let b = (y * 200 / h.max(1)) as u8;
-            data.extend_from_slice(&[r, g, b, 255]);
+            let v = if (x / 96 + y / 96) % 2 == 0 { 175 } else { 80 };
+            data.extend_from_slice(&[v, v, v, 255]);
         }
     }
     data
@@ -35,22 +37,24 @@ fn linear_from_rgba(rgba: &[u8], w: u32, h: u32) -> LinearRgbImage {
     LinearRgbImage::new(w, h, out).unwrap()
 }
 
-#[test]
-fn striped_ingest_selects_similar_strength_to_monolithic() {
+/// Gate, reducer and pipeline together, in the order `ingest_begin` uses them.
+fn assert_striped_matches_monolithic(target: ImageSize) {
     let (w, h) = (2400u32, 1600u32);
     let rgba = synthetic_rgba(w, h);
     let src = ImageSize {
         width: w,
         height: h,
     };
-    let target = ImageSize {
-        width: 400,
-        height: 267,
-    }; // ratio 6 -> staged path
 
+    // The gate `ingest_begin` applies before building the reducer.
+    validate_striped_shrink(src, target).unwrap();
+
+    // Compare the solver's output. The heuristic evaluator's cap depends only
+    // on base edge density and would stand in for the fit on both paths.
     let params = AutoSharpParams {
         target_width: target.width,
         target_height: target.height,
+        evaluator_config: None,
         ..Default::default()
     };
 
@@ -77,8 +81,42 @@ fn striped_ingest_selects_similar_strength_to_monolithic() {
 
     let s_mono = mono.diagnostics.selected_strength;
     let s_striped = striped.diagnostics.selected_strength;
+
+    // A parity claim is only meaningful if both paths selected a fitted root:
+    // a fallback pick is clamped to a probe, and the heuristic evaluator's cap
+    // is a function of base edge density, not of the probes.
+    for (name, d) in [
+        ("monolithic", &mono.diagnostics),
+        ("striped", &striped.diagnostics),
+    ] {
+        assert!(
+            matches!(d.selection_mode, SelectionMode::PolynomialRoot) && d.evaluator_cap.is_none(),
+            "{name} did not select a fitted root: mode={:?}, evaluator_cap={:?}",
+            d.selection_mode,
+            d.evaluator_cap
+        );
+    }
+
     assert!(
         (s_striped - s_mono).abs() <= 0.3,
         "selected strength diverged: monolithic={s_mono}, striped={s_striped}"
     );
+}
+
+#[test]
+fn striped_ingest_selects_similar_strength_to_monolithic() {
+    assert_striped_matches_monolithic(ImageSize {
+        width: 400,
+        height: 267,
+    }); // ratio 6
+}
+
+#[test]
+fn striped_ingest_just_above_the_4x_gate_matches_monolithic() {
+    // 2400x1600 -> 533x355 is ~4.5x: the window the old 3.0 gate let through
+    // and no test covered, just past the 4.0x boundary.
+    assert_striped_matches_monolithic(ImageSize {
+        width: 533,
+        height: 355,
+    });
 }

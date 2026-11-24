@@ -13,6 +13,13 @@ This project is pre-1.0 — breaking changes may occur in any release.
 - Downscales between 3× and 4× (e.g. 4K→720p) no longer run a full-size
   no-op bilinear "pre-reduce" pass before Lanczos3; resize is ~20× faster
   at those ratios.
+- Striped ingest no longer accepts shrink ratios between 3× and 4×. There the
+  pre-reduce factor floors to 1, so the "pre-reduce" was an identity pass over
+  a full-size accumulator; `validate_striped_shrink` now applies the same guard
+  as the staged resize path, and the web client sends those jobs down the
+  monolithic path like smaller downscales. `StripedPreReducer::new` likewise
+  rejects an intermediate equal to the source, where it used to allocate that
+  accumulator.
 
 ### Changed
 - Native resize is multithreaded (`fast_image_resize/rayon` under the
