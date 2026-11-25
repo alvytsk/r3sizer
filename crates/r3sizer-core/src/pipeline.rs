@@ -2008,6 +2008,262 @@ mod tests {
         assert_eq!(a.unwrap().1.dense_min, b.unwrap().1.dense_min);
     }
 
+    // -----------------------------------------------------------------------
+    // AutoSharpParams field roles
+    // -----------------------------------------------------------------------
+
+    /// Fields that change the [`PreparedBase`]; [`BaseParamsKey`] must cover
+    /// exactly these.  `target` is one key field holding the first two.
+    const BASE_AFFECTING: [&str; 10] = [
+        "target_width",
+        "target_height",
+        "target_artifact_ratio",
+        "enable_contrast_leveling",
+        "sharpen_strategy",
+        "input_color_space",
+        "resize_strategy",
+        "evaluation_color_space",
+        "artifact_metric",
+        "evaluator_config",
+    ];
+
+    /// Fields only the probe measurement reads.
+    const PROBE_ONLY: [&str; 5] = [
+        "sharpen_sigma",
+        "sharpen_mode",
+        "metric_mode",
+        "metric_weights",
+        "selection_policy",
+    ];
+
+    /// Fields read by neither the base nor the probes.
+    const NEITHER: [&str; 6] = [
+        "probe_strengths",
+        "fit_strategy",
+        "output_clamp",
+        "diagnostics_level",
+        "experimental_sharpen_mode",
+        "pipeline_mode",
+    ];
+
+    /// Compile-time tripwire for the three role lists.  The destructure has
+    /// no `..`, so a new field fails to compile until it is listed; a binding
+    /// left out of every array is an unused-variable error under `-D warnings`.
+    #[test]
+    fn every_param_field_has_a_role() {
+        let AutoSharpParams {
+            target_width,
+            target_height,
+            probe_strengths,
+            target_artifact_ratio,
+            enable_contrast_leveling,
+            sharpen_sigma,
+            fit_strategy,
+            output_clamp,
+            sharpen_mode,
+            metric_mode,
+            artifact_metric,
+            metric_weights,
+            selection_policy,
+            diagnostics_level,
+            sharpen_strategy,
+            input_color_space,
+            resize_strategy,
+            experimental_sharpen_mode,
+            evaluation_color_space,
+            evaluator_config,
+            pipeline_mode,
+        } = AutoSharpParams::default();
+
+        // One `&dyn Debug` per binding, grouped and ordered as the constants
+        // list their names.
+        let base_affecting: [&dyn std::fmt::Debug; BASE_AFFECTING.len()] = [
+            &target_width,
+            &target_height,
+            &target_artifact_ratio,
+            &enable_contrast_leveling,
+            &sharpen_strategy,
+            &input_color_space,
+            &resize_strategy,
+            &evaluation_color_space,
+            &artifact_metric,
+            &evaluator_config,
+        ];
+        let probe_only: [&dyn std::fmt::Debug; PROBE_ONLY.len()] = [
+            &sharpen_sigma,
+            &sharpen_mode,
+            &metric_mode,
+            &metric_weights,
+            &selection_policy,
+        ];
+        let neither: [&dyn std::fmt::Debug; NEITHER.len()] = [
+            &probe_strengths,
+            &fit_strategy,
+            &output_clamp,
+            &diagnostics_level,
+            &experimental_sharpen_mode,
+            &pipeline_mode,
+        ];
+        assert_eq!(base_affecting.len() + probe_only.len() + neither.len(), 21);
+    }
+
+    /// Change one named field to another valid value.
+    fn toggle_param(name: &str, params: &mut AutoSharpParams) {
+        use crate::{
+            ArtifactMetric, ClassificationParams, DiagnosticsLevel, EvaluationColorSpace,
+            EvaluatorConfig, ExperimentalSharpenMode, FitStrategy, GainTable, InputColorSpace,
+            MetricMode, PipelineMode, ProbeConfig, ResizeKernel, ResizeStrategy, SelectionPolicy,
+            SharpenMode, SharpenStrategy,
+        };
+        match name {
+            "target_width" => params.target_width += 7,
+            "target_height" => params.target_height += 7,
+            "target_artifact_ratio" => {
+                params.target_artifact_ratio = if params.target_artifact_ratio == 0.5 {
+                    0.25
+                } else {
+                    0.5
+                };
+            }
+            "enable_contrast_leveling" => {
+                params.enable_contrast_leveling = !params.enable_contrast_leveling;
+            }
+            "sharpen_strategy" => {
+                params.sharpen_strategy = match params.sharpen_strategy {
+                    SharpenStrategy::Uniform => SharpenStrategy::ContentAdaptive {
+                        classification: ClassificationParams::default(),
+                        gain_table: GainTable::v03_default(),
+                        max_backoff_iterations: 4,
+                        backoff_scale_factor: 0.8,
+                    },
+                    SharpenStrategy::ContentAdaptive { .. } => SharpenStrategy::Uniform,
+                };
+            }
+            "input_color_space" => {
+                params.input_color_space = match params.input_color_space {
+                    None => Some(InputColorSpace::LinearRgb),
+                    Some(_) => None,
+                };
+            }
+            "resize_strategy" => {
+                params.resize_strategy = match params.resize_strategy {
+                    None => Some(ResizeStrategy::Uniform {
+                        kernel: ResizeKernel::CatmullRom,
+                    }),
+                    Some(_) => None,
+                };
+            }
+            "evaluation_color_space" => {
+                params.evaluation_color_space = match params.evaluation_color_space {
+                    None => Some(EvaluationColorSpace::LumaOnly),
+                    Some(_) => None,
+                };
+            }
+            "artifact_metric" => {
+                params.artifact_metric = match params.artifact_metric {
+                    ArtifactMetric::ChannelClippingRatio => ArtifactMetric::PixelOutOfGamutRatio,
+                    ArtifactMetric::PixelOutOfGamutRatio => ArtifactMetric::ChannelClippingRatio,
+                };
+            }
+            "evaluator_config" => {
+                params.evaluator_config = match params.evaluator_config {
+                    None => Some(EvaluatorConfig::Heuristic),
+                    Some(_) => None,
+                };
+            }
+            "sharpen_sigma" => params.sharpen_sigma = 1.5,
+            "sharpen_mode" => {
+                params.sharpen_mode = match params.sharpen_mode {
+                    SharpenMode::Lightness => SharpenMode::Rgb,
+                    SharpenMode::Rgb => SharpenMode::Lightness,
+                };
+            }
+            "metric_mode" => {
+                params.metric_mode = match params.metric_mode {
+                    MetricMode::RelativeToBase => MetricMode::AbsoluteTotal,
+                    MetricMode::AbsoluteTotal => MetricMode::RelativeToBase,
+                };
+            }
+            "metric_weights" => params.metric_weights.gamut_excursion = 2.0,
+            "selection_policy" => {
+                params.selection_policy = match params.selection_policy {
+                    SelectionPolicy::GamutOnly => SelectionPolicy::Hybrid,
+                    _ => SelectionPolicy::GamutOnly,
+                };
+            }
+            "probe_strengths" => {
+                params.probe_strengths = ProbeConfig::Explicit(vec![0.25, 0.5, 1.0, 2.0]);
+            }
+            "fit_strategy" => {
+                params.fit_strategy = match params.fit_strategy {
+                    FitStrategy::Cubic => FitStrategy::DirectSearch,
+                    FitStrategy::DirectSearch => FitStrategy::Cubic,
+                };
+            }
+            "output_clamp" => {
+                params.output_clamp = match params.output_clamp {
+                    ClampPolicy::Clamp => ClampPolicy::Normalize,
+                    ClampPolicy::Normalize => ClampPolicy::Clamp,
+                };
+            }
+            "diagnostics_level" => {
+                params.diagnostics_level = match params.diagnostics_level {
+                    DiagnosticsLevel::Summary => DiagnosticsLevel::Full,
+                    DiagnosticsLevel::Full => DiagnosticsLevel::Summary,
+                };
+            }
+            "experimental_sharpen_mode" => {
+                params.experimental_sharpen_mode = if params.experimental_sharpen_mode.is_none() {
+                    Some(ExperimentalSharpenMode::LumaPlusChromaGuard {
+                        max_chroma_shift: 0.25,
+                        chroma_region_factors: None,
+                        saturation_guard: None,
+                    })
+                } else {
+                    None
+                };
+            }
+            "pipeline_mode" => {
+                params.pipeline_mode = match params.pipeline_mode {
+                    None => Some(PipelineMode::Fast),
+                    Some(_) => None,
+                };
+            }
+            other => panic!("`{other}` is not in any role list"),
+        }
+    }
+
+    fn prepared_photo() -> PreparedBase {
+        prepare_base(&gradient(48, 36), &AutoSharpParams::photo(16, 12), &|_| {}).unwrap()
+    }
+
+    #[test]
+    fn base_params_key_rejects_a_change_in_any_base_affecting_field() {
+        let prepared = prepared_photo();
+        for name in BASE_AFFECTING {
+            let mut changed = AutoSharpParams::photo(16, 12);
+            toggle_param(name, &mut changed);
+            assert!(
+                !prepared.matches_params(&changed),
+                "`{name}` changes the prepared base but BaseParamsKey ignores it"
+            );
+        }
+    }
+
+    #[test]
+    fn base_params_key_ignores_every_field_that_leaves_the_base_unchanged() {
+        let prepared = prepared_photo();
+        assert!(prepared.matches_params(&AutoSharpParams::photo(16, 12)));
+        for name in PROBE_ONLY.into_iter().chain(NEITHER) {
+            let mut changed = AutoSharpParams::photo(16, 12);
+            toggle_param(name, &mut changed);
+            assert!(
+                prepared.matches_params(&changed),
+                "`{name}` leaves the prepared base unchanged but BaseParamsKey rejects it"
+            );
+        }
+    }
+
     #[test]
     fn probes_carry_breakdown_only_under_composite_policy() {
         use crate::SelectionPolicy;
