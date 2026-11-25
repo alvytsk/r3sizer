@@ -191,6 +191,16 @@ pub enum SelectionPolicy {
     CompositeOnly,
 }
 
+impl SelectionPolicy {
+    /// Whether a probe should compute a per-probe [`MetricBreakdown`].
+    ///
+    /// Only the composite-aware policies need it; the default `GamutOnly`
+    /// path skips it to keep probing fast.
+    pub(crate) fn needs_probe_breakdown(self) -> bool {
+        self != SelectionPolicy::GamutOnly
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Solver / diagnostics status enums
 // ---------------------------------------------------------------------------
@@ -662,14 +672,6 @@ impl AutoSharpParams {
             mode.apply(&mut self);
         }
         self
-    }
-
-    /// Whether the probe loop should compute a per-probe [`MetricBreakdown`].
-    ///
-    /// Only the composite-aware selection policies need it; the default
-    /// `GamutOnly` path skips it to keep probing fast.
-    pub(crate) fn needs_probe_breakdown(&self) -> bool {
-        self.selection_policy != SelectionPolicy::GamutOnly
     }
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.

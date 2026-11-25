@@ -1,11 +1,11 @@
 use r3sizer_core::{
-    prepare_base, process_auto_sharp_downscale, process_from_prepared_with_probes,
-    AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
-    ChromaRegionFactors, ClampPolicy, ClassificationParams, CrossingStatus, DiagnosticsLevel,
-    ExperimentalSharpenMode, FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable,
-    LinearRgbImage, MetricComponent, MetricMode, PipelineMode, ProbeConfig, ProbeSample,
-    ResizeKernel, ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode,
-    SharpenStrategy,
+    prepare_base, process_auto_sharp_downscale, process_from_prepared,
+    process_from_prepared_with_probes, AdaptiveValidationOutcome, ArtifactMetric,
+    AutoSharpDiagnostics, AutoSharpParams, ChromaRegionFactors, ClampPolicy, ClassificationParams,
+    CrossingStatus, DiagnosticsLevel, EvaluationColorSpace, ExperimentalSharpenMode,
+    FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage,
+    MetricComponent, MetricMode, PipelineMode, ProbeConfig, ProbeSample, ResizeKernel,
+    ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
 };
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,19 @@ fn checkerboard(w: u32, h: u32) -> LinearRgbImage {
 
 fn solid_image(w: u32, h: u32, value: f32) -> LinearRgbImage {
     LinearRgbImage::new(w, h, vec![value; (w * h * 3) as usize]).unwrap()
+}
+
+/// Dark/light stripes 8 px wide: sharpening overshoot clips the red channel
+/// while luminance stays in range, so the evaluation color spaces disagree.
+fn stripe_image(w: u32, h: u32) -> LinearRgbImage {
+    let mut data = Vec::with_capacity((w * h * 3) as usize);
+    for _ in 0..h {
+        for x in 0..w {
+            let v = if (x / 8) % 2 == 0 { 0.92 } else { 0.03 };
+            data.extend_from_slice(&[v, v * 0.5, v * 0.2]);
+        }
+    }
+    LinearRgbImage::new(w, h, data).unwrap()
 }
 
 fn default_params(tw: u32, th: u32) -> AutoSharpParams {
@@ -1928,4 +1941,72 @@ fn two_pass_no_early_stop_when_all_under_budget() {
         "no bracket → no early stop, but got coarse_probes_used={:?}",
         diag.coarse_probes_used
     );
+}
+
+// ---------------------------------------------------------------------------
+// Probe-worker seam
+// ---------------------------------------------------------------------------
+
+#[test]
+fn worker_probes_measure_what_the_pipeline_measures() {
+    let src = stripe_image(128, 96);
+    let strengths = [0.5f32, 1.0, 2.0, 3.0, 4.0];
+    let photo = AutoSharpParams::photo(32, 24);
+    let variants = [
+        ("lightness", photo.clone()),
+        (
+            "rgb",
+            AutoSharpParams {
+                sharpen_mode: SharpenMode::Rgb,
+                ..photo.clone()
+            },
+        ),
+        (
+            "hybrid",
+            AutoSharpParams {
+                selection_policy: SelectionPolicy::Hybrid,
+                ..photo.clone()
+            },
+        ),
+    ];
+    for (label, variant) in variants {
+        for cs in [
+            None,
+            Some(EvaluationColorSpace::Rgb),
+            Some(EvaluationColorSpace::LumaOnly),
+            Some(EvaluationColorSpace::LabApprox),
+        ] {
+            let params = AutoSharpParams {
+                evaluation_color_space: cs,
+                probe_strengths: ProbeConfig::Explicit(strengths.to_vec()),
+                ..variant.clone()
+            };
+            let prepared = prepare_base(&src, &params, &|_| {}).unwrap();
+            let in_process = process_from_prepared(&prepared, &params, &|_| {})
+                .unwrap()
+                .diagnostics
+                .probe_samples;
+            let worker = prepared.run_probes(&strengths, &params).unwrap();
+            assert_eq!(
+                worker.len(),
+                in_process.len(),
+                "{label}, evaluation_color_space = {cs:?}"
+            );
+            for (w, p) in worker.iter().zip(&in_process) {
+                assert_eq!(
+                    (
+                        w.strength,
+                        w.artifact_ratio.to_bits(),
+                        w.metric_value.to_bits()
+                    ),
+                    (
+                        p.strength,
+                        p.artifact_ratio.to_bits(),
+                        p.metric_value.to_bits()
+                    ),
+                    "{label}, evaluation_color_space = {cs:?}"
+                );
+            }
+        }
+    }
 }

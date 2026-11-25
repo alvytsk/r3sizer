@@ -13,6 +13,7 @@
 /// 9. Measure actual artifact ratio on the final image.
 /// 10. Apply clamp/normalize policy.
 /// 11. Return result image + full diagnostics.
+use serde::{Deserialize, Serialize};
 use web_time::Instant;
 
 use crate::{
@@ -24,11 +25,82 @@ use crate::{
     sharpen::make_kernel,
     solve::{find_sharpness_direct_with_policy, find_sharpness_with_policy},
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams, ClampPolicy,
-    CoreError, DiagnosticsLevel, EvaluatorCapDiagnostics, FallbackReason, FitStatus, FitStrategy,
-    ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeConfig, ProbePassDiagnostics,
-    ProbeSample, ProcessOutput, RegionCoverage, RobustnessFlags, SelectionMode, SharpenMode,
-    SharpenStrategy, StageTiming,
+    CoreError, DiagnosticsLevel, EvaluationColorSpace, EvaluatorCapDiagnostics, FallbackReason,
+    FitStatus, FitStrategy, ImageSize, LinearRgbImage, MetricMode, MetricWeights, ProbeConfig,
+    ProbePassDiagnostics, ProbeSample, ProcessOutput, RegionCoverage, RobustnessFlags,
+    SelectionMode, SelectionPolicy, SharpenMode, SharpenStrategy, StageTiming,
 };
+
+// ---------------------------------------------------------------------------
+// Probe settings — everything a probe measurement reads from the params
+// ---------------------------------------------------------------------------
+
+/// The parameters a probe measurement reads, and nothing else.
+///
+/// Both probe paths build their context from this value, so in-process and
+/// worker probes measure the same thing for the same inputs.  A probe worker
+/// input holds no params, which makes that structural: a setting that is not
+/// here cannot reach a measurement.
+///
+/// Floats are stored as [`f32::to_bits`], so two settings compare equal
+/// exactly when they would produce the same numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeSettings {
+    sharpen_sigma_bits: u32,
+    sharpen_mode: SharpenMode,
+    metric_mode: MetricMode,
+    artifact_metric: ArtifactMetric,
+    metric_weights_bits: [u32; 4],
+    selection_policy: SelectionPolicy,
+    evaluation_color_space: Option<EvaluationColorSpace>,
+}
+
+impl ProbeSettings {
+    /// The settings `params` configures a probe measurement with.
+    pub(crate) fn from_params(params: &AutoSharpParams) -> Self {
+        let w = params.metric_weights;
+        Self {
+            sharpen_sigma_bits: params.sharpen_sigma.to_bits(),
+            sharpen_mode: params.sharpen_mode,
+            metric_mode: params.metric_mode,
+            artifact_metric: params.artifact_metric,
+            metric_weights_bits: [
+                w.gamut_excursion.to_bits(),
+                w.halo_ringing.to_bits(),
+                w.edge_overshoot.to_bits(),
+                w.texture_flattening.to_bits(),
+            ],
+            selection_policy: params.selection_policy,
+            evaluation_color_space: params.evaluation_color_space,
+        }
+    }
+
+    /// Whether a probe computes a per-probe [`MetricBreakdown`](crate::MetricBreakdown).
+    fn needs_probe_breakdown(&self) -> bool {
+        self.selection_policy.needs_probe_breakdown()
+    }
+
+    fn metric_weights(&self) -> MetricWeights {
+        let [gamut_excursion, halo_ringing, edge_overshoot, texture_flattening] =
+            self.metric_weights_bits;
+        MetricWeights {
+            gamut_excursion: f32::from_bits(gamut_excursion),
+            halo_ringing: f32::from_bits(halo_ringing),
+            edge_overshoot: f32::from_bits(edge_overshoot),
+            texture_flattening: f32::from_bits(texture_flattening),
+        }
+    }
+
+    /// Length of the detail signal these settings probe with, in floats, for
+    /// a base of `pixels` pixels: one per pixel in Lightness mode, three in
+    /// Rgb mode.
+    fn detail_len(&self, pixels: usize) -> usize {
+        match self.sharpen_mode {
+            SharpenMode::Lightness => pixels,
+            SharpenMode::Rgb => pixels * 3,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Base params fingerprint — tracks which params affect PreparedBase
@@ -495,14 +567,9 @@ pub fn run_probes_standalone(
         strengths,
         &base,
         Some(base_luminance),
-        params.sharpen_mode,
-        params.metric_mode,
-        params.artifact_metric,
-        baseline_artifact_ratio,
         &detail,
-        None,
-        params.needs_probe_breakdown(),
-        params.metric_weights,
+        baseline_artifact_ratio,
+        &ProbeSettings::from_params(params),
     )
 }
 
@@ -563,13 +630,8 @@ pub fn run_probes_from_detail(
         base: &base,
         base_luminance: Some(base_luminance),
         detail,
-        sharpen_mode: params.sharpen_mode,
-        artifact_metric: params.artifact_metric,
         baseline_artifact_ratio,
-        metric_mode: params.metric_mode,
-        metric_override: None,
-        need_breakdown: params.needs_probe_breakdown(),
-        metric_weights: params.metric_weights,
+        settings: ProbeSettings::from_params(params),
     };
     let mut scratch = ProbeScratch {
         luma: match params.sharpen_mode {
@@ -606,13 +668,7 @@ fn run_probes_for_prepared(
     let effective_p0 = prepared.effective_p0;
 
     let kernel = make_kernel(params.sharpen_sigma)?;
-
-    let eval_cs_fn = params.evaluation_color_space.map(|cs| {
-        move |img: &LinearRgbImage| -> f32 { crate::chroma_guard::evaluate_in_color_space(img, cs) }
-    });
-    let metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)> = eval_cs_fn
-        .as_ref()
-        .map(|f| f as &(dyn Fn(&LinearRgbImage) -> f32 + Sync));
+    let settings = ProbeSettings::from_params(params);
 
     on_stage("probing");
     let t0 = Instant::now();
@@ -633,14 +689,9 @@ fn run_probes_for_prepared(
             effective_p0,
             base,
             base_luminance,
-            params.sharpen_mode,
-            params.metric_mode,
-            params.artifact_metric,
             baseline_artifact_ratio,
             &detail,
-            metric_override,
-            params.needs_probe_breakdown(),
-            params.metric_weights,
+            &settings,
         )?,
         _ => {
             let strengths = params.probe_strengths.resolve()?;
@@ -648,14 +699,9 @@ fn run_probes_for_prepared(
                 &strengths,
                 base,
                 base_luminance,
-                params.sharpen_mode,
-                params.metric_mode,
-                params.artifact_metric,
-                baseline_artifact_ratio,
                 &detail,
-                metric_override,
-                params.needs_probe_breakdown(),
-                params.metric_weights,
+                baseline_artifact_ratio,
+                &settings,
             )?;
             (samples, None)
         }
@@ -1213,19 +1259,13 @@ fn sharpen_image(
 /// Each probe applies `out = input + s × D` from the precomputed detail
 /// signal (see [`compute_detail`]) — a trivial multiply-add — instead of
 /// recomputing the separable blur for every strength.
-#[allow(clippy::too_many_arguments)]
 fn probe_strengths(
     strengths: &[f32],
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
-    sharpen_mode: SharpenMode,
-    metric_mode: MetricMode,
-    artifact_metric: ArtifactMetric,
-    baseline_artifact_ratio: f32,
     detail: &[f32],
-    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
-    need_breakdown: bool,
-    metric_weights: MetricWeights,
+    baseline_artifact_ratio: f32,
+    settings: &ProbeSettings,
 ) -> Result<Vec<ProbeSample>, CoreError> {
     let w = base.width() as usize;
     let h = base.height() as usize;
@@ -1234,13 +1274,8 @@ fn probe_strengths(
         base,
         base_luminance,
         detail,
-        sharpen_mode,
-        artifact_metric,
         baseline_artifact_ratio,
-        metric_mode,
-        metric_override,
-        need_breakdown,
-        metric_weights,
+        settings: *settings,
     };
 
     #[cfg(feature = "parallel")]
@@ -1248,7 +1283,7 @@ fn probe_strengths(
         use rayon::prelude::*;
         let bw = base.width();
         let bh = base.height();
-        let mode = sharpen_mode;
+        let mode = settings.sharpen_mode;
         let results: Vec<ProbeSample> = strengths
             .par_iter()
             .map_init(
@@ -1268,7 +1303,7 @@ fn probe_strengths(
     #[cfg(not(feature = "parallel"))]
     {
         let mut scratch = ProbeScratch {
-            luma: match sharpen_mode {
+            luma: match settings.sharpen_mode {
                 SharpenMode::Lightness => vec![0.0f32; w * h],
                 SharpenMode::Rgb => Vec::new(),
             },
@@ -1712,14 +1747,9 @@ fn run_two_pass_probing(
     p0: f32,
     base: &LinearRgbImage,
     base_luminance: Option<&[f32]>,
-    sharpen_mode: SharpenMode,
-    metric_mode: MetricMode,
-    artifact_metric: ArtifactMetric,
     baseline_artifact_ratio: f32,
     detail: &[f32],
-    metric_override: Option<&(dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
-    need_breakdown: bool,
-    metric_weights: MetricWeights,
+    settings: &ProbeSettings,
 ) -> Result<(Vec<ProbeSample>, Option<ProbePassDiagnostics>), CoreError> {
     let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
 
@@ -1730,16 +1760,11 @@ fn run_two_pass_probing(
         base,
         base_luminance,
         detail,
-        sharpen_mode,
-        artifact_metric,
         baseline_artifact_ratio,
-        metric_mode,
-        metric_override,
-        need_breakdown,
-        metric_weights,
+        settings: *settings,
     };
     let mut scratch = ProbeScratch {
-        luma: match sharpen_mode {
+        luma: match settings.sharpen_mode {
             SharpenMode::Lightness => vec![0.0f32; w * h],
             SharpenMode::Rgb => Vec::new(),
         },
@@ -1806,15 +1831,10 @@ struct ProbeContext<'a> {
     base: &'a LinearRgbImage,
     base_luminance: Option<&'a [f32]>,
     detail: &'a [f32],
-    sharpen_mode: SharpenMode,
-    artifact_metric: ArtifactMetric,
+    /// Artifact ratio of the unsharpened base, which `RelativeToBase` subtracts.
     baseline_artifact_ratio: f32,
-    metric_mode: MetricMode,
-    metric_override: Option<&'a (dyn Fn(&LinearRgbImage) -> f32 + Sync)>,
-    /// Compute a per-probe [`MetricBreakdown`] (composite policies / diagnostics).
-    need_breakdown: bool,
-    /// Weights for the composite score in the per-probe breakdown.
-    metric_weights: MetricWeights,
+    /// Everything else a measurement reads.
+    settings: ProbeSettings,
 }
 
 /// Mutable scratch buffers reused across probes to avoid per-probe allocation.
@@ -1835,7 +1855,7 @@ fn probe_one_reuse(
 ) -> ProbeSample {
     use crate::sharpen;
 
-    match ctx.sharpen_mode {
+    match ctx.settings.sharpen_mode {
         SharpenMode::Lightness => {
             let lum = ctx
                 .base_luminance
@@ -1853,16 +1873,24 @@ fn probe_one_reuse(
         }
     }
 
-    let p_total = match ctx.metric_override {
-        Some(f) => f(&scratch.rgb),
-        None => crate::metrics::compute_selection_metric(&scratch.rgb, ctx.artifact_metric),
+    // The same measurement for in-process and worker probes: an evaluation
+    // color space replaces the default metric when one is configured.
+    let p_total = match ctx.settings.evaluation_color_space {
+        Some(cs) => crate::chroma_guard::evaluate_in_color_space(&scratch.rgb, cs),
+        None => {
+            crate::metrics::compute_selection_metric(&scratch.rgb, ctx.settings.artifact_metric)
+        }
     };
-    let metric_value = compute_metric_value(p_total, ctx.baseline_artifact_ratio, ctx.metric_mode);
+    let metric_value = compute_metric_value(
+        p_total,
+        ctx.baseline_artifact_ratio,
+        ctx.settings.metric_mode,
+    );
 
-    let breakdown = if ctx.need_breakdown {
+    let breakdown = if ctx.settings.needs_probe_breakdown() {
         // luma_sharpened: reuse scratch.luma in Lightness mode; extract in RGB mode.
         let sharp_luma_owned;
-        let sharp_luma: &[f32] = match ctx.sharpen_mode {
+        let sharp_luma: &[f32] = match ctx.settings.sharpen_mode {
             SharpenMode::Lightness => &scratch.luma,
             SharpenMode::Rgb => {
                 sharp_luma_owned = color::extract_luminance(&scratch.rgb);
@@ -1883,8 +1911,8 @@ fn probe_one_reuse(
             ctx.base,
             base_luma,
             sharp_luma,
-            ctx.artifact_metric,
-            &ctx.metric_weights,
+            ctx.settings.artifact_metric,
+            &ctx.settings.metric_weights(),
         ))
     } else {
         None
@@ -2044,6 +2072,18 @@ mod tests {
         "diagnostics_level",
         "experimental_sharpen_mode",
         "pipeline_mode",
+    ];
+
+    /// Fields whose value a probe measurement reads.  Two of them also change
+    /// the base, so they are listed in [`BASE_AFFECTING`] as well.
+    const PROBE_SETTINGS_FIELDS: [&str; 7] = [
+        "sharpen_sigma",
+        "sharpen_mode",
+        "metric_mode",
+        "artifact_metric",
+        "metric_weights",
+        "selection_policy",
+        "evaluation_color_space",
     ];
 
     /// Compile-time tripwire for the three role lists.  The destructure has
@@ -2260,6 +2300,28 @@ mod tests {
             assert!(
                 prepared.matches_params(&changed),
                 "`{name}` leaves the prepared base unchanged but BaseParamsKey rejects it"
+            );
+        }
+    }
+
+    #[test]
+    fn probe_settings_change_exactly_when_a_probe_setting_field_changes() {
+        let base = AutoSharpParams::photo(16, 12);
+        let settings = ProbeSettings::from_params(&base);
+        let all: Vec<&str> = BASE_AFFECTING
+            .iter()
+            .chain(PROBE_ONLY.iter())
+            .chain(NEITHER.iter())
+            .copied()
+            .collect();
+        assert_eq!(all.len(), 21);
+        for name in all {
+            let mut changed = base.clone();
+            toggle_param(name, &mut changed);
+            assert_eq!(
+                ProbeSettings::from_params(&changed) != settings,
+                PROBE_SETTINGS_FIELDS.contains(&name),
+                "`{name}`"
             );
         }
     }
