@@ -763,106 +763,6 @@ pub fn resolve_dense_strengths(
     }
 }
 
-/// Run probes against raw image data (for use in dedicated probe workers).
-///
-/// Each probe worker receives the base image pixels + luminance from the main
-/// worker and calls this function with its assigned subset of strengths.
-pub fn run_probes_standalone(
-    base_pixels: &[f32],
-    width: u32,
-    height: u32,
-    base_luminance: &[f32],
-    strengths: &[f32],
-    params: &AutoSharpParams,
-    baseline_artifact_ratio: f32,
-) -> Result<Vec<ProbeSample>, CoreError> {
-    let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
-    let kernel = make_kernel(params.sharpen_sigma)?;
-    let detail = compute_detail(&base, Some(base_luminance), params.sharpen_mode, &kernel);
-    probe_strengths(
-        strengths,
-        &base,
-        Some(base_luminance),
-        &detail,
-        baseline_artifact_ratio,
-        &ProbeSettings::from_params(params),
-    )
-}
-
-/// Compute the precomputed detail signal from a prepared base.
-///
-/// Returns `D = input - blur(input)` for the current sharpen mode:
-/// - **Lightness**: single-channel detail (W×H floats)
-/// - **RGB**: three-channel detail (W×H×3 floats)
-///
-/// The returned detail buffer can be sent to probe workers so they skip the
-/// Gaussian blur entirely, eliminating the dominant per-worker cost.
-pub fn compute_probe_detail(
-    base_pixels: &[f32],
-    width: u32,
-    height: u32,
-    base_luminance: &[f32],
-    params: &AutoSharpParams,
-) -> Result<Vec<f32>, CoreError> {
-    use crate::sharpen;
-    let kernel = make_kernel(params.sharpen_sigma)?;
-    let w = width as usize;
-    let h = height as usize;
-
-    match params.sharpen_mode {
-        SharpenMode::Lightness => Ok(sharpen::compute_detail_single_channel(
-            base_luminance,
-            w,
-            h,
-            &kernel,
-        )),
-        SharpenMode::Rgb => {
-            let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
-            Ok(sharpen::compute_detail_rgb(&base, &kernel))
-        }
-    }
-}
-
-/// Like [`run_probes_standalone`] but uses a precomputed detail signal,
-/// skipping the Gaussian blur (the dominant cost per worker).
-///
-/// Call [`compute_probe_detail`] once in the main worker, distribute the
-/// result to probe workers, then call this function in each worker.
-#[allow(clippy::too_many_arguments)]
-pub fn run_probes_from_detail(
-    base_pixels: &[f32],
-    width: u32,
-    height: u32,
-    base_luminance: &[f32],
-    detail: &[f32],
-    strengths: &[f32],
-    params: &AutoSharpParams,
-    baseline_artifact_ratio: f32,
-) -> Result<Vec<ProbeSample>, CoreError> {
-    let base = LinearRgbImage::new(width, height, base_pixels.to_vec())?;
-    let w = width as usize;
-    let h = height as usize;
-    let ctx = ProbeContext {
-        base: &base,
-        base_luminance: Some(base_luminance),
-        detail,
-        baseline_artifact_ratio,
-        settings: ProbeSettings::from_params(params),
-    };
-    let mut scratch = ProbeScratch {
-        luma: match params.sharpen_mode {
-            SharpenMode::Lightness => vec![0.0f32; w * h],
-            SharpenMode::Rgb => Vec::new(),
-        },
-        rgb: LinearRgbImage::zeros(width, height)?,
-    };
-    let results = strengths
-        .iter()
-        .map(|&s| probe_one_reuse(&ctx, s, &mut scratch))
-        .collect();
-    Ok(results)
-}
-
 /// Internal result of the probing phase.
 struct ProbeResult {
     samples: Vec<ProbeSample>,
@@ -2572,38 +2472,18 @@ mod tests {
     fn probes_carry_breakdown_only_under_composite_policy() {
         use crate::SelectionPolicy;
 
-        let base = gradient(24, 24);
-        let luma = color::extract_luminance(&base);
+        let src = gradient(96, 72);
         let strengths = [0.5f32, 1.0, 2.0, 3.0];
+        let mut params = AutoSharpParams::photo(24, 18);
+        let prepared = prepare_base(&src, &params, &|_| {}).unwrap();
 
-        // GamutOnly (default): fast path, no per-probe breakdown.
-        let mut params = AutoSharpParams::photo(24, 24);
         params.selection_policy = SelectionPolicy::GamutOnly;
-        let gamut = crate::run_probes_standalone(
-            base.pixels(),
-            base.width(),
-            base.height(),
-            &luma,
-            &strengths,
-            &params,
-            0.0,
-        )
-        .unwrap();
-        assert!(gamut.iter().all(|s| s.breakdown.is_none()));
+        let gamut = prepared.run_probes(&strengths, &params).unwrap();
+        assert!(gamut.samples().iter().all(|s| s.breakdown.is_none()));
 
-        // Hybrid: per-probe breakdown must be populated.
         params.selection_policy = SelectionPolicy::Hybrid;
-        let hybrid = crate::run_probes_standalone(
-            base.pixels(),
-            base.width(),
-            base.height(),
-            &luma,
-            &strengths,
-            &params,
-            0.0,
-        )
-        .unwrap();
-        assert!(hybrid.iter().all(|s| s.breakdown.is_some()));
+        let hybrid = prepared.run_probes(&strengths, &params).unwrap();
+        assert!(hybrid.samples().iter().all(|s| s.breakdown.is_some()));
     }
 
     // -----------------------------------------------------------------------
