@@ -5,32 +5,28 @@
  * instance. Falls back gracefully to single-worker processing if the pool
  * can't be initialized.
  *
- * Base image data is sent once via `distributeBaseData` and cached in each
- * worker, avoiding redundant structured clones on every probe batch.
+ * The base is sent once via `distributeBaseData` and cached in each worker as
+ * one record (buffers, params and provenance stamp), avoiding redundant
+ * structured clones on every probe batch.
  */
 
 import type { CancellationToken } from "./errors";
-import type { ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
+import type { BaseData, ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
 
-/** Base image data extracted from the main worker's PreparedBase. */
-export interface BaseData {
-  basePixels: Float32Array;
-  luminance: Float32Array;
-  width: number;
-  height: number;
-  baseline: number;
-  effectiveP0: number;
-  /** Precomputed detail signal (D = input - blur(input)).
-   *  When present, probe workers skip the Gaussian blur entirely. */
-  detail?: Float32Array;
+export type { BaseData };
+
+/** Result of a parallel probe round. */
+export interface ProbePoolResult {
+  /** One JSON `ProbeBatch`: the round's batches merged under their shared stamp. */
+  batchJson: string;
+  /** Wall-clock time of the round (ms). */
+  probingMs: number;
 }
 
-/** Result of a parallel probe batch. */
-export interface ProbePoolResult {
-  /** JSON array of merged ProbeSamples, sorted by strength. */
-  samplesJson: string;
-  /** Wall-clock time of the parallel probing phase (ms). */
-  probingMs: number;
+/** One `ProbeBatch` (the core type) as it crosses the worker boundary. */
+interface SerializedBatch {
+  provenance: unknown;
+  samples: Array<{ strength: number }>;
 }
 
 const DEFAULT_POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 6);
@@ -97,11 +93,11 @@ export function isProbePoolReady(): boolean {
 }
 
 /**
- * Send base image data to all probe workers for caching.
+ * Send one base to all probe workers for caching.
  *
- * Call this once per processing cycle after `get_base_data()`.  Workers cache
- * the data and reuse it across multiple `runProbesParallel` calls (e.g. coarse
- * and dense rounds in TwoPass mode), eliminating redundant structured clones.
+ * Call this once per processing cycle after `get_probe_bundle`. Workers cache
+ * the record and reuse it across multiple `runProbesParallel` calls (e.g.
+ * coarse and dense rounds in TwoPass mode).
  */
 export async function distributeBaseData(baseData: BaseData): Promise<void> {
   if (!poolReady || pool.length === 0) {
@@ -123,16 +119,7 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
         resolve();
       };
       w.addEventListener("message", handler);
-      w.postMessage({
-        type: "set_base",
-        id,
-        basePixels: baseData.basePixels,
-        luminance: baseData.luminance,
-        width: baseData.width,
-        height: baseData.height,
-        baseline: baseData.baseline,
-        detail: baseData.detail,
-      } as ProbeWorkerRequest);
+      w.postMessage({ type: "set_base", id, baseData } as ProbeWorkerRequest);
     });
   });
 
@@ -141,20 +128,43 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
 }
 
 /**
- * Run probes in parallel across the pool.
+ * Merge the batches of one or more probe rounds into a single `ProbeBatch`.
  *
- * Workers must have base data cached via `distributeBaseData` before calling
- * this.  Only strengths and params are sent per batch (no image data).
+ * Every batch must carry the same provenance: a worker still holding the
+ * previous base would otherwise slip samples of another base into the fit.
+ * Samples are sorted by strength and near-duplicates (within 1e-5) removed.
  */
+export function mergeProbeBatches(batchJsons: string[]): string {
+  if (batchJsons.length === 0) throw new Error("no probe batches to merge");
+  const batches = batchJsons.map((json) => JSON.parse(json) as SerializedBatch);
+  const [first, ...rest] = batches;
+  const stamp = JSON.stringify(first.provenance);
+  for (const other of rest) {
+    if (JSON.stringify(other.provenance) !== stamp) {
+      throw new Error("probe batches disagree on provenance — the base changed while probing");
+    }
+  }
+  const samples = batches
+    .flatMap((b) => b.samples)
+    .sort((a, b) => a.strength - b.strength)
+    .filter((s, i, arr) => i === 0 || Math.abs(s.strength - arr[i - 1].strength) >= 1e-5);
+  return JSON.stringify({ provenance: first.provenance, samples });
+}
+
 export interface ProbeRunOpts {
   token?: CancellationToken;
   /** Called as each worker's chunk completes: (probesDone, probesTotal). */
   onChunkDone?: (done: number, total: number) => void;
 }
 
+/**
+ * Run one round of probes in parallel across the pool.
+ *
+ * Workers must hold the base via `distributeBaseData` first. Only strengths
+ * are sent per batch: each worker probes with the record it was given.
+ */
 export async function runProbesParallel(
   strengths: number[],
-  paramsJson: string,
   opts: ProbeRunOpts = {},
 ): Promise<ProbePoolResult> {
   if (!poolReady || pool.length === 0) {
@@ -171,27 +181,20 @@ export async function runProbesParallel(
 
   let done = 0;
   const promises = chunks.map((chunk, i) => {
-    if (chunk.length === 0) return Promise.resolve("[]");
+    if (chunk.length === 0) return Promise.resolve(null);
     opts.token?.throwIfCancelled();
-    return runProbeOnWorker(pool[i], chunk, paramsJson).then((json) => {
+    return runProbeOnWorker(pool[i], chunk).then((batchJson) => {
       done += chunk.length;
       opts.onChunkDone?.(done, strengths.length);
-      return json;
+      return batchJson;
     });
   });
 
   const results = await Promise.all(promises);
   const probingMs = performance.now() - t0;
 
-  // Merge all ProbeSample arrays and sort by strength.
-  const merged = results
-    .flatMap((json) => JSON.parse(json) as Array<{ strength: number }>)
-    .sort((a, b) => a.strength - b.strength);
-
-  return {
-    samplesJson: JSON.stringify(merged),
-    probingMs,
-  };
+  const batchJson = mergeProbeBatches(results.filter((b): b is string => b !== null));
+  return { batchJson, probingMs };
 }
 
 /** Distribute strengths as evenly as possible across N workers. */
@@ -203,12 +206,8 @@ function splitStrengths(strengths: number[], n: number): number[][] {
   return chunks;
 }
 
-/** Send a probe batch to one worker and await its result. */
-function runProbeOnWorker(
-  worker: Worker,
-  strengths: number[],
-  paramsJson: string,
-): Promise<string> {
+/** Send a probe batch to one worker and await its stamped batch. */
+function runProbeOnWorker(worker: Worker, strengths: number[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const id = nextProbeId++;
     const timer = setTimeout(() => {
@@ -223,18 +222,13 @@ function runProbeOnWorker(
       if (e.data.error) {
         reject(new Error(e.data.error));
       } else {
-        resolve(e.data.samplesJson!);
+        resolve(e.data.batchJson!);
       }
     };
 
     worker.addEventListener("message", handler);
 
-    const msg: ProbeWorkerRequest = {
-      type: "probe",
-      id,
-      strengths,
-      paramsJson,
-    };
+    const msg: ProbeWorkerRequest = { type: "probe", id, strengths };
     worker.postMessage(msg);
   });
 }

@@ -6,11 +6,12 @@ import {
   distributeBaseData,
   initProbePool,
   isProbePoolReady,
+  mergeProbeBatches,
   resetBaseCache,
   runProbesParallel,
 } from "./probe-pool";
 import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
-import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
+import type { ProbeBundle, WorkerRequest, WorkerResponse } from "./wasm-worker";
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
@@ -109,10 +110,8 @@ function ensureWorker(): Promise<void> {
               cb.reject(new Error(data.error));
             } else if (data.type === "result") {
               cb.resolve(data.result as ProcessResult);
-            } else if (data.type === "base_data") {
-              cb.resolve(data.baseData ?? null);
-            } else if (data.type === "detail") {
-              cb.resolve(data.detailData ?? null);
+            } else if (data.type === "probe_bundle") {
+              cb.resolve(data.bundle);
             } else if (data.type === "strengths") {
               cb.resolve(data.strengthsJson ?? "[]");
             } else if (data.type === "dense_result") {
@@ -229,10 +228,11 @@ export async function prepareImage(
  *   2. Resolve initial strengths via Rust (coarse for TwoPass, all for Explicit/Range)
  *   3. Fan out to probe pool
  *   4. For TwoPass: resolve dense window, run second round in parallel
- *   5. Merge samples, send to main worker for fit + sharpen
+ *   5. Merge the stamped batches, send to main worker for fit + sharpen
  *
  * Falls back to single-worker `processImageAsync` if pool is unavailable,
- * base preparation fails, or any step in the parallel path errors.
+ * base preparation fails, or any step in the parallel path errors — including
+ * a batch the main worker refuses because its stamp is stale.
  */
 export interface ParallelOpts {
   token?: CancellationToken;
@@ -283,21 +283,12 @@ async function runParallelPipeline(
   });
   opts.token?.throwIfCancelled();
 
-  // Step 2: Get base data and precomputed detail from main worker.
-  const [baseData, detail] = await Promise.all([
-    getBaseData(),
-    callWorker<Float32Array | null>({ type: "compute_detail", paramsJson }),
-  ]);
-  if (!baseData) {
-    throw new Error("base data unavailable after prepare_base");
-  }
+  // Step 2: The main worker mints the base, its detail signal and the
+  // provenance stamp together, so they cannot come from different moments.
+  const bundle = await callWorker<ProbeBundle>({ type: "get_probe_bundle", paramsJson });
+  const baseData: BaseData = { ...bundle, paramsJson };
 
-  // Include detail in base data so workers skip the Gaussian blur.
-  if (detail) {
-    baseData.detail = detail;
-  }
-
-  // Distribute base data + detail to probe workers (cached for subsequent rounds).
+  // Distribute the record to probe workers (cached for subsequent rounds).
   await distributeBaseData(baseData);
   opts.token?.throwIfCancelled();
 
@@ -315,18 +306,20 @@ async function runParallelPipeline(
   // Step 4: Run initial probes in parallel.
   progressCallback?.("probing");
   const t0 = performance.now();
-  const { samplesJson: initialSamplesJson } = await runProbesParallel(
-    initialStrengths,
-    paramsJson,
-    { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 * (d / t)) },
-  );
+  const coarse = await runProbesParallel(initialStrengths, {
+    token: opts.token,
+    onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 * (d / t)),
+  });
 
   // Step 5: For TwoPass, resolve dense window and run second round.
-  let finalSamplesJson = initialSamplesJson;
+  let finalBatchJson = coarse.batchJson;
   let passDiagnosticsJson = "";
+  const coarseSamplesJson = JSON.stringify(
+    (JSON.parse(coarse.batchJson) as { samples: unknown }).samples,
+  );
   const denseResultStr = await callWorker<string | null>({
     type: "resolve_dense_strengths",
-    coarseSamplesJson: initialSamplesJson,
+    coarseSamplesJson,
     paramsJson,
     effectiveP0: baseData.effectiveP0,
   });
@@ -338,39 +331,28 @@ async function runParallelPipeline(
     };
     if (denseResult.strengths.length > 0) {
       opts.token?.throwIfCancelled();
-      const { samplesJson: denseSamplesJson } = await runProbesParallel(
-        denseResult.strengths,
-        paramsJson,
-        { token: opts.token, onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 + 0.4 * (d / t)) },
-      );
-      // Merge coarse + dense, sort by strength, dedup.
-      const coarse = JSON.parse(initialSamplesJson) as Array<{ strength: number }>;
-      const dense = JSON.parse(denseSamplesJson) as Array<{ strength: number }>;
-      const merged = [...coarse, ...dense]
-        .sort((a, b) => a.strength - b.strength)
-        .filter((s, i, arr) => i === 0 || Math.abs(s.strength - arr[i - 1].strength) >= 1e-5);
-      finalSamplesJson = JSON.stringify(merged);
+      const dense = await runProbesParallel(denseResult.strengths, {
+        token: opts.token,
+        onChunkDone: (d, t) => opts.onProbeProgress?.(0.6 + 0.4 * (d / t)),
+      });
+      // Merge coarse and dense rounds; refuses batches with another stamp.
+      finalBatchJson = mergeProbeBatches([coarse.batchJson, dense.batchJson]);
     }
     passDiagnosticsJson = JSON.stringify(denseResult.diagnostics);
   }
   const probingMs = performance.now() - t0;
 
-  // Step 6: Send all probes to main worker for fit + sharpen.
+  // Step 6: Send the stamped batch to the main worker for fit + sharpen.
   opts.token?.throwIfCancelled();
   opts.onProbeProgress?.(1);
   progressCallback?.("fitting");
   return callWorker<ProcessResult>({
     type: "process_from_probes",
     paramsJson,
-    probesJson: finalSamplesJson,
+    batchJson: finalBatchJson,
     probingUs: Math.round(probingMs * 1000),
     passDiagnosticsJson,
   });
-}
-
-/** Get cached base data from the main worker. */
-function getBaseData(): Promise<BaseData | null> {
-  return callWorker<BaseData | null>({ type: "get_base_data" });
 }
 
 /** Send a request to the main worker and await its response. */
