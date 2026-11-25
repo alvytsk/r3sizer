@@ -33,7 +33,7 @@ refer to the tagged workspace release that shipped them.
 
 ### Speed (v0.7)
 
-- **Detail precomputation**: `D = input - blur(input)` computed once per probe phase. Each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `compute_probe_detail` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
+- **Detail precomputation**: `D = input - blur(input)` computed once per probe phase. Each probe applies `out = input + s * D` (trivial multiply-add). WASM probe workers receive precomputed detail via `get_probe_bundle` / `probe_batch_with_detail`, eliminating redundant Gaussian blur across workers.
 - **Staged shrink**: for shrink ratios >= 4x, a bilinear pre-reduce to ~2x target precedes the final Lanczos3 pass, following the libvips `gap` principle.
 - **Pipeline modes**: `PipelineMode` enum (Fast / Balanced / Quality) controls probe budget, adaptive complexity, chroma guard, and evaluator. Applied via `AutoSharpParams::resolved()`.
 - **Early stopping**: coarse probing exits after 3 or more probes once a P0 crossing bracket is found, saving the remaining probes.
