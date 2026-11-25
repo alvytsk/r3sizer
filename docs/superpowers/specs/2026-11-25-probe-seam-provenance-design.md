@@ -103,7 +103,8 @@ Nothing accepts it except `ProbeWorkerInput::new`.
 - `provenance`'s baseline equals `parts.baseline_artifact_ratio`.
 
 Lengths are exact, the same policy `finish_pipeline` already applies to the
-final sharpen. `run_probes(&self, strengths) -> ProbeBatch` takes no params.
+final sharpen. `run_probes(&self, strengths) -> Result<ProbeBatch, CoreError>`
+takes no params; the `Result` is for the scratch allocation.
 
 `PreparedBase::probe_input(&self, detail, &params) -> Result<ProbeWorkerInput>`
 builds one from the base itself and mints the provenance. Only `detail` is
@@ -191,8 +192,9 @@ instance's provenance.
 It does not guarantee these cases:
 
 - At the single wasm call site, `luminance` and `detail` are both `W × H`
-  floats in Lightness mode and could be swapped. A node parity test covering
-  that call site is the guard.
+  floats in Lightness mode and could be swapped. A node parity test fixes the
+  binding's argument order and a unit test fixes the worker's call; those two
+  tests are the guard.
 - An identical re-preparation gets a new `base_id`. Samples from the previous
   instance are then rejected and the web client falls back to the in-process
   path: slower, never wrong.
