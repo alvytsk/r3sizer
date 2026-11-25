@@ -13,6 +13,8 @@
 /// 9. Measure actual artifact ratio on the final image.
 /// 10. Apply clamp/normalize policy.
 /// 11. Return result image + full diagnostics.
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
 use web_time::Instant;
 
@@ -161,6 +163,8 @@ pub struct PreparedBase {
     pub target: ImageSize,
     /// Fingerprint of the params that produced this base.
     base_key: BaseParamsKey,
+    /// Identity of this instance among all prepared bases; see [`ProbeProvenance`].
+    base_id: u64,
     pub(crate) base_luminance: Option<Vec<f32>>,
     pub(crate) gain_map: Option<crate::GainMap>,
     pub(crate) region_map: Option<crate::RegionMap>,
@@ -224,43 +228,243 @@ impl PreparedBase {
     /// - **Lightness**: `W × H` floats (single channel)
     /// - **RGB**: `W × H × 3` floats (interleaved)
     ///
-    /// Pass this detail buffer to probe workers so they skip the Gaussian blur
-    /// entirely and call [`run_probes_from_detail`] instead of
-    /// [`run_probes_standalone`].  The detail signal is independent of sharpening
-    /// strength, so it only needs to be computed once per probe phase.
+    /// Pass this detail buffer to probe workers so they skip the Gaussian
+    /// blur entirely: build a [`ProbeWorkerInput`] with [`Self::probe_input`].
+    /// The detail signal is independent of sharpening strength, so it only
+    /// needs to be computed once per probe phase.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::InvalidParams`] when `make_kernel` rejects the sigma.
     pub fn compute_detail(&self, params: &AutoSharpParams) -> Result<Vec<f32>, CoreError> {
-        compute_probe_detail(
-            self.base.pixels(),
-            self.base.width(),
-            self.base.height(),
-            self.base_luminance.as_deref().unwrap_or(&[]),
+        let kernel = make_kernel(params.sharpen_sigma)?;
+        Ok(compute_detail(
+            &self.base,
+            self.base_luminance.as_deref(),
+            params.sharpen_mode,
+            &kernel,
+        ))
+    }
+
+    /// Stamp for probe batches measured on this base with `params`.
+    ///
+    /// See [`ProbeProvenance`] for what it binds a batch to.
+    pub fn probe_provenance(&self, params: &AutoSharpParams) -> ProbeProvenance {
+        ProbeProvenance {
+            base_id: self.base_id,
+            baseline_artifact_ratio_bits: self.baseline_artifact_ratio.to_bits(),
+            settings: ProbeSettings::from_params(params),
+        }
+    }
+
+    /// A [`ProbeWorkerInput`] for this base and `params`.
+    ///
+    /// `detail` is the [`Self::compute_detail`] output and the only
+    /// caller-supplied buffer, so it is the only one that can be wrong; it is
+    /// length-checked like any raw part.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::BufferLengthMismatch`] when `detail` does not have the
+    /// length `params.sharpen_mode` implies.
+    pub fn probe_input<'a>(
+        &'a self,
+        detail: &'a [f32],
+        params: &AutoSharpParams,
+    ) -> Result<ProbeWorkerInput<'a>, CoreError> {
+        ProbeWorkerInput::new(
+            ProbeWorkerParts {
+                base: &self.base,
+                base_luminance: self.base_luminance.as_deref().unwrap_or(&[]),
+                detail,
+                baseline_artifact_ratio: self.baseline_artifact_ratio,
+            },
             params,
+            self.probe_provenance(params),
         )
     }
 
     /// Run sharpening probes for the given strengths against this base.
     ///
-    /// Convenience wrapper around [`run_probes_standalone`] that reads the
-    /// required fields directly from `self`, avoiding the need to pass raw
-    /// pixel slices from call sites.
-    ///
-    /// For higher performance in parallel workers, prefer using
-    /// [`compute_detail`][Self::compute_detail] once and then calling
-    /// [`run_probes_from_detail`] per worker.
+    /// The returned batch is stamped for this base and `params`, ready for
+    /// [`process_from_prepared_with_probes`].  The detail signal is the
+    /// dominant cost; a caller probing in several rounds builds one
+    /// [`ProbeWorkerInput`] with [`Self::probe_input`] and reuses it.
     pub fn run_probes(
         &self,
         strengths: &[f32],
         params: &AutoSharpParams,
-    ) -> Result<Vec<ProbeSample>, CoreError> {
-        run_probes_standalone(
-            self.base.pixels(),
-            self.base.width(),
-            self.base.height(),
-            self.base_luminance.as_deref().unwrap_or(&[]),
+    ) -> Result<ProbeBatch, CoreError> {
+        let detail = self.compute_detail(params)?;
+        self.probe_input(&detail, params)?.run_probes(strengths)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Probe-worker seam: a validated input and a stamped batch
+// ---------------------------------------------------------------------------
+
+/// Identity of the next [`PreparedBase`] instance.  Every `prepare_base` call
+/// that builds a base takes a new one.
+static NEXT_BASE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// What a [`ProbeBatch`] was measured on: which [`PreparedBase`] instance,
+/// with which baseline, and under which probe settings.
+///
+/// Only a [`PreparedBase`] mints one, through
+/// [`PreparedBase::probe_provenance`].  [`process_from_prepared_with_probes`]
+/// accepts a batch only when its stamp equals the one it would mint for the
+/// base and params it is given.  The instance id makes that exact: preparing
+/// the same base again is a new instance, so samples measured on the previous
+/// one are refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeProvenance {
+    base_id: u64,
+    baseline_artifact_ratio_bits: u32,
+    settings: ProbeSettings,
+}
+
+/// The raw buffers of a probe run, named so they cannot be passed in the
+/// wrong position.  Nothing accepts them except [`ProbeWorkerInput::new`],
+/// which checks every length.
+#[derive(Debug, Clone, Copy)]
+pub struct ProbeWorkerParts<'a> {
+    /// The downscaled base image.
+    pub base: &'a LinearRgbImage,
+    /// Its luminance: `W × H` floats.
+    pub base_luminance: &'a [f32],
+    /// The detail signal for the probe settings: `W × H` floats in Lightness
+    /// mode, `W × H × 3` in Rgb mode (see [`PreparedBase::compute_detail`]).
+    pub detail: &'a [f32],
+    /// The base's artifact ratio before sharpening, as
+    /// [`PreparedBase::baseline_artifact_ratio`] reports it.
+    pub baseline_artifact_ratio: f32,
+}
+
+/// Everything a probe worker needs to measure one base: the buffers and the
+/// probe settings, validated and stamped.
+///
+/// Build one from a [`PreparedBase`] with [`PreparedBase::probe_input`], or
+/// from parts that crossed a worker boundary with [`ProbeWorkerInput::new`],
+/// the one raw entry.  [`Self::run_probes`] takes no params, so a measurement
+/// cannot read anything its stamp does not name.
+#[derive(Debug)]
+pub struct ProbeWorkerInput<'a> {
+    provenance: ProbeProvenance,
+    base: &'a LinearRgbImage,
+    base_luminance: &'a [f32],
+    detail: &'a [f32],
+    baseline_artifact_ratio: f32,
+    settings: ProbeSettings,
+}
+
+impl<'a> ProbeWorkerInput<'a> {
+    /// Validate raw parts against `params` and `provenance`.
+    ///
+    /// This is the one raw entry into a probe run, so it enforces every
+    /// invariant the release build's callers rely on:
+    ///
+    /// - `base_luminance` has exactly `W × H` floats, in both sharpen modes.
+    /// - `detail` has exactly the length the sharpen mode implies: `W × H`
+    ///   in Lightness mode, `W × H × 3` in Rgb mode.
+    /// - The stamp's settings are those of `params`.
+    /// - The stamp's baseline is the one in `parts`.
+    ///
+    /// # Errors
+    ///
+    /// [`CoreError::BufferLengthMismatch`] for the first two,
+    /// [`CoreError::ProbeProvenanceMismatch`] for the last two.
+    pub fn new(
+        parts: ProbeWorkerParts<'a>,
+        params: &AutoSharpParams,
+        provenance: ProbeProvenance,
+    ) -> Result<Self, CoreError> {
+        let pixels = parts.base.width() as usize * parts.base.height() as usize;
+        if parts.base_luminance.len() != pixels {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: pixels,
+                got_len: parts.base_luminance.len(),
+            });
+        }
+        let settings = ProbeSettings::from_params(params);
+        let detail_len = settings.detail_len(pixels);
+        if parts.detail.len() != detail_len {
+            return Err(CoreError::BufferLengthMismatch {
+                expected_len: detail_len,
+                got_len: parts.detail.len(),
+            });
+        }
+        if provenance.settings != settings {
+            return Err(CoreError::ProbeProvenanceMismatch);
+        }
+        if provenance.baseline_artifact_ratio_bits != parts.baseline_artifact_ratio.to_bits() {
+            return Err(CoreError::ProbeProvenanceMismatch);
+        }
+        Ok(Self {
+            provenance,
+            base: parts.base,
+            base_luminance: parts.base_luminance,
+            detail: parts.detail,
+            baseline_artifact_ratio: parts.baseline_artifact_ratio,
+            settings,
+        })
+    }
+
+    /// The stamp every batch made from this input carries.
+    pub fn provenance(&self) -> ProbeProvenance {
+        self.provenance
+    }
+
+    /// Measure `strengths` on this input and stamp the result.
+    ///
+    /// # Errors
+    ///
+    /// When the scratch buffers cannot be allocated.
+    pub fn run_probes(&self, strengths: &[f32]) -> Result<ProbeBatch, CoreError> {
+        let samples = probe_strengths(
             strengths,
-            params,
+            self.base,
+            Some(self.base_luminance),
+            self.detail,
             self.baseline_artifact_ratio,
-        )
+            &self.settings,
+        )?;
+        Ok(ProbeBatch {
+            provenance: self.provenance,
+            samples,
+        })
+    }
+}
+
+/// Probe samples together with the [`ProbeProvenance`] they were measured
+/// under.
+///
+/// [`ProbeWorkerInput::run_probes`] and [`PreparedBase::run_probes`] stamp
+/// their output.  [`ProbeBatch::new`] lets a caller that measures probes its
+/// own way stamp samples for a base it holds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeBatch {
+    provenance: ProbeProvenance,
+    samples: Vec<ProbeSample>,
+}
+
+impl ProbeBatch {
+    /// Stamp `samples` with `provenance`.
+    pub fn new(provenance: ProbeProvenance, samples: Vec<ProbeSample>) -> Self {
+        Self {
+            provenance,
+            samples,
+        }
+    }
+
+    /// What the samples were measured on.
+    pub fn provenance(&self) -> ProbeProvenance {
+        self.provenance
+    }
+
+    /// The samples, in the order they were measured.
+    pub fn samples(&self) -> &[ProbeSample] {
+        &self.samples
     }
 }
 
@@ -400,12 +604,14 @@ pub fn prepare_base(
     };
 
     let base_key = BaseParamsKey::from_params(params);
+    let base_id = NEXT_BASE_ID.fetch_add(1, Ordering::Relaxed);
 
     Ok(PreparedBase {
         base,
         input_size,
         target,
         base_key,
+        base_id,
         base_luminance,
         gain_map,
         region_map,
@@ -441,33 +647,43 @@ pub fn process_from_prepared(
     finish_pipeline(prepared, params, probe_result, on_stage)
 }
 
-/// Like [`process_from_prepared`] but with externally-collected probe samples.
+/// Like [`process_from_prepared`] but with probe samples measured elsewhere.
 ///
 /// Use this when probes were computed in parallel across multiple workers.
 /// The `probing_us` field should reflect the wall-clock time of the parallel
 /// probing phase (not the sum of per-worker times).
 ///
-/// `probe_samples` may be supplied in any order; they are sorted internally by
-/// ascending strength before fitting and solving.
+/// `batch` must carry the stamp [`PreparedBase::probe_provenance`] mints for
+/// this base and these params: its samples were measured on this very
+/// [`PreparedBase`] instance, with its baseline and these probe settings.
+/// Any other batch is refused with [`CoreError::ProbeProvenanceMismatch`]
+/// before any work is done.  A param change that leaves the base and the
+/// probe settings alone (`fit_strategy`, `diagnostics_level`, ...) does not
+/// invalidate a batch.  The samples may be in any order; they are sorted
+/// internally by ascending strength before fitting and solving.
 ///
 /// If `pass_diagnostics` is `Some`, it is included in the output diagnostics
 /// (useful for TwoPass parallel probing where JS resolved the dense window).
 ///
-/// `detail` is the [`compute_probe_detail`] output for these same params, if
-/// the caller still has it; the final sharpen then skips its own blur.  A
-/// buffer of the wrong length for the sharpen mode is ignored and recomputed.
+/// `detail` is the [`PreparedBase::compute_detail`] output for these same
+/// params, if the caller still has it; the final sharpen then skips its own
+/// blur.  A buffer of the wrong length for the sharpen mode is ignored and
+/// recomputed.
 #[allow(clippy::too_many_arguments)]
 pub fn process_from_prepared_with_probes(
     prepared: &PreparedBase,
     params: &AutoSharpParams,
-    probe_samples: Vec<ProbeSample>,
+    batch: ProbeBatch,
     probing_us: u64,
     pass_diagnostics: Option<ProbePassDiagnostics>,
     detail: Option<Vec<f32>>,
     on_stage: &dyn Fn(&str),
 ) -> Result<ProcessOutput, CoreError> {
+    if batch.provenance != prepared.probe_provenance(params) {
+        return Err(CoreError::ProbeProvenanceMismatch);
+    }
     let probe_result = ProbeResult {
-        samples: probe_samples,
+        samples: batch.samples,
         pass_diagnostics,
         probing_us,
         detail,
@@ -937,10 +1153,8 @@ fn finish_pipeline(
     on_stage("sharpening");
     let t0 = Instant::now();
     let px = base.width() as usize * base.height() as usize;
-    let detail_len = match params.sharpen_mode {
-        SharpenMode::Lightness => px,
-        SharpenMode::Rgb => px * 3,
-    };
+    // The same exact-length policy `ProbeWorkerInput::new` applies to probes.
+    let detail_len = ProbeSettings::from_params(params).detail_len(px);
     let detail = match detail {
         Some(d) if d.len() == detail_len => d,
         _ => compute_detail(base, base_luminance, params.sharpen_mode, &kernel),
@@ -2323,6 +2537,34 @@ mod tests {
                 PROBE_SETTINGS_FIELDS.contains(&name),
                 "`{name}`"
             );
+        }
+    }
+
+    #[test]
+    fn the_finish_refuses_a_batch_whose_probe_settings_differ() {
+        let prepared = prepared_photo();
+        let base = AutoSharpParams::photo(16, 12);
+        let batch = || prepared.run_probes(&[0.5, 1.0, 2.0], &base).unwrap();
+        for name in BASE_AFFECTING
+            .iter()
+            .chain(PROBE_ONLY.iter())
+            .chain(NEITHER.iter())
+        {
+            let mut changed = base.clone();
+            toggle_param(name, &mut changed);
+            let refused = matches!(
+                process_from_prepared_with_probes(
+                    &prepared,
+                    &changed,
+                    batch(),
+                    0,
+                    None,
+                    None,
+                    &|_| {}
+                ),
+                Err(CoreError::ProbeProvenanceMismatch)
+            );
+            assert_eq!(refused, PROBE_SETTINGS_FIELDS.contains(name), "`{name}`");
         }
     }
 

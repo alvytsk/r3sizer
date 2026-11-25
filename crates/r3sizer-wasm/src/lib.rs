@@ -539,7 +539,7 @@ pub fn process_from_probes(
     let output = r3sizer_core::process_from_prepared_with_probes(
         prepared,
         &params,
-        probe_samples,
+        r3sizer_core::ProbeBatch::new(prepared.probe_provenance(&params), probe_samples),
         probing_us as u64,
         pass_diagnostics,
         detail,

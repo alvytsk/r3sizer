@@ -2,10 +2,11 @@ use r3sizer_core::{
     prepare_base, process_auto_sharp_downscale, process_from_prepared,
     process_from_prepared_with_probes, AdaptiveValidationOutcome, ArtifactMetric,
     AutoSharpDiagnostics, AutoSharpParams, ChromaRegionFactors, ClampPolicy, ClassificationParams,
-    CrossingStatus, DiagnosticsLevel, EvaluationColorSpace, ExperimentalSharpenMode,
+    CoreError, CrossingStatus, DiagnosticsLevel, EvaluationColorSpace, ExperimentalSharpenMode,
     FallbackReason, FitStrategy, GainTable, ImageSize, KernelTable, LinearRgbImage,
-    MetricComponent, MetricMode, PipelineMode, ProbeConfig, ProbeSample, ResizeKernel,
-    ResizeStrategy, SaturationGuardParams, SelectionMode, SharpenMode, SharpenStrategy,
+    MetricComponent, MetricMode, PipelineMode, ProbeBatch, ProbeConfig, ProbeSample,
+    ProbeWorkerInput, ProbeWorkerParts, ResizeKernel, ResizeStrategy, SaturationGuardParams,
+    SelectionMode, SharpenMode, SharpenStrategy,
 };
 
 // ---------------------------------------------------------------------------
@@ -431,7 +432,9 @@ fn solve_with_probes(
             breakdown: None,
         })
         .collect();
-    process_from_prepared_with_probes(&prepared, params, samples, 0, None, None, &|_| {})
+    // Hand-made samples: stamp them for the base they are solved against.
+    let batch = ProbeBatch::new(prepared.probe_provenance(params), samples);
+    process_from_prepared_with_probes(&prepared, params, batch, 0, None, None, &|_| {})
         .unwrap()
         .diagnostics
 }
@@ -1987,6 +1990,7 @@ fn worker_probes_measure_what_the_pipeline_measures() {
                 .diagnostics
                 .probe_samples;
             let worker = prepared.run_probes(&strengths, &params).unwrap();
+            let worker = worker.samples();
             assert_eq!(
                 worker.len(),
                 in_process.len(),
@@ -2009,4 +2013,159 @@ fn worker_probes_measure_what_the_pipeline_measures() {
             }
         }
     }
+}
+
+fn seam_params() -> AutoSharpParams {
+    AutoSharpParams {
+        probe_strengths: ProbeConfig::Explicit(vec![0.25, 0.5, 1.0, 2.0, 3.0]),
+        ..AutoSharpParams::photo(32, 24)
+    }
+}
+
+/// `ProbeWorkerParts` with each buffer passed under its own name.
+fn parts<'a>(
+    base: &'a LinearRgbImage,
+    luma: &'a [f32],
+    detail: &'a [f32],
+    baseline: f32,
+) -> ProbeWorkerParts<'a> {
+    ProbeWorkerParts {
+        base,
+        base_luminance: luma,
+        detail,
+        baseline_artifact_ratio: baseline,
+    }
+}
+
+#[test]
+fn a_probe_batch_is_refused_by_another_instance_of_the_same_base() {
+    let src = stripe_image(128, 96);
+    let params = seam_params();
+    let a = prepare_base(&src, &params, &|_| {}).unwrap();
+    let b = prepare_base(&src, &params, &|_| {}).unwrap();
+    assert_ne!(a.probe_provenance(&params), b.probe_provenance(&params));
+    let batch = a.run_probes(&[0.5, 1.0, 2.0], &params).unwrap();
+    let refused = process_from_prepared_with_probes(&b, &params, batch, 0, None, None, &|_| {});
+    assert!(matches!(refused, Err(CoreError::ProbeProvenanceMismatch)));
+}
+
+#[test]
+fn an_accepted_batch_gives_the_in_process_result() {
+    let params = seam_params();
+    let prepared = prepare_base(&stripe_image(128, 96), &params, &|_| {}).unwrap();
+    let batch = prepared
+        .run_probes(&[0.25, 0.5, 1.0, 2.0, 3.0], &params)
+        .unwrap();
+    let via_workers =
+        process_from_prepared_with_probes(&prepared, &params, batch, 0, None, None, &|_| {})
+            .unwrap();
+    let in_process = process_from_prepared(&prepared, &params, &|_| {}).unwrap();
+    assert_eq!(
+        via_workers.diagnostics.selected_strength.to_bits(),
+        in_process.diagnostics.selected_strength.to_bits()
+    );
+    let metrics = |d: &AutoSharpDiagnostics| {
+        d.probe_samples
+            .iter()
+            .map(|s| (s.strength.to_bits(), s.metric_value.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        metrics(&via_workers.diagnostics),
+        metrics(&in_process.diagnostics)
+    );
+}
+
+#[test]
+fn probing_no_strengths_gives_an_empty_stamped_batch() {
+    let prepared = prepare_base(&stripe_image(128, 96), &seam_params(), &|_| {}).unwrap();
+    let batch = prepared.run_probes(&[], &seam_params()).unwrap();
+    assert!(batch.samples().is_empty());
+    assert_eq!(
+        batch.provenance(),
+        prepared.probe_provenance(&seam_params())
+    );
+}
+
+#[test]
+fn a_probe_input_rejects_every_wrong_length_buffer() {
+    let src = stripe_image(128, 96);
+    for mode in [SharpenMode::Lightness, SharpenMode::Rgb] {
+        let params = AutoSharpParams {
+            sharpen_mode: mode,
+            ..seam_params()
+        };
+        let prepared = prepare_base(&src, &params, &|_| {}).unwrap();
+        let base = LinearRgbImage::new(32, 24, prepared.base_pixels().to_vec()).unwrap();
+        let luma = prepared.luminance().unwrap().to_vec();
+        let detail = prepared.compute_detail(&params).unwrap();
+        let stamp = prepared.probe_provenance(&params);
+        let baseline = prepared.baseline_artifact_ratio();
+        let n = 32 * 24;
+        let (luma_len, detail_len) = (luma.len(), detail.len());
+        assert_eq!(luma_len, n);
+        assert_eq!(
+            detail_len,
+            if matches!(mode, SharpenMode::Lightness) {
+                n
+            } else {
+                3 * n
+            }
+        );
+        ProbeWorkerInput::new(parts(&base, &luma, &detail, baseline), &params, stamp).unwrap();
+
+        let mut long_luma = luma.clone();
+        long_luma.extend([0.5; 5]);
+        for (bad, expected, got) in [(&luma[..n - 1], n, n - 1), (long_luma.as_slice(), n, n + 5)] {
+            let result =
+                ProbeWorkerInput::new(parts(&base, bad, &detail, baseline), &params, stamp);
+            assert!(
+                matches!(result, Err(CoreError::BufferLengthMismatch { expected_len, got_len }) if (expected_len, got_len) == (expected, got)),
+                "{mode:?}: luminance of {} floats was accepted or misreported",
+                bad.len()
+            );
+        }
+        let mut long_detail = detail.clone();
+        long_detail.extend([0.5; 7]);
+        for (bad, expected, got) in [
+            (&detail[..detail_len - 1], detail_len, detail_len - 1),
+            (long_detail.as_slice(), detail_len, detail_len + 7),
+        ] {
+            let result = ProbeWorkerInput::new(parts(&base, &luma, bad, baseline), &params, stamp);
+            assert!(
+                matches!(result, Err(CoreError::BufferLengthMismatch { expected_len, got_len }) if (expected_len, got_len) == (expected, got)),
+                "{mode:?}: detail of {} floats was accepted or misreported",
+                bad.len()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_probe_input_rejects_a_stamp_minted_for_other_params_or_baseline() {
+    let params = seam_params();
+    let prepared = prepare_base(&stripe_image(128, 96), &params, &|_| {}).unwrap();
+    let base = LinearRgbImage::new(32, 24, prepared.base_pixels().to_vec()).unwrap();
+    let luma = prepared.luminance().unwrap();
+    let detail = prepared.compute_detail(&params).unwrap();
+    let stamp = prepared.probe_provenance(&params);
+    let baseline = prepared.baseline_artifact_ratio();
+    let other = AutoSharpParams {
+        sharpen_sigma: 1.5,
+        ..params.clone()
+    };
+    let wrong_params = ProbeWorkerInput::new(parts(&base, luma, &detail, baseline), &other, stamp);
+    assert!(matches!(
+        wrong_params,
+        Err(CoreError::ProbeProvenanceMismatch)
+    ));
+    let wrong_baseline = ProbeWorkerInput::new(
+        parts(&base, luma, &detail, baseline + 0.125),
+        &params,
+        stamp,
+    );
+    assert!(matches!(
+        wrong_baseline,
+        Err(CoreError::ProbeProvenanceMismatch)
+    ));
 }
