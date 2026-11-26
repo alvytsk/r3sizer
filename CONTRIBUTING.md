@@ -40,7 +40,9 @@ npm run dev           # starts Vite dev server
 
 ### TypeScript type regeneration
 
-When you change serializable types in `r3sizer-core/src/types.rs` **or**
+When you change serializable types in `r3sizer-core/src/types.rs`, the
+probe-seam types `ProbeSettings`, `ProbeProvenance` and `ProbeBatch` in
+`crates/r3sizer-core/src/pipeline.rs`, **or**
 `r3sizer-metadata/src/types.rs` (the exporter includes the nine metadata
 types listed in `crates/r3sizer-core/tests/typegen.rs` via `r3sizer-core`'s
 dev-only `typegen` dependency on it; `MetadataLimits` in `limits.rs` is not

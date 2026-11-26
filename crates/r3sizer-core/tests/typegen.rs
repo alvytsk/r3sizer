@@ -18,10 +18,11 @@ use r3sizer_core::{
     ExperimentalSharpenMode, FallbackReason, FitQuality, FitStatus, FitStrategy, GainTable,
     ImageFeatures, ImageSize, IngestDiagnostics, InputColorSpace, InputIngressDiagnostics,
     KernelTable, MetricBreakdown, MetricComponent, MetricMode, MetricWeights, ParamPatch,
-    PipelineMode, ProbeConfig, ProbePassDiagnostics, ProbeSample, QualityEvaluation,
-    Recommendation, RecommendationKind, RegionClass, RegionCoverage, ResizeKernel, ResizeStrategy,
-    ResizeStrategyDiagnostics, RobustnessFlags, SaturationGuardParams, SelectionMode,
-    SelectionPolicy, Severity, SharpenMode, SharpenStrategy, StageTiming,
+    PipelineMode, ProbeBatch, ProbeConfig, ProbePassDiagnostics, ProbeProvenance, ProbeSample,
+    ProbeSettings, QualityEvaluation, Recommendation, RecommendationKind, RegionClass,
+    RegionCoverage, ResizeKernel, ResizeStrategy, ResizeStrategyDiagnostics, RobustnessFlags,
+    SaturationGuardParams, SelectionMode, SelectionPolicy, Severity, SharpenMode, SharpenStrategy,
+    StageTiming,
 };
 use r3sizer_metadata::{
     ColorAction, MetadataCategory, MetadataExportRequest, MetadataExportResponse, MetadataIssue,
@@ -83,6 +84,10 @@ fn export_typescript_bindings() {
         MetricBreakdown::decl(&cfg),
         // ── Probe / diagnostics ─────────────────────────────────────────
         ProbeSample::decl(&cfg),
+        // ── Probe-worker seam ───────────────────────────────────────────
+        ProbeSettings::decl(&cfg),
+        ProbeProvenance::decl(&cfg),
+        ProbeBatch::decl(&cfg),
         StageTiming::decl(&cfg),
         RegionCoverage::decl(&cfg),
         AdaptiveValidationOutcome::decl(&cfg),

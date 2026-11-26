@@ -60,8 +60,11 @@ export type {
   OutputFacts,
   ParamPatch,
   PipelineMode,
+  ProbeBatch,
   ProbeConfig,
+  ProbeProvenance,
   ProbeSample,
+  ProbeSettings,
   QualityEvaluation,
   Recommendation,
   // Recommendations (v0.5)

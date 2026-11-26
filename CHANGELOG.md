@@ -9,6 +9,9 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ## [Unreleased]
 
+Contains public API changes (see Changed), so the next release is a minor
+version, not a patch.
+
 ### Fixed
 - Downscales between 3× and 4× (e.g. 4K→720p) no longer run a full-size
   no-op bilinear "pre-reduce" pass before Lanczos3; resize is ~20× faster
@@ -20,6 +23,11 @@ This project is pre-1.0 — breaking changes may occur in any release.
   monolithic path like smaller downscales. `StripedPreReducer::new` likewise
   rejects an intermediate equal to the source, where it used to allocate that
   accumulator.
+- Probe workers reject buffers of the wrong length with
+  `CoreError::BufferLengthMismatch`. In release builds a too-short `detail`
+  used to return plausible but wrong samples, and with it a wrong s*.
+- Worker probes honor `evaluation_color_space`, matching the in-process
+  pipeline. They used to measure as if the option were off.
 
 ### Changed
 - Native resize is multithreaded (`fast_image_resize/rayon` under the
@@ -29,6 +37,17 @@ This project is pre-1.0 — breaking changes may occur in any release.
   `process_from_prepared_with_probes` takes an optional `detail` argument.
 - The WASM build enables SIMD128 (~19% faster pipeline). Requires Chrome 91+,
   Firefox 89+, Safari 16.4+.
+- `process_from_prepared_with_probes` takes a `ProbeBatch` and returns
+  `CoreError::ProbeProvenanceMismatch` unless the batch was measured on this
+  `PreparedBase` instance, with this baseline and these probe settings.
+  `PreparedBase::run_probes` returns a `ProbeBatch`.
+  `run_probes_standalone`, `run_probes_from_detail` and `compute_probe_detail`
+  are replaced by `ProbeWorkerInput`, the one raw entry, which validates every
+  buffer length.
+- WASM: `get_probe_bundle` replaces `get_base_data` and
+  `compute_probe_detail`; `probe_batch_with_detail` takes a provenance and
+  returns a batch; `process_from_probes` takes a batch. `probe_batch` is
+  removed.
 
 ## [0.10.0] - 2026-09-16
 

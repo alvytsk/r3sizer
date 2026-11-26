@@ -27,16 +27,11 @@ thread_local! {
     static CACHED_BASE: RefCell<Option<r3sizer_core::PreparedBase>> = const { RefCell::new(None) };
     static CACHED_INGEST: RefCell<Option<StripedPreReducer>> = const { RefCell::new(None) };
     static CACHED_INGEST_DIAG: RefCell<Option<IngestDiagnostics>> = const { RefCell::new(None) };
-    /// Last `compute_probe_detail` output, keyed by the params it depends on,
-    /// so `process_from_probes` can skip a second blur. Cleared with the base.
-    static CACHED_DETAIL: RefCell<Option<(DetailKey, Vec<f32>)>> = const { RefCell::new(None) };
-}
-
-/// Params the detail signal depends on (beyond the cached base itself).
-type DetailKey = (u32, r3sizer_core::SharpenMode);
-
-fn detail_key(params: &AutoSharpParams) -> DetailKey {
-    (params.sharpen_sigma.to_bits(), params.sharpen_mode)
+    /// Last `get_probe_bundle` detail signal with the provenance it was
+    /// minted under, so `process_from_probes` can skip a second blur when it
+    /// finishes the same base and params. Cleared with the base.
+    static CACHED_DETAIL: RefCell<Option<(r3sizer_core::ProbeProvenance, Vec<f32>)>> =
+        const { RefCell::new(None) };
 }
 
 /// Pre-convert sRGB RGBA pixels to linear RGB and cache the result.
@@ -349,122 +344,69 @@ pub fn process_image(
 // Parallel probing API — used by the probe worker pool
 // ---------------------------------------------------------------------------
 
-/// Extract cached base image data for sending to probe workers.
+/// Mint everything a probe worker needs for the cached base: its pixels and
+/// luminance, the detail signal for `params_json`, and the provenance stamp
+/// that every batch made from them must carry.
 ///
-/// Returns a JS object with `basePixels` (Float32Array), `luminance` (Float32Array),
-/// `width`, `height`, `baseline`, `effectiveP0`, or null if no base is cached.
-#[wasm_bindgen]
-pub fn get_base_data() -> JsValue {
-    CACHED_BASE.with(|c| {
-        let cache = c.borrow();
-        let prepared = match cache.as_ref() {
-            Some(b) => b,
-            None => return JsValue::NULL,
-        };
-
-        let result = js_sys::Object::new();
-        let base_px = js_sys::Float32Array::from(prepared.base_pixels());
-        let luma = match prepared.luminance() {
-            Some(l) => js_sys::Float32Array::from(l),
-            None => return JsValue::NULL,
-        };
-
-        let _ = js_sys::Reflect::set(&result, &"basePixels".into(), &base_px);
-        let _ = js_sys::Reflect::set(&result, &"luminance".into(), &luma);
-        let _ = js_sys::Reflect::set(
-            &result,
-            &"width".into(),
-            &JsValue::from(prepared.base_width()),
-        );
-        let _ = js_sys::Reflect::set(
-            &result,
-            &"height".into(),
-            &JsValue::from(prepared.base_height()),
-        );
-        let _ = js_sys::Reflect::set(
-            &result,
-            &"baseline".into(),
-            &JsValue::from(prepared.baseline_artifact_ratio()),
-        );
-        let _ = js_sys::Reflect::set(
-            &result,
-            &"effectiveP0".into(),
-            &JsValue::from(prepared.effective_p0()),
-        );
-
-        result.into()
-    })
-}
-
-/// Run probes on raw base image data (for use in dedicated probe workers).
+/// All of it comes from one call, so the base, the detail and the stamp
+/// cannot belong to different moments.  Returns a JS object with `basePixels`
+/// (Float32Array), `luminance` (Float32Array), `width`, `height`, `baseline`,
+/// `effectiveP0`, `detail` (Float32Array) and `provenanceJson` (string).
+/// Send the whole object, with the params it was minted for, to each probe
+/// worker.
 ///
-/// Each probe worker receives the base pixels + luminance via postMessage and
-/// calls this with its assigned strengths.  Returns a JSON array of ProbeSamples.
+/// Errors when no base is cached: call [`prepare_base`] first.
 #[wasm_bindgen]
-pub fn probe_batch(
-    base_pixels: &[f32],
-    width: u32,
-    height: u32,
-    luminance: &[f32],
-    strengths_json: &str,
-    params_json: &str,
-    baseline: f32,
-) -> Result<String, JsValue> {
+pub fn get_probe_bundle(params_json: &str) -> Result<JsValue, JsValue> {
     let params = parse_params(params_json)?;
-    let strengths: Vec<f32> = serde_json::from_str(strengths_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
-
-    let samples = r3sizer_core::run_probes_standalone(
-        base_pixels,
-        width,
-        height,
-        luminance,
-        &strengths,
-        &params,
-        baseline,
-    )
-    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    serde_json::to_string(&samples)
-        .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
-}
-
-/// Compute the precomputed detail signal from the cached PreparedBase.
-///
-/// Returns the detail as a Float32Array.  The caller distributes this to probe
-/// workers so they can call [`probe_batch_with_detail`] and skip the Gaussian
-/// blur entirely (the dominant per-worker cost).
-///
-/// For Lightness mode: W×H floats.  For RGB mode: W×H×3 floats.
-#[wasm_bindgen]
-pub fn compute_probe_detail(params_json: &str) -> Result<js_sys::Float32Array, JsValue> {
-    let params = parse_params(params_json)?;
-
     CACHED_BASE.with(|c| {
         let cache = c.borrow();
         let prepared = cache
             .as_ref()
             .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
-        let luma = prepared
+        let luminance = prepared
             .luminance()
             .ok_or_else(|| JsValue::from_str("luminance unavailable"))?;
-        let detail = r3sizer_core::compute_probe_detail(
-            prepared.base_pixels(),
-            prepared.base_width(),
-            prepared.base_height(),
-            luma,
-            &params,
-        )
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let array = js_sys::Float32Array::from(detail.as_slice());
-        CACHED_DETAIL.with(|c| *c.borrow_mut() = Some((detail_key(&params), detail)));
-        Ok(array)
+        let provenance = prepared.probe_provenance(&params);
+        let detail = prepared
+            .compute_detail(&params)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let result = js_sys::Object::new();
+        let set = |key: &str, value: JsValue| -> Result<(), JsValue> {
+            js_sys::Reflect::set(&result, &key.into(), &value).map(|_| ())
+        };
+        set(
+            "basePixels",
+            js_sys::Float32Array::from(prepared.base_pixels()).into(),
+        )?;
+        set("luminance", js_sys::Float32Array::from(luminance).into())?;
+        set("width", prepared.base_width().into())?;
+        set("height", prepared.base_height().into())?;
+        set("baseline", prepared.baseline_artifact_ratio().into())?;
+        set("effectiveP0", prepared.effective_p0().into())?;
+        set(
+            "detail",
+            js_sys::Float32Array::from(detail.as_slice()).into(),
+        )?;
+        let provenance_json = serde_json::to_string(&provenance)
+            .map_err(|e| JsValue::from_str(&format!("provenance serialization failed: {e}")))?;
+        set("provenanceJson", provenance_json.into())?;
+
+        CACHED_DETAIL.with(|d| *d.borrow_mut() = Some((provenance, detail)));
+        Ok(result.into())
     })
 }
 
-/// Like [`probe_batch`] but uses a precomputed detail signal, skipping the
-/// Gaussian blur.  Call [`compute_probe_detail`] once in the main worker and
-/// send the result to probe workers alongside the base data.
+/// Run probes on base data that crossed a worker boundary, using the
+/// precomputed detail signal so the Gaussian blur is skipped.
+///
+/// Call [`get_probe_bundle`] once in the main worker and send its object,
+/// together with the params it was minted for, to the probe workers.
+///
+/// Every buffer is length-checked, and the stamp is checked against
+/// `params_json` and `baseline`: a mismatch is an error, never a wrong
+/// sample.  Returns a JSON `ProbeBatch`: its `provenance` and its `samples`.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn probe_batch_with_detail(
@@ -476,43 +418,57 @@ pub fn probe_batch_with_detail(
     strengths_json: &str,
     params_json: &str,
     baseline: f32,
+    provenance_json: &str,
 ) -> Result<String, JsValue> {
     let params = parse_params(params_json)?;
     let strengths: Vec<f32> = serde_json::from_str(strengths_json)
         .map_err(|e| JsValue::from_str(&format!("invalid strengths JSON: {e}")))?;
-
-    let samples = r3sizer_core::run_probes_from_detail(
-        base_pixels,
-        width,
-        height,
-        luminance,
-        detail,
-        &strengths,
+    let provenance: r3sizer_core::ProbeProvenance = serde_json::from_str(provenance_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid provenance JSON: {e}")))?;
+    let base = LinearRgbImage::new(width, height, base_pixels.to_vec())
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let input = r3sizer_core::ProbeWorkerInput::new(
+        r3sizer_core::ProbeWorkerParts {
+            base: &base,
+            base_luminance: luminance,
+            detail,
+            baseline_artifact_ratio: baseline,
+        },
         &params,
-        baseline,
+        provenance,
     )
     .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    serde_json::to_string(&samples)
+    let batch = input
+        .run_probes(&strengths)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    serde_json::to_string(&batch)
         .map_err(|e| JsValue::from_str(&format!("serialization failed: {e}")))
 }
 
-/// Finish processing using the cached PreparedBase and externally-collected probes.
+/// Finish processing using the cached PreparedBase and a probe batch measured
+/// by the worker pool.
 ///
-/// Call this in the main worker after collecting probe results from the pool.
+/// Call this in the main worker after collecting batches from the pool (see
+/// [`get_probe_bundle`] and [`probe_batch_with_detail`]).  `batch_json` is one
+/// [`r3sizer_core::ProbeBatch`]: the batches of every round merged under a
+/// single `provenance`.  It is refused unless its stamp is the one the cached
+/// base mints for `params_json`; a refusal leaves that base cached, so the
+/// caller's fallback run reuses it.
+///
 /// `pass_diagnostics_json` is optional JSON for `ProbePassDiagnostics` (from
 /// TwoPass resolution).  Pass an empty string or `"null"` to omit.
 #[wasm_bindgen]
 pub fn process_from_probes(
     params_json: &str,
-    probes_json: &str,
+    batch_json: &str,
     probing_us: u32,
     pass_diagnostics_json: &str,
 ) -> Result<JsValue, JsValue> {
     let mut params = parse_params(params_json)?;
     apply_ingest_constraints(&mut params);
-    let probe_samples: Vec<r3sizer_core::ProbeSample> = serde_json::from_str(probes_json)
-        .map_err(|e| JsValue::from_str(&format!("invalid probes JSON: {e}")))?;
+    let batch: r3sizer_core::ProbeBatch = serde_json::from_str(batch_json)
+        .map_err(|e| JsValue::from_str(&format!("invalid probe batch JSON: {e}")))?;
     let pass_diagnostics: Option<r3sizer_core::ProbePassDiagnostics> =
         if pass_diagnostics_json.is_empty() || pass_diagnostics_json == "null" {
             None
@@ -524,22 +480,44 @@ pub fn process_from_probes(
             )
         };
 
-    // Must have a cached PreparedBase.
+    // Refuse before taking the base, so a refusal leaves the cache in place
+    // for the fallback run that follows it.
+    let refusal = CACHED_BASE.with(|c| {
+        let cache = c.borrow();
+        match cache.as_ref() {
+            Some(base) if base.matches_params(&params) => {
+                if base.probe_provenance(&params) == batch.provenance() {
+                    None
+                } else {
+                    Some(r3sizer_core::CoreError::ProbeProvenanceMismatch.to_string())
+                }
+            }
+            _ => Some("no cached PreparedBase — call prepare_base first".to_string()),
+        }
+    });
+    if let Some(message) = refusal {
+        return Err(JsValue::from_str(&message));
+    }
+
+    // Must have a cached PreparedBase. Checked just above; the borrow above
+    // cannot be kept across the take.
     let cached_base = take_matching_base(&params);
     let prepared = cached_base
         .as_ref()
         .ok_or_else(|| JsValue::from_str("no cached PreparedBase — call prepare_base first"))?;
 
-    let key = detail_key(&params);
+    // The cached detail is reusable only for the base and params it was
+    // minted with; the core entry recomputes it otherwise.
+    let key = prepared.probe_provenance(&params);
     let detail = CACHED_DETAIL.with(|c| match c.borrow_mut().take() {
-        Some((k, d)) if k == key => Some(d),
+        Some((provenance, d)) if provenance == key => Some(d),
         _ => None,
     });
 
     let output = r3sizer_core::process_from_prepared_with_probes(
         prepared,
         &params,
-        probe_samples,
+        batch,
         probing_us as u64,
         pass_diagnostics,
         detail,

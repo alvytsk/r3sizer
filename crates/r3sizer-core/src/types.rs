@@ -137,6 +137,19 @@ pub enum SharpenMode {
     Lightness,
 }
 
+impl SharpenMode {
+    /// Number of floats in a detail signal for this mode over `pixels` pixels:
+    /// one per pixel in Lightness mode, three (interleaved RGB) in Rgb mode.
+    ///
+    /// This is the exact length a probe worker's `detail` buffer must have.
+    pub fn detail_len(self, pixels: usize) -> usize {
+        match self {
+            SharpenMode::Lightness => pixels,
+            SharpenMode::Rgb => pixels * 3,
+        }
+    }
+}
+
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]
@@ -189,6 +202,16 @@ pub enum SelectionPolicy {
     /// Experimental: composite score drives both fitting and fallback ranking.
     /// Currently treated as Hybrid (polynomial fitting still uses gamut).
     CompositeOnly,
+}
+
+impl SelectionPolicy {
+    /// Whether a probe should compute a per-probe [`MetricBreakdown`].
+    ///
+    /// Only the composite-aware policies need it; the default `GamutOnly`
+    /// path skips it to keep probing fast.
+    pub(crate) fn needs_probe_breakdown(self) -> bool {
+        self != SelectionPolicy::GamutOnly
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -662,14 +685,6 @@ impl AutoSharpParams {
             mode.apply(&mut self);
         }
         self
-    }
-
-    /// Whether the probe loop should compute a per-probe [`MetricBreakdown`].
-    ///
-    /// Only the composite-aware selection policies need it; the default
-    /// `GamutOnly` path skips it to keep probing fast.
-    pub(crate) fn needs_probe_breakdown(&self) -> bool {
-        self.selection_policy != SelectionPolicy::GamutOnly
     }
 
     /// Validate that parameters are internally consistent. Called at pipeline entry.

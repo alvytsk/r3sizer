@@ -184,31 +184,27 @@ sequenceDiagram
     MW->>MW: Resize, classify regions, measure baseline
     MW-->>UI: PreparedBase cached, fingerprinted by BaseParamsKey
 
-    par Fetch base and detail together
-        UI->>MW: get_base_data
-        and
-        UI->>MW: compute_probe_detail(params)
-        MW->>MW: One Gaussian blur, D = input - blur(input)
-    end
-    MW-->>UI: Base pixels plus the detail signal
+    UI->>MW: get_probe_bundle(params)
+    MW->>MW: One Gaussian blur, D = input - blur(input),<br/>then mint the provenance stamp
+    MW-->>UI: Base pixels, the detail signal and the provenance stamp
 
-    UI->>Pool: set_base once, cached in every worker
+    UI->>Pool: set_base once: bundle, params and stamp, cached in every worker
     UI->>MW: resolve_initial_strengths(params)
     MW-->>UI: Coarse strengths
 
     UI->>Pool: Round 1, coarse probes, distributed across workers
     Pool->>Pool: out = input + s * D, then measure.<br/>No blur per probe
-    Pool-->>UI: Coarse samples
+    Pool-->>UI: Stamped coarse samples
 
     UI->>MW: resolve_dense_strengths(coarse samples, effective P0)
     MW-->>UI: Dense window around the bracketed crossing
 
     UI->>Pool: Round 2, dense probes
-    Pool-->>UI: Dense samples
-    UI->>UI: Merge, sort by strength, deduplicate
+    Pool-->>UI: Stamped dense samples
+    UI->>UI: Merge under one stamp, sort by strength, deduplicate
 
-    UI->>MW: process_from_probes(merged samples)
-    MW->>MW: Fit cubic, run robustness checks, solve for s*,<br/>sharpen, chroma guard, clamp
+    UI->>MW: process_from_probes(merged batch)
+    MW->>MW: Refuse a foreign stamp,<br/>then fit cubic, run robustness checks, solve for s*,<br/>sharpen, chroma guard, clamp
     MW-->>UI: Output RGBA and AutoSharpDiagnostics
     UI-->>User: Preview and diagnostics
 
@@ -219,7 +215,7 @@ sequenceDiagram
     end
 ```
 
-Three design points are visible in this sequence.
+Four design points are visible in this sequence.
 
 **The base is prepared once.** `prepare_base` costs roughly 1.5 seconds on a
 24 MP image. `process_from_probes` costs roughly 0.5 seconds. A parameter change
@@ -229,6 +225,12 @@ that does not affect the base reuses the cached `PreparedBase`. The
 **The blur runs once, not once per probe.** The detail signal `D` does not depend
 on the strength `s`. Each probe reduces to a multiply-add. This is why the base
 data sent to the pool carries `detail`.
+
+**A batch carries its provenance.** The stamp names the `PreparedBase`
+instance, its baseline and the settings the probes read. A worker cannot pair
+one base's buffers with another's params, because params and stamp travel with
+the buffers in one `set_base` record. `process_from_probes` refuses any batch
+whose stamp is not the one it would mint for the base and params it holds.
 
 **Any parallel failure falls back.** `processImageParallel` catches every error
 except cancellation and reruns the whole request on the main worker.

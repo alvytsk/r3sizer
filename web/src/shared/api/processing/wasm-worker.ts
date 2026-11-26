@@ -1,8 +1,8 @@
 import type { MetadataExportRequest, MetadataExportResponse } from "@/shared/lib";
+import type { ProbeBundle } from "./probe-bundle";
 import {
   clear_cache,
-  compute_probe_detail,
-  get_base_data,
+  get_probe_bundle,
   ingest_abort,
   ingest_begin,
   ingest_end,
@@ -25,8 +25,7 @@ export interface WorkerRequest {
     | "process"
     | "prepare"
     | "prepare_base"
-    | "get_base_data"
-    | "compute_detail"
+    | "get_probe_bundle"
     | "process_from_probes"
     | "resolve_initial_strengths"
     | "resolve_dense_strengths"
@@ -42,7 +41,8 @@ export interface WorkerRequest {
   width?: number;
   height?: number;
   paramsJson?: string;
-  probesJson?: string;
+  /** One JSON `ProbeBatch`: the pool's batches merged under one stamp. */
+  batchJson?: string;
   probingUs?: number;
   passDiagnosticsJson?: string;
   coarseSamplesJson?: string;
@@ -59,8 +59,7 @@ export interface WorkerResponse {
     | "result"
     | "prepared"
     | "base_prepared"
-    | "base_data"
-    | "detail"
+    | "probe_bundle"
     | "progress"
     | "strengths"
     | "dense_result"
@@ -75,15 +74,7 @@ export interface WorkerResponse {
     outputHeight: number;
     diagnostics: unknown;
   };
-  baseData?: {
-    basePixels: Float32Array;
-    luminance: Float32Array;
-    width: number;
-    height: number;
-    baseline: number;
-    effectiveP0: number;
-  } | null;
-  detailData?: Float32Array | null;
+  bundle?: ProbeBundle;
   strengthsJson?: string;
   denseResult?: string | null;
   ingest?: { width: number; height: number } | null;
@@ -220,63 +211,34 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
     return;
   }
 
-  if (msg.type === "get_base_data") {
-    const { id } = msg;
-    try {
-      if (!ready) throw new Error("WASM not initialized");
-      const data = get_base_data();
-      const resp: WorkerResponse = {
-        type: "base_data",
-        id,
-        baseData: data
-          ? {
-              basePixels: data.basePixels,
-              luminance: data.luminance,
-              width: data.width,
-              height: data.height,
-              baseline: data.baseline,
-              effectiveP0: data.effectiveP0,
-            }
-          : null,
-      };
-      (self as unknown as Worker).postMessage(resp);
-    } catch (err) {
-      const resp: WorkerResponse = {
-        type: "base_data",
-        id,
-        error: err instanceof Error ? err.message : String(err),
-      };
-      (self as unknown as Worker).postMessage(resp);
-    }
-    return;
-  }
-
-  if (msg.type === "compute_detail") {
+  if (msg.type === "get_probe_bundle") {
     const { id, paramsJson } = msg;
     try {
       if (!ready) throw new Error("WASM not initialized");
-      const detail = compute_probe_detail(paramsJson!);
-      const resp: WorkerResponse = { type: "detail", id, detailData: detail };
-      (self as unknown as Worker).postMessage(resp);
+      const bundle = get_probe_bundle(paramsJson!) as ProbeBundle;
+      (self as unknown as Worker).postMessage({
+        type: "probe_bundle",
+        id,
+        bundle,
+      } satisfies WorkerResponse);
     } catch (err) {
-      const resp: WorkerResponse = {
-        type: "detail",
+      (self as unknown as Worker).postMessage({
+        type: "probe_bundle",
         id,
         error: err instanceof Error ? err.message : String(err),
-      };
-      (self as unknown as Worker).postMessage(resp);
+      } satisfies WorkerResponse);
     }
     return;
   }
 
   if (msg.type === "process_from_probes") {
-    const { id, paramsJson, probesJson, probingUs, passDiagnosticsJson } = msg;
+    const { id, paramsJson, batchJson, probingUs, passDiagnosticsJson } = msg;
     try {
       if (!ready) throw new Error("WASM not initialized");
 
       const result = process_from_probes(
         paramsJson!,
-        probesJson!,
+        batchJson!,
         probingUs!,
         passDiagnosticsJson ?? "",
       );

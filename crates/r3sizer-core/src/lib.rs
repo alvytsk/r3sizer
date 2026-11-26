@@ -36,10 +36,10 @@ pub mod prelude;
 // Re-export the complete public surface.
 pub use ingest::{compute_intermediate_size, validate_striped_shrink, StripedPreReducer};
 pub use pipeline::{
-    compute_probe_detail, prepare_base, process_auto_sharp_downscale,
-    process_auto_sharp_downscale_with_progress, process_from_prepared,
-    process_from_prepared_with_probes, resolve_dense_strengths, resolve_initial_strengths,
-    run_probes_from_detail, run_probes_standalone, PreparedBase,
+    prepare_base, process_auto_sharp_downscale, process_auto_sharp_downscale_with_progress,
+    process_from_prepared, process_from_prepared_with_probes, resolve_dense_strengths,
+    resolve_initial_strengths, PreparedBase, ProbeBatch, ProbeProvenance, ProbeSettings,
+    ProbeWorkerInput, ProbeWorkerParts,
 };
 pub use types::{
     AdaptiveValidationOutcome, ArtifactMetric, AutoSharpDiagnostics, AutoSharpParams,
@@ -73,6 +73,12 @@ pub enum CoreError {
 
     #[error("buffer length mismatch: expected {expected_len} components, got {got_len}")]
     BufferLengthMismatch { expected_len: usize, got_len: usize },
+
+    /// A [`ProbeBatch`] did not carry the stamp its [`PreparedBase`] mints for
+    /// the base and params it was finished with: it was measured on another
+    /// base instance, with another baseline, or under other probe settings.
+    #[error("probe batch was not measured on this prepared base with these params")]
+    ProbeProvenanceMismatch,
 
     #[error("empty image: width or height is zero")]
     EmptyImage,
