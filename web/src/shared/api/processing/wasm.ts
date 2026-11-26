@@ -1,7 +1,12 @@
-import type { MetadataExportRequest, MetadataExportResponse, ProcessResult } from "@/shared/lib";
+import type {
+  MetadataExportRequest,
+  MetadataExportResponse,
+  ProbeBatch,
+  ProcessResult,
+} from "@/shared/lib";
 import type { CancellationToken } from "./errors";
 import { CancelledError } from "./errors";
-import type { BaseData } from "./probe-pool";
+import type { ProbeBundle } from "./probe-bundle";
 import {
   distributeBaseData,
   initProbePool,
@@ -10,8 +15,9 @@ import {
   resetBaseCache,
   runProbesParallel,
 } from "./probe-pool";
+import type { BaseData } from "./probe-worker";
 import wasmUrl from "./wasm-pkg/r3sizer_wasm_bg.wasm?url";
-import type { ProbeBundle, WorkerRequest, WorkerResponse } from "./wasm-worker";
+import type { WorkerRequest, WorkerResponse } from "./wasm-worker";
 
 let worker: Worker | null = null;
 let workerReadyPromise: Promise<void> | null = null;
@@ -314,9 +320,7 @@ async function runParallelPipeline(
   // Step 5: For TwoPass, resolve dense window and run second round.
   let finalBatchJson = coarse.batchJson;
   let passDiagnosticsJson = "";
-  const coarseSamplesJson = JSON.stringify(
-    (JSON.parse(coarse.batchJson) as { samples: unknown }).samples,
-  );
+  const coarseSamplesJson = JSON.stringify((JSON.parse(coarse.batchJson) as ProbeBatch).samples);
   const denseResultStr = await callWorker<string | null>({
     type: "resolve_dense_strengths",
     coarseSamplesJson,

@@ -133,10 +133,10 @@ the single raw entry. `PreparedBase::compute_detail` stays;
 **`BaseParamsKey`** is unchanged. Two tests cover it:
 
 1. A compile-time classification. A test destructures all 21 fields of
-   `AutoSharpParams` without `..` and feeds every binding into one of two
+   `AutoSharpParams` without `..` and feeds every binding into one of three
    role arrays. A new field fails the test build until it is listed: the
-   destructure rejects the pattern, and a binding left out of both arrays is
-   an unused-variable error under `-D warnings`.
+   destructure rejects the pattern, and a binding left out of every array is
+   an error under plain `cargo test` (`deny(unused_variables)`).
 2. The table-driven test from the issue, extended to every field: toggling
    one field at a time makes `matches_params` return `false` for the ten
    base-affecting fields and `true` for the other eleven.

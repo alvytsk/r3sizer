@@ -74,6 +74,9 @@ pub enum CoreError {
     #[error("buffer length mismatch: expected {expected_len} components, got {got_len}")]
     BufferLengthMismatch { expected_len: usize, got_len: usize },
 
+    /// A [`ProbeBatch`] did not carry the stamp its [`PreparedBase`] mints for
+    /// the base and params it was finished with: it was measured on another
+    /// base instance, with another baseline, or under other probe settings.
     #[error("probe batch was not measured on this prepared base with these params")]
     ProbeProvenanceMismatch,
 

@@ -453,7 +453,8 @@ pub fn probe_batch_with_detail(
 /// [`get_probe_bundle`] and [`probe_batch_with_detail`]).  `batch_json` is one
 /// [`r3sizer_core::ProbeBatch`]: the batches of every round merged under a
 /// single `provenance`.  It is refused unless its stamp is the one the cached
-/// base mints for `params_json`.
+/// base mints for `params_json`; a refusal leaves that base cached, so the
+/// caller's fallback run reuses it.
 ///
 /// `pass_diagnostics_json` is optional JSON for `ProbePassDiagnostics` (from
 /// TwoPass resolution).  Pass an empty string or `"null"` to omit.
@@ -479,7 +480,27 @@ pub fn process_from_probes(
             )
         };
 
-    // Must have a cached PreparedBase.
+    // Refuse before taking the base, so a refusal leaves the cache in place
+    // for the fallback run that follows it.
+    let refusal = CACHED_BASE.with(|c| {
+        let cache = c.borrow();
+        match cache.as_ref() {
+            Some(base) if base.matches_params(&params) => {
+                if base.probe_provenance(&params) == batch.provenance() {
+                    None
+                } else {
+                    Some(r3sizer_core::CoreError::ProbeProvenanceMismatch.to_string())
+                }
+            }
+            _ => Some("no cached PreparedBase — call prepare_base first".to_string()),
+        }
+    });
+    if let Some(message) = refusal {
+        return Err(JsValue::from_str(&message));
+    }
+
+    // Must have a cached PreparedBase. Checked just above; the borrow above
+    // cannot be kept across the take.
     let cached_base = take_matching_base(&params);
     let prepared = cached_base
         .as_ref()

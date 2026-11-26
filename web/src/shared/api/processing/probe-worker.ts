@@ -7,6 +7,7 @@
  * Base data is sent once via `set_base` and cached for the duration of the
  * processing cycle, avoiding redundant structured clones per batch.
  */
+import type { ProbeBundle } from "./probe-bundle";
 import { initSync, probe_batch_with_detail } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
@@ -18,15 +19,7 @@ let ready = false;
  * Workers cache it as one record, so the buffers, the params and the stamp
  * can never come from different bases.
  */
-export interface BaseData {
-  basePixels: Float32Array;
-  luminance: Float32Array;
-  width: number;
-  height: number;
-  baseline: number;
-  effectiveP0: number;
-  /** Precomputed detail signal (D = input - blur(input)), so the Gaussian blur is skipped. */
-  detail: Float32Array;
+export interface BaseData extends ProbeBundle {
   /** The params the bundle was minted for; every batch is measured with these. */
   paramsJson: string;
   /** Opaque stamp from `get_probe_bundle`; every batch made from this base carries it. */

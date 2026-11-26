@@ -9,6 +9,9 @@ This project is pre-1.0 — breaking changes may occur in any release.
 
 ## [Unreleased]
 
+Contains public API changes (see Changed), so the next release is a minor
+version, not a patch.
+
 ### Fixed
 - Downscales between 3× and 4× (e.g. 4K→720p) no longer run a full-size
   no-op bilinear "pre-reduce" pass before Lanczos3; resize is ~20× faster

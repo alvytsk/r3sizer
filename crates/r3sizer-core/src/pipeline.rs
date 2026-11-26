@@ -40,13 +40,14 @@ use crate::{
 /// The parameters a probe measurement reads, and nothing else.
 ///
 /// Both probe paths build their context from this value, so in-process and
-/// worker probes measure the same thing for the same inputs.  A probe worker
-/// input holds no params, which makes that structural: a setting that is not
-/// here cannot reach a measurement.
+/// worker probes measure the same thing for the same inputs.  A
+/// [`ProbeWorkerInput`] holds no params, which makes that structural: a
+/// setting that is not here cannot reach a measurement.
 ///
 /// Floats are stored as [`f32::to_bits`], so two settings compare equal
 /// exactly when they would produce the same numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct ProbeSettings {
     sharpen_sigma_bits: u32,
     sharpen_mode: SharpenMode,
@@ -90,16 +91,6 @@ impl ProbeSettings {
             halo_ringing: f32::from_bits(halo_ringing),
             edge_overshoot: f32::from_bits(edge_overshoot),
             texture_flattening: f32::from_bits(texture_flattening),
-        }
-    }
-
-    /// Length of the detail signal these settings probe with, in floats, for
-    /// a base of `pixels` pixels: one per pixel in Lightness mode, three in
-    /// Rgb mode.
-    fn detail_len(&self, pixels: usize) -> usize {
-        match self.sharpen_mode {
-            SharpenMode::Lightness => pixels,
-            SharpenMode::Rgb => pixels * 3,
         }
     }
 }
@@ -308,16 +299,21 @@ impl PreparedBase {
 /// that builds a base takes a new one.
 static NEXT_BASE_ID: AtomicU64 = AtomicU64::new(1);
 
-/// What a [`ProbeBatch`] was measured on: which [`PreparedBase`] instance,
-/// with which baseline, and under which probe settings.
+/// What a [`ProbeBatch`] claims to have been measured on: which
+/// [`PreparedBase`] instance, with which baseline, and under which probe
+/// settings.
 ///
-/// Only a [`PreparedBase`] mints one, through
-/// [`PreparedBase::probe_provenance`].  [`process_from_prepared_with_probes`]
-/// accepts a batch only when its stamp equals the one it would mint for the
-/// base and params it is given.  The instance id makes that exact: preparing
-/// the same base again is a new instance, so samples measured on the previous
-/// one are refused.
+/// A [`PreparedBase`] produces one through [`PreparedBase::probe_provenance`],
+/// and [`process_from_prepared_with_probes`] accepts a batch only when its
+/// stamp equals the one it would mint for the base and params it is given.
+/// The instance id makes that exact: preparing the same base again is a new
+/// instance, so samples measured on the previous one are refused.
+///
+/// The type also deserializes, so a worker can hand a stamp back across a
+/// boundary.  A deserialized stamp is a claim, not a credential: it is
+/// compared, never trusted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct ProbeProvenance {
     base_id: u64,
     baseline_artifact_ratio_bits: u32,
@@ -387,7 +383,7 @@ impl<'a> ProbeWorkerInput<'a> {
             });
         }
         let settings = ProbeSettings::from_params(params);
-        let detail_len = settings.detail_len(pixels);
+        let detail_len = settings.sharpen_mode.detail_len(pixels);
         if parts.detail.len() != detail_len {
             return Err(CoreError::BufferLengthMismatch {
                 expected_len: detail_len,
@@ -419,7 +415,8 @@ impl<'a> ProbeWorkerInput<'a> {
     ///
     /// # Errors
     ///
-    /// When the scratch buffers cannot be allocated.
+    /// When the scratch buffers cannot be created.  That needs an empty base,
+    /// which a valid [`LinearRgbImage`] never is.
     pub fn run_probes(&self, strengths: &[f32]) -> Result<ProbeBatch, CoreError> {
         let samples = probe_strengths(
             strengths,
@@ -443,6 +440,7 @@ impl<'a> ProbeWorkerInput<'a> {
 /// their output.  [`ProbeBatch::new`] lets a caller that measures probes its
 /// own way stamp samples for a base it holds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typegen", derive(ts_rs::TS))]
 pub struct ProbeBatch {
     provenance: ProbeProvenance,
     samples: Vec<ProbeSample>,
@@ -450,6 +448,10 @@ pub struct ProbeBatch {
 
 impl ProbeBatch {
     /// Stamp `samples` with `provenance`.
+    ///
+    /// The stamp then vouches for the base and params the caller named, not
+    /// for how the samples were measured: holding a base lets a caller stamp
+    /// samples for it, but what it measures is its own responsibility.
     pub fn new(provenance: ProbeProvenance, samples: Vec<ProbeSample>) -> Self {
         Self {
             provenance,
@@ -1054,7 +1056,7 @@ fn finish_pipeline(
     let t0 = Instant::now();
     let px = base.width() as usize * base.height() as usize;
     // The same exact-length policy `ProbeWorkerInput::new` applies to probes.
-    let detail_len = ProbeSettings::from_params(params).detail_len(px);
+    let detail_len = params.sharpen_mode.detail_len(px);
     let detail = match detail {
         Some(d) if d.len() == detail_len => d,
         _ => compute_detail(base, base_luminance, params.sharpen_mode, &kernel),
@@ -1381,9 +1383,6 @@ fn probe_strengths(
     baseline_artifact_ratio: f32,
     settings: &ProbeSettings,
 ) -> Result<Vec<ProbeSample>, CoreError> {
-    let w = base.width() as usize;
-    let h = base.height() as usize;
-
     let ctx = ProbeContext {
         base,
         base_luminance,
@@ -1395,19 +1394,13 @@ fn probe_strengths(
     #[cfg(feature = "parallel")]
     {
         use rayon::prelude::*;
-        let bw = base.width();
-        let bh = base.height();
-        let mode = settings.sharpen_mode;
+        // Built once and cloned for each rayon worker, so a failure is an
+        // `Err` here exactly as in the serial build.
+        let scratch = ProbeScratch::new(base, settings.sharpen_mode)?;
         let results: Vec<ProbeSample> = strengths
             .par_iter()
             .map_init(
-                move || ProbeScratch {
-                    luma: match mode {
-                        SharpenMode::Lightness => vec![0.0f32; w * h],
-                        SharpenMode::Rgb => Vec::new(),
-                    },
-                    rgb: LinearRgbImage::zeros(bw, bh).unwrap(),
-                },
+                || scratch.clone(),
                 |scratch, &s| probe_one_reuse(&ctx, s, scratch),
             )
             .collect();
@@ -1416,13 +1409,7 @@ fn probe_strengths(
 
     #[cfg(not(feature = "parallel"))]
     {
-        let mut scratch = ProbeScratch {
-            luma: match settings.sharpen_mode {
-                SharpenMode::Lightness => vec![0.0f32; w * h],
-                SharpenMode::Rgb => Vec::new(),
-            },
-            rgb: LinearRgbImage::zeros(base.width(), base.height())?,
-        };
+        let mut scratch = ProbeScratch::new(base, settings.sharpen_mode)?;
         let results = strengths
             .iter()
             .map(|&s| probe_one_reuse(&ctx, s, &mut scratch))
@@ -1868,8 +1855,6 @@ fn run_two_pass_probing(
     let coarse_strengths = linspace(coarse_min, coarse_max, coarse_count);
 
     // Scratch buffers and context reused across all coarse + dense probes.
-    let w = base.width() as usize;
-    let h = base.height() as usize;
     let ctx = ProbeContext {
         base,
         base_luminance,
@@ -1877,13 +1862,7 @@ fn run_two_pass_probing(
         baseline_artifact_ratio,
         settings: *settings,
     };
-    let mut scratch = ProbeScratch {
-        luma: match settings.sharpen_mode {
-            SharpenMode::Lightness => vec![0.0f32; w * h],
-            SharpenMode::Rgb => Vec::new(),
-        },
-        rgb: LinearRgbImage::zeros(base.width(), base.height())?,
-    };
+    let mut scratch = ProbeScratch::new(base, settings.sharpen_mode)?;
 
     // Phase 1: coarse with early stopping
     let mut coarse_samples = Vec::with_capacity(coarse_count);
@@ -1956,9 +1935,27 @@ struct ProbeContext<'a> {
 /// - `luma`: intermediate sharpened luminance buffer; only written in
 ///   Lightness mode (must have length >= W×H). Empty in RGB mode.
 /// - `rgb`: output image buffer. Must have the same dimensions as `base`.
+#[derive(Clone)]
 struct ProbeScratch {
     luma: Vec<f32>,
     rgb: LinearRgbImage,
+}
+
+impl ProbeScratch {
+    /// Zeroed scratch for probing `base` in `mode`.
+    ///
+    /// The only possible error is [`CoreError::EmptyImage`], which a valid
+    /// [`LinearRgbImage`] never yields.
+    fn new(base: &LinearRgbImage, mode: SharpenMode) -> Result<Self, CoreError> {
+        let pixels = base.width() as usize * base.height() as usize;
+        Ok(Self {
+            luma: match mode {
+                SharpenMode::Lightness => vec![0.0f32; pixels],
+                SharpenMode::Rgb => Vec::new(),
+            },
+            rgb: LinearRgbImage::zeros(base.width(), base.height())?,
+        })
+    }
 }
 
 /// Evaluate a single probe from precomputed detail, reusing scratch buffers.
@@ -2201,8 +2198,10 @@ mod tests {
     ];
 
     /// Compile-time tripwire for the three role lists.  The destructure has
-    /// no `..`, so a new field fails to compile until it is listed; a binding
-    /// left out of every array is an unused-variable error under `-D warnings`.
+    /// no `..`, so a new field fails to compile until it is listed, and
+    /// `deny(unused_variables)` makes a binding left out of every array an
+    /// error under plain `cargo test`, not only under clippy's `-D warnings`.
+    #[deny(unused_variables)]
     #[test]
     fn every_param_field_has_a_role() {
         let AutoSharpParams {

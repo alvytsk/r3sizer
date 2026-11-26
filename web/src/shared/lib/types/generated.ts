@@ -274,6 +274,12 @@ metric_value: number,
  */
 breakdown?: MetricBreakdown | null, };
 
+export type ProbeSettings = { sharpen_sigma_bits: number, sharpen_mode: SharpenMode, metric_mode: MetricMode, artifact_metric: ArtifactMetric, metric_weights_bits: [number, number, number, number], selection_policy: SelectionPolicy, evaluation_color_space: EvaluationColorSpace | null, };
+
+export type ProbeProvenance = { base_id: number, baseline_artifact_ratio_bits: number, settings: ProbeSettings, };
+
+export type ProbeBatch = { provenance: ProbeProvenance, samples: Array<ProbeSample>, };
+
 export type StageTiming = { resize_us: number, contrast_us: number, baseline_us: number, 
 /**
  * Wall-clock time for the entire probe loop (parallel or sequential).

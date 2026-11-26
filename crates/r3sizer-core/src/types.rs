@@ -137,6 +137,19 @@ pub enum SharpenMode {
     Lightness,
 }
 
+impl SharpenMode {
+    /// Number of floats in a detail signal for this mode over `pixels` pixels:
+    /// one per pixel in Lightness mode, three (interleaved RGB) in Rgb mode.
+    ///
+    /// This is the exact length a probe worker's `detail` buffer must have.
+    pub fn detail_len(self, pixels: usize) -> usize {
+        match self {
+            SharpenMode::Lightness => pixels,
+            SharpenMode::Rgb => pixels * 3,
+        }
+    }
+}
+
 /// How the artifact metric is computed for sharpness selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typegen", derive(TS))]

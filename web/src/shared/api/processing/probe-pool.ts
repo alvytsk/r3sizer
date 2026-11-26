@@ -10,10 +10,9 @@
  * structured clones on every probe batch.
  */
 
+import type { ProbeBatch } from "@/shared/lib";
 import type { CancellationToken } from "./errors";
 import type { BaseData, ProbeWorkerRequest, ProbeWorkerResponse } from "./probe-worker";
-
-export type { BaseData };
 
 /** Result of a parallel probe round. */
 export interface ProbePoolResult {
@@ -21,12 +20,6 @@ export interface ProbePoolResult {
   batchJson: string;
   /** Wall-clock time of the round (ms). */
   probingMs: number;
-}
-
-/** One `ProbeBatch` (the core type) as it crosses the worker boundary. */
-interface SerializedBatch {
-  provenance: unknown;
-  samples: Array<{ strength: number }>;
 }
 
 const DEFAULT_POOL_SIZE = Math.min(navigator.hardwareConcurrency || 4, 6);
@@ -136,7 +129,7 @@ export async function distributeBaseData(baseData: BaseData): Promise<void> {
  */
 export function mergeProbeBatches(batchJsons: string[]): string {
   if (batchJsons.length === 0) throw new Error("no probe batches to merge");
-  const batches = batchJsons.map((json) => JSON.parse(json) as SerializedBatch);
+  const batches = batchJsons.map((json) => JSON.parse(json) as ProbeBatch);
   const [first, ...rest] = batches;
   const stamp = JSON.stringify(first.provenance);
   for (const other of rest) {
@@ -144,11 +137,14 @@ export function mergeProbeBatches(batchJsons: string[]): string {
       throw new Error("probe batches disagree on provenance — the base changed while probing");
     }
   }
-  const samples = batches
-    .flatMap((b) => b.samples)
-    .sort((a, b) => a.strength - b.strength)
-    .filter((s, i, arr) => i === 0 || Math.abs(s.strength - arr[i - 1].strength) >= 1e-5);
-  return JSON.stringify({ provenance: first.provenance, samples });
+  const merged: ProbeBatch = {
+    provenance: first.provenance,
+    samples: batches
+      .flatMap((b) => b.samples)
+      .sort((a, b) => a.strength - b.strength)
+      .filter((s, i, arr) => i === 0 || Math.abs(s.strength - arr[i - 1].strength) >= 1e-5),
+  };
+  return JSON.stringify(merged);
 }
 
 export interface ProbeRunOpts {

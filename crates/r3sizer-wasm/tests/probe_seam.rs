@@ -274,3 +274,22 @@ fn a_worker_rejects_wrong_buffers_and_foreign_stamps() {
         garbage.as_string()
     );
 }
+
+#[wasm_bindgen_test]
+fn a_refused_batch_leaves_the_cached_base_in_place() {
+    r3sizer_wasm::clear_cache();
+    let rgba = stripe_rgba(128, 96);
+    let params = params_json(1.0);
+    r3sizer_wasm::prepare_base(&rgba, 128, 96, &params).unwrap();
+    let b = bundle(&params);
+    let batch = probe(&b, &params, &[0.5], b.baseline, &b.provenance_json).unwrap();
+
+    // Another sigma keeps the cached base (fast path) and refuses the batch.
+    let other_sigma = params_json(1.5);
+    r3sizer_wasm::prepare_base(&rgba, 128, 96, &other_sigma).unwrap();
+    assert!(r3sizer_wasm::process_from_probes(&other_sigma, &batch, 0, "").is_err());
+
+    // The refusal must not cost the fallback run its prepared base.
+    let again = bundle(&other_sigma);
+    assert_eq!(again.base_pixels, b.base_pixels);
+}

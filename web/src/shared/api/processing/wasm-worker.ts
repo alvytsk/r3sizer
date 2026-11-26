@@ -1,4 +1,5 @@
 import type { MetadataExportRequest, MetadataExportResponse } from "@/shared/lib";
+import type { ProbeBundle } from "./probe-bundle";
 import {
   clear_cache,
   get_probe_bundle,
@@ -17,21 +18,6 @@ import {
 } from "./wasm-pkg/r3sizer_wasm";
 
 let ready = false;
-
-/**
- * What `get_probe_bundle` minted for one base: its pixels and luminance, the
- * detail signal, and the provenance stamp every batch made from them carries.
- */
-export interface ProbeBundle {
-  basePixels: Float32Array;
-  luminance: Float32Array;
-  width: number;
-  height: number;
-  baseline: number;
-  effectiveP0: number;
-  detail: Float32Array;
-  provenanceJson: string;
-}
 
 export interface WorkerRequest {
   type:
